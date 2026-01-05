@@ -1,0 +1,170 @@
+
+import React, { useState, useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../supabaseClient';
+import { 
+  LayoutDashboard, 
+  Users, 
+  LogOut, 
+  Menu, 
+  X, 
+  UserCircle,
+  Briefcase,
+  UserCog,
+  Building2,
+  FileCheck2,
+  UserPlus,
+  Gift,
+  BadgeDollarSign,
+  ChevronRight,
+  Bell,
+  Search
+} from 'lucide-react';
+import { UserRole } from '../types';
+
+interface NavItem {
+  icon: React.ElementType;
+  label: string;
+  path: string;
+  badge?: number;
+}
+
+const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { userProfile, signOut } = useAuth();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [pendingEmployeeCount, setPendingEmployeeCount] = useState(0);
+
+  useEffect(() => {
+    if (userProfile && (userProfile.role === UserRole.ADMIN || userProfile.role === UserRole.MOD)) {
+        fetchNotificationCounts();
+    }
+  }, [userProfile]);
+
+  const fetchNotificationCounts = async () => {
+      try {
+          const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+          setPendingEmployeeCount(count || 0);
+      } catch (err) { console.error(err); }
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login');
+  };
+
+  const navItems: NavItem[] = [
+    { icon: LayoutDashboard, label: 'Tổng quan', path: '/' },
+    { icon: Users, label: 'Khách hàng', path: '/customers' },
+    { icon: FileCheck2, label: 'Đơn hàng', path: '/deals' },
+    { icon: BadgeDollarSign, label: 'Tài chính & Quỹ', path: '/finance' },
+    { icon: Gift, label: 'Chính sách', path: '/promotions' },
+  ];
+
+  if (userProfile?.role === UserRole.ADMIN || userProfile?.role === UserRole.MOD) {
+    navItems.push({ icon: UserPlus, label: 'Phân bổ Leads', path: '/assign' });
+    navItems.push({ icon: Briefcase, label: 'Nhân sự', path: '/employees', badge: pendingEmployeeCount });
+  }
+  if (userProfile?.role === UserRole.ADMIN) {
+    navItems.push({ icon: Building2, label: 'Đại lý', path: '/distributors' });
+  }
+  navItems.push({ icon: UserCog, label: 'Cấu hình', path: '/profile' });
+
+  return (
+    <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-800">
+      {/* Mobile Overlay */}
+      {isSidebarOpen && <div className="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm md:hidden" onClick={() => setIsSidebarOpen(false)} />}
+
+      {/* Sidebar */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200/60 transition-transform duration-300 md:static md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} shadow-2xl md:shadow-none flex flex-col`}>
+        {/* Logo Area */}
+        <div className="h-20 flex items-center px-6 border-b border-slate-100">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 flex items-center justify-center text-white font-bold text-2xl shadow-glow mr-3">V</div>
+            <div>
+                <h1 className="text-xl font-extrabold text-slate-900 tracking-tight leading-none">VinFast<span className="text-primary-600">CRM</span></h1>
+                <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-1">Nguyên Hồ</p>
+            </div>
+            <button onClick={() => setIsSidebarOpen(false)} className="md:hidden ml-auto text-slate-400 hover:text-slate-600"><X/></button>
+        </div>
+
+        {/* User Info Card */}
+        <div className="p-4">
+            <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-100/50 shadow-sm">
+                <div className="w-10 h-10 rounded-full bg-white border border-slate-200 p-0.5 flex-shrink-0 shadow-sm overflow-hidden">
+                    {userProfile?.avatar_url ? <img src={userProfile.avatar_url} className="w-full h-full rounded-full object-cover"/> : <UserCircle className="w-full h-full text-slate-300"/>}
+                </div>
+                <div className="overflow-hidden">
+                    <p className="text-sm font-bold text-slate-900 truncate">{userProfile?.full_name || 'User'}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        <p className="text-xs text-slate-500 capitalize font-medium">{userProfile?.role || 'Sales'}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {/* Navigation */}
+        <div className="px-4 py-2">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">Menu chính</p>
+            <nav className="space-y-1">
+                {navItems.map((item) => {
+                    const isActive = location.pathname === item.path;
+                    return (
+                        <Link key={item.path} to={item.path} onClick={() => setIsSidebarOpen(false)}
+                            className={`group flex items-center justify-between px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 ${
+                                isActive 
+                                ? 'bg-primary-600 text-white shadow-md shadow-primary-200' 
+                                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <item.icon size={20} className={`${isActive ? 'text-white' : 'text-slate-400 group-hover:text-primary-600'} transition-colors`} />
+                                <span>{item.label}</span>
+                            </div>
+                            {item.badge ? (
+                                <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">{item.badge}</span>
+                            ) : isActive && (
+                                <ChevronRight size={16} className="text-white/80"/>
+                            )}
+                        </Link>
+                    );
+                })}
+            </nav>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-auto p-4 border-t border-slate-100">
+            <button onClick={handleSignOut} className="flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all border border-transparent hover:border-red-100 group">
+                <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" /> 
+                Đăng xuất
+            </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#f8fafc]">
+          {/* Mobile Header */}
+          <header className="md:hidden flex items-center justify-between h-16 px-4 bg-white border-b border-slate-200 shadow-sm z-30 sticky top-0">
+              <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white font-bold">V</div>
+                  <span className="font-extrabold text-slate-800 text-lg">VinFast CRM</span>
+              </div>
+              <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg"><Menu/></button>
+          </header>
+
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
+              <div className="mx-auto max-w-7xl animate-fade-in pb-10">
+                  {children}
+              </div>
+          </div>
+      </main>
+    </div>
+  );
+};
+
+export default Layout;
