@@ -1,0 +1,450 @@
+
+import React, { useEffect, useState, useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { supabase } from '../supabaseClient';
+import { Customer, CustomerStatus, UserProfile, Transaction } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { 
+  ArrowLeft, Users, CheckCircle, Ban, TrendingUp, Calendar, Phone, MapPin, CarFront, Loader2, User, Clock, AlertTriangle, BadgeDollarSign, Wallet, ArrowUpRight, ArrowDownLeft, Building2, Target, Trophy, X, Save, UserX, Hand, Flame, Briefcase
+} from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
+
+const EmployeeDetail: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const { isAdmin, isMod } = useAuth();
+  const navigate = useNavigate();
+  
+  const [employee, setEmployee] = useState<UserProfile | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // KPI Modal
+  const [showKpiModal, setShowKpiModal] = useState(false);
+  const [newKpiTarget, setNewKpiTarget] = useState('');
+  const [isSavingKpi, setIsSavingKpi] = useState(false);
+
+  // Tabs State
+  const [activeTab, setActiveTab] = useState<'due' | 'overdue' | 'longterm' | 'won' | 'stopped' | 'all'>('due');
+
+  // GMT+7 Helper
+  const getLocalTodayStr = () => {
+    const now = new Date();
+    const vnTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+    return vnTime.toISOString().split('T')[0];
+  };
+  const todayStr = getLocalTodayStr();
+
+  useEffect(() => {
+    if (!isAdmin && !isMod) {
+        navigate('/');
+        return;
+    }
+    fetchData();
+  }, [id, isAdmin, isMod]);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      
+      // 1. Fetch Employee Profile
+      const { data: empData, error: empError } = await supabase.from('profiles').select('*').eq('id', id).single();
+      if (empError) throw empError;
+      setEmployee(empData as UserProfile);
+      setNewKpiTarget(empData.kpi_target?.toString() || '0');
+
+      // 2. Fetch Customers
+      const { data: custData, error: custError } = await supabase.from('customers').select('*').eq('creator_id', id).order('created_at', { ascending: false });
+      if (custError) throw custError;
+      setCustomers(custData as Customer[]);
+
+      // 3. Fetch Transactions (History of In/Out for this employee)
+      const { data: transData, error: transError } = await supabase.from('transactions').select('*').eq('user_id', id).order('created_at', { ascending: false });
+      if (transError) throw transError;
+      setTransactions(transData as Transaction[]);
+
+    } catch (err) {
+      console.error("Error fetching employee details:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateKpi = async () => {
+      setIsSavingKpi(true);
+      try {
+          const target = parseInt(newKpiTarget);
+          const { error } = await supabase.from('profiles').update({ kpi_target: isNaN(target) ? 0 : target }).eq('id', id);
+          if (error) throw error;
+          
+          setEmployee(prev => prev ? ({ ...prev, kpi_target: target }) : null);
+          setShowKpiModal(false);
+          alert("Đã cập nhật KPI!");
+      } catch (e) {
+          alert("Lỗi cập nhật KPI.");
+      } finally {
+          setIsSavingKpi(false);
+      }
+  };
+
+  // --- STATS CALCULATION ---
+  const stats = useMemo(() => {
+      const total = customers.length;
+      const won = customers.filter(c => c.status === CustomerStatus.WON).length;
+      const lost = customers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING).length;
+      const active = total - won - lost; 
+      
+      // Khách tiềm năng = Chỉ tính khách HOT
+      const potentialHot = customers.filter(c => 
+          c.classification === 'Hot' && 
+          c.status !== CustomerStatus.WON && 
+          c.status !== CustomerStatus.LOST && 
+          c.status !== CustomerStatus.LOST_PENDING
+      ).length;
+
+      // Tính số khách chưa tiếp nhận
+      const unacknowledged = customers.filter(c => c.status === CustomerStatus.NEW && c.is_acknowledged === false).length;
+      
+      const conversionRate = total > 0 ? ((won / total) * 100).toFixed(1) : '0.0';
+      return { total, won, lost, active, potentialHot, conversionRate, unacknowledged };
+  }, [customers]);
+
+  // --- KPI LOGIC (Current Month) ---
+  const kpiData = useMemo(() => {
+      const currentMonth = new Date().getMonth() + 1;
+      const currentYear = new Date().getFullYear();
+      
+      const wonThisMonth = customers.filter(c => {
+          if (c.status !== CustomerStatus.WON) return false;
+          const d = new Date(c.updated_at || c.created_at);
+          return d.getMonth() + 1 === currentMonth && d.getFullYear() === currentYear;
+      }).length;
+
+      const target = employee?.kpi_target || 0;
+      const percentage = target > 0 ? Math.min(100, Math.round((wonThisMonth / target) * 100)) : 0;
+      
+      return { wonThisMonth, target, percentage };
+  }, [customers, employee]);
+
+  const kpiChartData = [
+      { name: 'Đã đạt', value: kpiData.wonThisMonth },
+      { name: 'Còn lại', value: Math.max(0, kpiData.target - kpiData.wonThisMonth) }
+  ];
+  
+  // --- FINANCIAL CHART DATA (Monthly) ---
+  const financialData = useMemo(() => {
+      const last6Months = [];
+      const now = new Date();
+      for (let i = 5; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          last6Months.push({
+              month: d.getMonth() + 1,
+              year: d.getFullYear(),
+              label: `T${d.getMonth() + 1}`,
+              revenue: 0,
+              expense: 0,
+              net: 0,
+              predicted: 0
+          });
+      }
+
+      transactions.forEach(t => {
+          if (t.status !== 'approved') return;
+          const tDate = new Date(t.created_at);
+          const monthData = last6Months.find(m => m.month === tDate.getMonth() + 1 && m.year === tDate.getFullYear());
+          if (monthData) {
+              if (['revenue', 'deposit', 'repayment'].includes(t.type)) {
+                  monthData.revenue += t.amount;
+              } else if (['expense', 'advance'].includes(t.type)) {
+                  monthData.expense += t.amount;
+              }
+          }
+      });
+
+      customers.forEach(c => {
+          if (c.status === CustomerStatus.WON && c.deal_details?.revenue) {
+              const cDate = new Date(c.updated_at || c.created_at); 
+              const monthData = last6Months.find(m => m.month === cDate.getMonth() + 1 && m.year === cDate.getFullYear());
+              if (monthData) {
+                  monthData.predicted += c.deal_details.revenue;
+              }
+          }
+      });
+
+      return last6Months.map(m => ({ ...m, net: m.revenue - m.expense }));
+  }, [transactions, customers]);
+
+  // --- PART TIME INCOME CALCULATION (30% of NET) ---
+  const totalNetRevenue = useMemo(() => {
+      return financialData.reduce((sum, item) => sum + item.net, 0);
+  }, [financialData]);
+  
+  const partTimeIncome = totalNetRevenue > 0 ? totalNetRevenue * 0.3 : 0;
+
+  // --- CUSTOMER FILTER LOGIC ---
+  const filteredCustomers = useMemo(() => {
+      // Hàm kiểm tra chung để loại bỏ khách đã xong
+      const isActiveCustomer = (c: Customer) => c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST;
+
+      switch (activeTab) {
+          case 'due':
+              return customers.filter(c => {
+                  if (!isActiveCustomer(c) || c.is_special_care) return false;
+                  // Logic: Nếu ngày hẹn = hôm nay, coi là đến hạn (bất kể có cờ dài hạn hay không)
+                  return c.recare_date === todayStr;
+              });
+          case 'overdue':
+              return customers.filter(c => {
+                  if (!isActiveCustomer(c) || c.is_special_care) return false;
+                  // Logic: Nếu không có ngày hẹn -> không quá hạn (hoặc logic khác tùy nhu cầu)
+                  if (!c.recare_date) return false;
+                  // Logic QUAN TRỌNG: Nếu ngày hẹn < hôm nay, hệ thống TỰ ĐỘNG coi là quá hạn 
+                  // Bất kể trong DB c.is_long_term là true hay false.
+                  return c.recare_date < todayStr;
+              });
+          case 'longterm':
+              return customers.filter(c => {
+                  // Logic: Chỉ hiển thị ở tab Dài hạn nếu:
+                  // 1. Đang bật cờ dài hạn
+                  // 2. VÀ Ngày hẹn phải là TƯƠNG LAI (> hôm nay).
+                  // Nếu ngày hẹn <= hôm nay, nó đã rơi vào case 'due' hoặc 'overdue' ở trên rồi.
+                  return isActiveCustomer(c) && c.is_long_term === true && c.recare_date && c.recare_date > todayStr;
+              });
+          case 'won':
+              return customers.filter(c => c.status === CustomerStatus.WON);
+          case 'stopped':
+              return customers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING);
+          case 'all':
+          default:
+              return customers;
+      }
+  }, [customers, activeTab, todayStr]);
+
+  const filteredCustomerIds = useMemo(() => filteredCustomers.map(c => c.id), [filteredCustomers]);
+
+  const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
+
+  if (loading) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin text-primary-600" /></div>;
+  if (!employee) return <div className="text-center p-8">Không tìm thấy nhân viên.</div>;
+
+  return (
+    <div className="space-y-6 pb-20">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+          <button onClick={() => navigate('/employees')} className="p-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+              <ArrowLeft size={20} className="text-gray-600" />
+          </button>
+          <div>
+              <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold text-gray-900">{employee.full_name}</h1>
+                  {employee.is_part_time && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-0.5 rounded border border-orange-200 uppercase">Part-time</span>}
+              </div>
+              <p className="text-gray-500 text-sm">{employee.email} • {employee.phone}</p>
+          </div>
+          <div className="ml-auto flex items-center gap-3">
+              <div className="px-3 py-1 bg-primary-50 text-primary-700 rounded-lg text-xs font-bold uppercase">{employee.role}</div>
+              {!employee.is_part_time && (
+                  <button onClick={() => setShowKpiModal(true)} className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-purple-700"><Target size={14}/> Set KPI</button>
+              )}
+          </div>
+      </div>
+
+      {/* KPI & STATS CARDS */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* KPI OR INCOME CHART */}
+          {employee.is_part_time ? (
+              <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-5 rounded-2xl border border-orange-200 shadow-sm flex flex-col justify-between relative overflow-hidden">
+                  <div className="flex justify-between items-start z-10">
+                      <div>
+                          <p className="text-orange-800 text-xs font-bold uppercase flex items-center gap-1"><Wallet size={14}/> Thu nhập Part-time</p>
+                          <h3 className="text-2xl font-bold text-gray-900 mt-1">{formatCurrency(partTimeIncome)} <span className="text-sm font-normal text-gray-500">VNĐ</span></h3>
+                      </div>
+                      <div className="text-right">
+                          <p className="text-lg font-bold text-orange-700">30%</p>
+                          <p className="text-[10px] text-orange-600">trên Doanh thu Net</p>
+                      </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-orange-200">
+                      <p className="text-xs text-orange-700 font-medium flex justify-between"><span>Doanh thu Net (6 tháng):</span> <span>{formatCurrency(totalNetRevenue)} VNĐ</span></p>
+                  </div>
+                  <div className="absolute -right-6 -bottom-6 text-orange-200 opacity-50 pointer-events-none"><Briefcase size={100} /></div>
+              </div>
+          ) : (
+              <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between relative overflow-hidden">
+                  <div className="flex justify-between items-start z-10">
+                      <div>
+                          <p className="text-gray-500 text-xs font-bold uppercase flex items-center gap-1"><Trophy size={14} className="text-yellow-500"/> KPI Tháng {new Date().getMonth()+1}</p>
+                          <h3 className="text-2xl font-bold text-gray-900 mt-1">{kpiData.wonThisMonth} / {kpiData.target} <span className="text-sm font-normal text-gray-500">xe</span></h3>
+                      </div>
+                      <div className="text-right">
+                          <p className={`text-lg font-bold ${kpiData.percentage >= 100 ? 'text-green-600' : 'text-blue-600'}`}>{kpiData.percentage}%</p>
+                          <p className="text-[10px] text-gray-400">Hoàn thành</p>
+                      </div>
+                  </div>
+                  <div className="mt-4 h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all duration-1000 ${kpiData.percentage >= 100 ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(100, kpiData.percentage)}%` }}></div>
+                  </div>
+                  <div className="absolute -right-6 -bottom-6 text-gray-50 opacity-50 pointer-events-none"><Target size={100} /></div>
+              </div>
+          )}
+
+          {/* OTHER STATS */}
+          <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center">
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded-full mb-2"><Users size={20} /></div>
+                    <p className="text-gray-500 text-[10px] font-bold uppercase">Tổng Khách</p>
+                    <p className="text-xl font-bold text-gray-900">{stats.total}</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center">
+                    <div className="p-2 bg-green-50 text-green-600 rounded-full mb-2"><CheckCircle size={20} /></div>
+                    <p className="text-gray-500 text-[10px] font-bold uppercase">Đã chốt</p>
+                    <p className="text-xl font-bold text-gray-900">{stats.won}</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center">
+                    <div className="p-2 bg-red-50 text-red-600 rounded-full mb-2"><Flame size={20} /></div>
+                    <p className="text-gray-500 text-[10px] font-bold uppercase">Khách Hot</p>
+                    <p className="text-xl font-bold text-gray-900">{stats.potentialHot}</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center">
+                    <div className="p-2 bg-purple-50 text-purple-600 rounded-full mb-2"><TrendingUp size={20} /></div>
+                    <p className="text-gray-500 text-[10px] font-bold uppercase">Tỷ lệ chốt</p>
+                    <p className="text-xl font-bold text-gray-900">{stats.conversionRate}%</p>
+                </div>
+          </div>
+      </div>
+
+      {/* CHARTS ROW */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+              <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><BadgeDollarSign className="text-green-600"/> Hiệu quả Kinh doanh (Net)</h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={financialData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                    <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(val) => `${val/1000000}M`} />
+                    <Tooltip cursor={{fill: 'transparent'}} formatter={(val: number) => formatCurrency(val) + ' VNĐ'} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                    <Legend />
+                    <Bar name="Thực thu" dataKey="revenue" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
+                    <Bar name="Chi phí" dataKey="expense" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
+                    <Bar name="Lợi nhuận" dataKey="net" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+              <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><TrendingUp className="text-purple-600"/> Doanh thu Dự kiến (Đã chốt)</h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={financialData}>
+                    <defs>
+                      <linearGradient id="colorPredicted" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8}/>
+                        <stop offset="95%" stopColor="#8884d8" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                    <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} tickFormatter={(val) => `${val/1000000}M`} />
+                    <Tooltip formatter={(val: number) => formatCurrency(val) + ' VNĐ'} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                    <Area type="monotone" dataKey="predicted" stroke="#8884d8" fillOpacity={1} fill="url(#colorPredicted)" name="Dự kiến" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+          </div>
+      </div>
+
+      {/* TRANSACTION HISTORY */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+              <h3 className="font-bold text-gray-900 flex items-center gap-2"><Wallet size={20} className="text-blue-600"/> Lịch sử Thu / Chi</h3>
+          </div>
+          <div className="overflow-x-auto max-h-[400px]">
+              <table className="w-full text-sm text-left">
+                  <thead className="text-xs text-gray-500 uppercase bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                          <th className="px-6 py-3">Ngày</th>
+                          <th className="px-6 py-3">Loại</th>
+                          <th className="px-6 py-3">Khách hàng / Nguồn</th>
+                          <th className="px-6 py-3">Nội dung</th>
+                          <th className="px-6 py-3 text-right">Số tiền</th>
+                          <th className="px-6 py-3 text-center">Trạng thái</th>
+                      </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                      {transactions.length === 0 ? (
+                          <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-500">Chưa có giao dịch nào.</td></tr>
+                      ) : (
+                          transactions.map(t => {
+                              const relatedCustomer = customers.find(c => c.id === t.customer_id);
+                              const isMKT = relatedCustomer?.source?.includes('MKT') || false;
+                              return (
+                                  <tr key={t.id} className="hover:bg-gray-50 transition-colors">
+                                      <td className="px-6 py-4 font-medium text-gray-900">{new Date(t.created_at).toLocaleDateString('vi-VN')}</td>
+                                      <td className="px-6 py-4">
+                                          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold ${['revenue','deposit','repayment'].includes(t.type) ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                              {['revenue','deposit','repayment'].includes(t.type) ? <ArrowDownLeft size={12}/> : <ArrowUpRight size={12}/>}
+                                              {t.type === 'revenue' ? 'Doanh thu' : t.type === 'deposit' ? 'Nộp quỹ' : t.type === 'expense' ? 'Chi phí' : t.type === 'advance' ? 'Ứng tiền' : 'Hoàn ứng'}
+                                          </span>
+                                      </td>
+                                      <td className="px-6 py-4">
+                                          <div className="font-bold text-gray-900">{t.customer_name || '---'}</div>
+                                          {isMKT && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold border border-blue-200">MKT Group</span>}
+                                      </td>
+                                      <td className="px-6 py-4 text-gray-600 max-w-xs truncate" title={t.reason}>{t.reason}</td>
+                                      <td className={`px-6 py-4 text-right font-bold ${['revenue','deposit','repayment'].includes(t.type) ? 'text-green-600' : 'text-red-600'}`}>
+                                          {['revenue','deposit','repayment'].includes(t.type) ? '+' : '-'}{formatCurrency(t.amount)}
+                                      </td>
+                                      <td className="px-6 py-4 text-center">
+                                          <span className={`px-2 py-1 rounded-full text-xs font-bold ${t.status === 'approved' ? 'bg-green-100 text-green-700' : t.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-700'}`}>
+                                              {t.status === 'approved' ? 'Đã duyệt' : t.status === 'pending' ? 'Chờ duyệt' : 'Từ chối'}
+                                          </span>
+                                      </td>
+                                  </tr>
+                              );
+                          })
+                      )}
+                  </tbody>
+              </table>
+          </div>
+      </div>
+
+      {/* KPI MODAL */}
+      {showKpiModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Target className="text-purple-600"/> Thiết lập KPI Tháng</h3>
+                      <button onClick={() => setShowKpiModal(false)}><X className="text-gray-400 hover:text-gray-600" /></button>
+                  </div>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-1">Mục tiêu số xe chốt / tháng</label>
+                          <input 
+                              type="number"
+                              value={newKpiTarget}
+                              onChange={(e) => setNewKpiTarget(e.target.value)}
+                              className="w-full bg-white border border-gray-300 rounded-xl px-4 py-2 text-gray-900 font-bold outline-none focus:border-purple-500"
+                              placeholder="Ví dụ: 5"
+                          />
+                      </div>
+                      <div className="flex justify-end gap-2 pt-2">
+                          <button onClick={() => setShowKpiModal(false)} className="px-4 py-2 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200">Hủy</button>
+                          <button 
+                              onClick={handleUpdateKpi}
+                              disabled={isSavingKpi}
+                              className="px-4 py-2 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 flex items-center gap-2"
+                          >
+                              {isSavingKpi && <Loader2 className="animate-spin" size={16} />} Lưu KPI
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+    </div>
+  );
+};
+
+export default EmployeeDetail;

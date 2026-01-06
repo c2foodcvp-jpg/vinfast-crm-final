@@ -1,12 +1,13 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { Customer, CustomerStatus, CustomerClassification, UserProfile } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate, useLocation } from 'react-router-dom';
+import * as ReactRouterDOM from 'react-router-dom';
 import { Search, Plus, X, User, CarFront, Calendar, AlertCircle, Clock, CheckCircle2, MessageSquare, ShieldAlert, Upload, FileSpreadsheet, Download, AlertTriangle, Flame, History, RotateCcw, HardDrive, MapPin, Loader2, ChevronDown, List, Filter, Webhook, UserX, ScanSearch, Phone, Trash2 } from 'lucide-react';
 import { CAR_MODELS } from '../types';
-import { read, utils, writeFile } from 'xlsx';
+
+const { useNavigate, useLocation } = ReactRouterDOM as any;
 
 // Local Interface for Duplicates
 interface DuplicateGroup {
@@ -25,6 +26,7 @@ const CustomerList: React.FC = () => {
   const [selectedRep, setSelectedRep] = useState<string>('all');
   const [isTodayFilter, setIsTodayFilter] = useState(false);
   const [isUnacknowledgedFilter, setIsUnacknowledgedFilter] = useState(false); 
+  const [isExpiredLongTermFilter, setIsExpiredLongTermFilter] = useState(false);
 
   // Tabs State
   const location = useLocation();
@@ -40,36 +42,24 @@ const CustomerList: React.FC = () => {
   const [isDuplicateWarningOpen, setIsDuplicateWarningOpen] = useState(false);
   const [duplicateData, setDuplicateData] = useState<{id: string, name: string, sales_rep: string, phone: string} | null>(null);
 
-  // Backup/Restore/Import Refs
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   // DUPLICATE SCANNER STATES
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
 
-  // DATE LOGIC HELPER
+  // DATE LOGIC HELPER (GMT+7)
   const getLocalTodayStr = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const now = new Date();
+    // Shift to GMT+7
+    const vnTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+    return vnTime.toISOString().split('T')[0];
   };
 
   const todayStr = getLocalTodayStr();
 
   const initialFormState = {
-    name: '',
-    phone: '',
-    location: '',
-    source: 'MKT Group',
-    source_detail: '',
-    interest: '', 
-    notes: '',
-    isZaloOnly: false,
-    recare_date: todayStr,
-    classification: 'Warm' as CustomerClassification
+    name: '', phone: '', location: '', source: 'MKT Group', source_detail: '', interest: '', 
+    notes: '', isZaloOnly: false, recare_date: todayStr, classification: 'Warm' as CustomerClassification
   };
   
   const [formData, setFormData] = useState(initialFormState);
@@ -87,16 +77,25 @@ const CustomerList: React.FC = () => {
         setActiveTab(location.state.initialTab);
         setIsTodayFilter(false);
         setIsUnacknowledgedFilter(false);
+        setIsExpiredLongTermFilter(false);
       }
       if (location.state.filterType === 'today') {
         setIsTodayFilter(true);
         setIsUnacknowledgedFilter(false);
+        setIsExpiredLongTermFilter(false);
         setActiveTab('all'); 
       }
       if (location.state.filterType === 'unacknowledged') {
         setIsUnacknowledgedFilter(true);
         setIsTodayFilter(false);
+        setIsExpiredLongTermFilter(false);
         setActiveTab('all'); 
+      }
+      if (location.state.filterType === 'expired_longterm') {
+        setIsExpiredLongTermFilter(true);
+        setIsTodayFilter(false);
+        setIsUnacknowledgedFilter(false);
+        setActiveTab('all');
       }
     }
   }, [location.state]);
@@ -130,6 +129,7 @@ const CustomerList: React.FC = () => {
     }
   };
 
+  // ... (Keep existing handler functions: handleScanDuplicates, handleInputChange, toggleZaloOnly, normalizePhone, sendNewCustomerWebhook, handleAddCustomer, executeAddCustomer, handleRequestTransfer, handleDeleteCustomer) ...
   const handleScanDuplicates = async () => {
     setIsScanning(true);
     setIsDuplicateModalOpen(true);
@@ -175,7 +175,11 @@ const CustomerList: React.FC = () => {
   };
 
   const sendNewCustomerWebhook = async (customer: Customer, notes: string) => {
-      const webhookUrl = localStorage.getItem('vinfast_crm_discord_webhook_new_lead');
+      let webhookUrl = localStorage.getItem('vinfast_crm_discord_webhook_new_lead');
+      if (!webhookUrl) {
+          const { data } = await supabase.from('app_settings').select('value').eq('key', 'discord_webhook_new_lead').maybeSingle();
+          if (data) webhookUrl = data.value;
+      }
       if (!webhookUrl) return;
       try {
           await fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
@@ -189,7 +193,7 @@ const CustomerList: React.FC = () => {
                       { name: "🚗 Quan tâm", value: customer.interest || 'Chưa rõ', inline: true },
                       { name: "📍 Khu vực", value: customer.location || 'Chưa rõ', inline: true },
                       { name: "📝 Ghi chú", value: notes || "Không có", inline: false },
-                      { name: "👤 Người tạo", value: userProfile?.full_name || 'Admin', inline: true }
+                      { name: "👤 Người tạo", value: userProfile?.full_name || 'System', inline: true }
                   ]
               }]
           }) });
@@ -199,31 +203,16 @@ const CustomerList: React.FC = () => {
   const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
     if (!formData.name.trim()) { alert("Vui lòng nhập tên khách hàng"); setIsSubmitting(false); return; }
     if (!formData.isZaloOnly && !formData.phone.trim()) { alert("Vui lòng nhập số điện thoại"); setIsSubmitting(false); return; }
-
     try {
         let finalPhone = formData.phone;
         if (!formData.isZaloOnly) {
             finalPhone = normalizePhone(formData.phone);
             if (finalPhone.length === 9) finalPhone = '0' + finalPhone;
-
-            // --- CHECK DUPLICATE PHONE ---
-            const { data: existing } = await supabase
-                .from('customers')
-                .select('id, name, sales_rep')
-                .eq('phone', finalPhone)
-                .maybeSingle();
-
+            const { data: existing } = await supabase.from('customers').select('id, name, sales_rep').eq('phone', finalPhone).maybeSingle();
             if (existing) {
-                // If duplicate found, show custom modal
-                setDuplicateData({
-                    id: existing.id,
-                    name: existing.name,
-                    sales_rep: existing.sales_rep || "Chưa phân bổ",
-                    phone: finalPhone
-                });
+                setDuplicateData({ id: existing.id, name: existing.name, sales_rep: existing.sales_rep || "Chưa phân bổ", phone: finalPhone });
                 setIsDuplicateWarningOpen(true);
                 setIsSubmitting(false);
                 return;
@@ -231,13 +220,9 @@ const CustomerList: React.FC = () => {
         } else {
             finalPhone = 'Zalo-' + Date.now().toString().slice(-6);
         }
-
-        // If no duplicate, proceed directly
         await executeAddCustomer(finalPhone);
-
     } catch (err: any) {
-        const errorMessage = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
-        alert("Lỗi thêm khách: " + errorMessage);
+        alert("Lỗi thêm khách: " + err.message);
         setIsSubmitting(false);
     }
   };
@@ -252,10 +237,8 @@ const CustomerList: React.FC = () => {
             creator_id: userProfile?.id, sales_rep: userProfile?.full_name,
             is_special_care: false, is_long_term: false, created_at: new Date().toISOString()
         };
-
         const { data, error } = await supabase.from('customers').insert([payload]).select();
         if (error) throw error;
-
         if (data && data[0]) {
             await supabase.from('interactions').insert([{
                 customer_id: data[0].id, user_id: userProfile?.id, type: 'note',
@@ -263,115 +246,132 @@ const CustomerList: React.FC = () => {
                 created_at: new Date().toISOString()
             }]);
             if (sendToDiscord) await sendNewCustomerWebhook(data[0] as Customer, formData.notes);
-            
-            // Reset and Close
             setFormData(initialFormState);
             setIsAddModalOpen(false);
             setIsDuplicateWarningOpen(false);
             setDuplicateData(null);
-            
-            fetchCustomers(); // Refresh list
+            fetchCustomers();
             alert("Thêm khách hàng thành công!");
         }
-      } catch (err: any) {
-          alert("Lỗi thêm khách: " + err.message);
-      } finally {
-          setIsSubmitting(false);
-      }
+      } catch (err: any) { alert("Lỗi thêm khách: " + err.message); } finally { setIsSubmitting(false); }
   };
 
   const handleRequestTransfer = async () => {
       if (!duplicateData || !userProfile) return;
       setIsSubmitting(true);
       try {
-          // Update customer record to request transfer
           await supabase.from('customers').update({ pending_transfer_to: userProfile.id }).eq('id', duplicateData.id);
-          
-          // Add note
           await supabase.from('interactions').insert([{
-              customer_id: duplicateData.id,
-              user_id: userProfile.id,
-              type: 'note',
+              customer_id: duplicateData.id, user_id: userProfile.id, type: 'note',
               content: `⚠️ Yêu cầu chuyển quyền chăm sóc từ ${userProfile.full_name}.`,
               created_at: new Date().toISOString()
           }]);
-
           alert("Đã gửi yêu cầu chuyển quyền chăm sóc cho Admin/Mod!");
           setIsDuplicateWarningOpen(false);
           setIsAddModalOpen(false);
           setDuplicateData(null);
           setFormData(initialFormState);
-          
-      } catch (e) {
-          alert("Lỗi khi gửi yêu cầu.");
-      } finally {
-          setIsSubmitting(false);
-      }
+      } catch (e) { alert("Lỗi khi gửi yêu cầu."); } finally { setIsSubmitting(false); }
   };
 
   const handleDeleteCustomer = async (customerId: string, e: React.MouseEvent) => {
-      e.stopPropagation(); // Prevent navigating to detail
+      e.stopPropagation();
       if (!window.confirm("CẢNH BÁO: Xóa khách hàng này? Hành động không thể hoàn tác.")) return;
-      
       try {
-          // 1. Delete Interactions first
           await supabase.from('interactions').delete().eq('customer_id', customerId);
-          // 2. Delete Transactions
           await supabase.from('transactions').delete().eq('customer_id', customerId);
-          // 3. Delete Customer
           const { error } = await supabase.from('customers').delete().eq('id', customerId);
-          
           if (error) throw error;
-          
           setCustomers(prev => prev.filter(c => c.id !== customerId));
       } catch (err: any) {
           alert("Lỗi xóa: " + (err.message || "Vui lòng liên hệ Admin."));
       }
   };
 
-  const getFilteredCustomers = () => {
-    const normalizedSearch = searchTerm.replace(/\s+/g, '');
-    let filtered = customers.filter(c => {
-      const normalizedPhone = c.phone ? c.phone.replace(/\s+/g, '') : '';
-      return (
-        (c.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || 
-        normalizedPhone.includes(normalizedSearch)
-      );
-    });
+  // Base list filtered by Search/Rep/Date (Not Tabs)
+  const baseFilteredCustomers = useMemo(() => {
+      const normalizedSearch = searchTerm.replace(/\s+/g, '');
+      let filtered = customers.filter(c => {
+        const normalizedPhone = c.phone ? c.phone.replace(/\s+/g, '') : '';
+        return (
+          (c.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || 
+          normalizedPhone.includes(normalizedSearch)
+        );
+      });
 
-    if ((isAdmin || isMod) && selectedRep !== 'all') {
-        filtered = filtered.filter(c => c.creator_id === selectedRep);
-    }
+      if ((isAdmin || isMod) && selectedRep !== 'all') {
+          filtered = filtered.filter(c => c.creator_id === selectedRep);
+      }
 
-    if (isTodayFilter) {
-        filtered = filtered.filter(c => {
-            if (!c.created_at) return false;
-            const d = new Date(c.created_at);
-            const cDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            return cDate === todayStr;
-        });
-    }
+      if (isTodayFilter) {
+          filtered = filtered.filter(c => {
+              if (!c.created_at) return false;
+              const d = new Date(c.created_at);
+              const vnDate = new Date(d.getTime() + (7 * 60 * 60 * 1000));
+              const cDate = vnDate.toISOString().split('T')[0];
+              return cDate === todayStr;
+          });
+      }
 
-    if (isUnacknowledgedFilter) {
-        filtered = filtered.filter(c => c.status === CustomerStatus.NEW && !c.is_acknowledged && c.sales_rep);
-    }
+      if (isUnacknowledgedFilter) {
+          filtered = filtered.filter(c => c.status === CustomerStatus.NEW && !c.is_acknowledged && c.sales_rep);
+      }
 
-    switch (activeTab) {
-      case 'general': return filtered.filter(c => c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.LOST_PENDING && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.WON_PENDING);
-      case 'special': return filtered.filter(c => c.is_special_care === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON);
-      case 'due': return filtered.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date === todayStr; });
-      case 'overdue': return filtered.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date < todayStr; });
-      case 'longterm': return filtered.filter(c => c.is_long_term === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON);
-      case 'stopped': return filtered.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING);
-      case 'won': return filtered.filter(c => c.status === CustomerStatus.WON || c.status === CustomerStatus.WON_PENDING);
-      case 'pending': return filtered.filter(c => c.status === CustomerStatus.WON_PENDING || c.status === CustomerStatus.LOST_PENDING || c.deal_status === 'completed_pending' || c.deal_status === 'refund_pending' || !!c.pending_transfer_to);
-      case 'all': return filtered;
-      default: return filtered;
-    }
-  };
+      if (isExpiredLongTermFilter) {
+          filtered = filtered.filter(c => {
+              if (!c.is_long_term) return false;
+              if (c.status === CustomerStatus.WON || c.status === CustomerStatus.LOST) return false;
+              if (!c.recare_date) return false;
+              return c.recare_date <= todayStr;
+          });
+      }
 
-  const filteredList = getFilteredCustomers();
+      return filtered;
+  }, [customers, searchTerm, selectedRep, isTodayFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, isAdmin, isMod, todayStr]);
+
+  // Tab Filtering logic applied to base list
+  const filteredList = useMemo(() => {
+      switch (activeTab) {
+        case 'general': return baseFilteredCustomers.filter(c => c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.LOST_PENDING && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.WON_PENDING);
+        case 'special': return baseFilteredCustomers.filter(c => c.is_special_care === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON);
+        case 'due': return baseFilteredCustomers.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date === todayStr; });
+        case 'overdue': return baseFilteredCustomers.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date < todayStr; });
+        case 'longterm': return baseFilteredCustomers.filter(c => c.is_long_term === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON);
+        case 'stopped': return baseFilteredCustomers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING);
+        case 'won': return baseFilteredCustomers.filter(c => c.status === CustomerStatus.WON || c.status === CustomerStatus.WON_PENDING);
+        case 'pending': return baseFilteredCustomers.filter(c => c.status === CustomerStatus.WON_PENDING || c.status === CustomerStatus.LOST_PENDING || c.deal_status === 'completed_pending' || c.deal_status === 'refund_pending' || !!c.pending_transfer_to);
+        case 'all': return baseFilteredCustomers;
+        default: return baseFilteredCustomers;
+      }
+  }, [activeTab, baseFilteredCustomers, todayStr]);
   
+  // Counts Calculation for Badges
+  const counts = useMemo(() => ({
+      general: baseFilteredCustomers.filter(c => c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.LOST_PENDING && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.WON_PENDING).length,
+      special: baseFilteredCustomers.filter(c => c.is_special_care === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length,
+      due: baseFilteredCustomers.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date === todayStr; }).length,
+      overdue: baseFilteredCustomers.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date < todayStr; }).length,
+      longterm: baseFilteredCustomers.filter(c => c.is_long_term === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length,
+      won: baseFilteredCustomers.filter(c => c.status === CustomerStatus.WON || c.status === CustomerStatus.WON_PENDING).length,
+      stopped: baseFilteredCustomers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING).length
+  }), [baseFilteredCustomers, todayStr]);
+
+  const tabs: {id: string; label: string; icon: any; count?: number; colorClass?: string}[] = [
+    { id: 'general', label: 'Khách hàng', icon: User, count: counts.general, colorClass: 'text-green-600 bg-green-100' }, // Xanh lá nhạt
+    { id: 'special', label: 'CS Đặc biệt', icon: AlertCircle, count: counts.special, colorClass: 'text-purple-600 bg-purple-100' }, // Tím
+    { id: 'due', label: 'Đến hạn CS', icon: Clock, count: counts.due, colorClass: 'text-orange-600 bg-orange-100' }, // Cam
+    { id: 'overdue', label: 'Quá hạn CS', icon: AlertTriangle, count: counts.overdue, colorClass: 'text-red-600 bg-red-100' }, // Đỏ
+    { id: 'longterm', label: 'CS Dài hạn', icon: Calendar, count: counts.longterm, colorClass: 'text-blue-600 bg-blue-100' }, // Xanh dương
+    { id: 'stopped', label: 'Ngưng CS', icon: X, count: counts.stopped, colorClass: 'text-gray-600 bg-gray-100' },
+    { id: 'won', label: 'Đã chốt', icon: CheckCircle2, count: counts.won, colorClass: 'text-emerald-700 bg-emerald-200' }, // Xanh lá đậm
+  ];
+
+  if (isAdmin || isMod) {
+      const pendingCount = baseFilteredCustomers.filter(c => c.status === CustomerStatus.WON_PENDING || c.status === CustomerStatus.LOST_PENDING || c.deal_status === 'completed_pending' || c.deal_status === 'refund_pending' || !!c.pending_transfer_to).length;
+      tabs.push({ id: 'pending', label: 'Chờ duyệt', icon: ShieldAlert, count: pendingCount, colorClass: 'text-yellow-700 bg-yellow-100' });
+      tabs.push({ id: 'all', label: 'Tất cả (DB)', icon: List });
+  }
+
   const getRecareStatus = (customer: Customer) => { 
       let statusText = '--/--';
       let statusColor = 'text-gray-400';
@@ -383,29 +383,15 @@ const CustomerList: React.FC = () => {
       return { text: statusText, color: statusColor };
   };
 
-  const tabs: {id: string; label: string; icon: any; count?: number}[] = [
-    { id: 'general', label: 'Khách hàng', icon: User },
-    { id: 'special', label: 'CS Đặc biệt', icon: AlertCircle },
-    { id: 'due', label: 'Đến hạn CS', icon: Clock },
-    { id: 'overdue', label: 'Quá hạn CS', icon: AlertCircle },
-    { id: 'longterm', label: 'CS Dài hạn', icon: Calendar },
-    { id: 'stopped', label: 'Ngưng CS', icon: X },
-    { id: 'won', label: 'Đã chốt', icon: CheckCircle2 },
-  ];
-
-  if (isAdmin || isMod) {
-      const pendingCount = customers.filter(c => c.status === CustomerStatus.WON_PENDING || c.status === CustomerStatus.LOST_PENDING || c.deal_status === 'completed_pending' || c.deal_status === 'refund_pending' || !!c.pending_transfer_to).length;
-      tabs.push({ id: 'pending', label: 'Chờ duyệt', icon: ShieldAlert, count: pendingCount });
-      tabs.push({ id: 'all', label: 'Tất cả (DB)', icon: List });
-  }
-
   return (
     <div className="space-y-6 pb-20 relative">
+      {/* ... (Header and Search section kept same as before) ... */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
             <h1 className="text-2xl font-bold text-gray-900">Quản lý Khách hàng</h1>
             {isTodayFilter && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold"><Calendar size={14} /> Đang xem: Khách mới hôm nay<button onClick={() => setIsTodayFilter(false)} className="ml-1 hover:text-green-900"><X size={14}/></button></span>)}
             {isUnacknowledgedFilter && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold animate-fade-in"><UserX size={14} /> Đang xem: Khách chưa được TVBH tiếp nhận<button onClick={() => setIsUnacknowledgedFilter(false)} className="ml-1 hover:text-purple-900"><X size={14}/></button></span>)}
+            {isExpiredLongTermFilter && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold animate-fade-in"><AlertTriangle size={14} /> Đang xem: Khách CS Dài hạn đã đến hạn (Hết hạn)<button onClick={() => setIsExpiredLongTermFilter(false)} className="ml-1 hover:text-blue-900"><X size={14}/></button></span>)}
         </div>
         <div className="flex gap-2">
             {(isAdmin || isMod) && (<button onClick={handleScanDuplicates} className="flex items-center gap-2 rounded-xl bg-gray-800 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-gray-400 transition-colors hover:bg-black"><ScanSearch size={18} /> Quét trùng lặp</button>)}
@@ -437,12 +423,13 @@ const CustomerList: React.FC = () => {
            const isActive = activeTab === tab.id;
            return (
              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-2 rounded-xl whitespace-nowrap transition-all text-sm font-medium border ${isActive ? 'bg-primary-600 text-white border-primary-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
-               <tab.icon size={16} /> {tab.label} {(tab as any).count > 0 && (<span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full ml-1">{(tab as any).count}</span>)}
+               <tab.icon size={16} /> {tab.label} {(tab as any).count > 0 && (<span className={`text-[10px] px-1.5 py-0.5 rounded-full ml-1 font-bold ${(tab as any).colorClass || 'bg-gray-200 text-gray-700'}`}>{(tab as any).count}</span>)}
              </button>
            );
         })}
       </div>
 
+      {/* List content (same as before) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredList.length === 0 ? (
           <div className="col-span-full py-12 text-center text-gray-500 bg-white rounded-2xl border border-gray-100 border-dashed">
@@ -453,7 +440,15 @@ const CustomerList: React.FC = () => {
             const recareStatus = getRecareStatus(customer);
             const isFinishedStatus = [CustomerStatus.WON, CustomerStatus.LOST, CustomerStatus.WON_PENDING, CustomerStatus.LOST_PENDING].includes(customer.status);
             return (
-              <div key={customer.id} onClick={() => navigate(`/customers/${customer.id}`)} className="group bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-primary-200 transition-all cursor-pointer relative overflow-hidden">
+              <div 
+                key={customer.id} 
+                onClick={() => navigate(`/customers/${customer.id}`, { 
+                    state: { 
+                        customerIds: filteredList.map(c => c.id) // Pass current list context
+                    } 
+                })} 
+                className="group bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-primary-200 transition-all cursor-pointer relative overflow-hidden"
+              >
                 <div className="absolute top-0 right-0 p-2 flex flex-col gap-1 items-end">
                     {customer.is_special_care && <Flame size={18} className="text-red-500 animate-pulse" />}
                     {customer.is_long_term && <Calendar size={18} className="text-blue-500" />}
@@ -486,7 +481,7 @@ const CustomerList: React.FC = () => {
         )}
       </div>
       
-      {/* ADD MODAL */}
+      {/* ... Add/Duplicate Modals (Identical to previous) ... */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
           <div className="bg-white rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
@@ -519,7 +514,6 @@ const CustomerList: React.FC = () => {
         </div>
       )}
 
-      {/* --- DUPLICATE WARNING MODAL --- */}
       {isDuplicateWarningOpen && duplicateData && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl transform scale-100 transition-all border border-red-100">
@@ -528,43 +522,22 @@ const CustomerList: React.FC = () => {
                           <AlertTriangle className="text-red-600" size={32} />
                       </div>
                       <h3 className="text-xl font-bold text-gray-900 mb-2">Cảnh báo Trùng lặp!</h3>
-                      <p className="text-sm text-gray-500 mb-6">
-                          Số điện thoại <span className="font-bold text-gray-900">{duplicateData.phone}</span> đã tồn tại trên hệ thống.
-                      </p>
-                      
+                      <p className="text-sm text-gray-500 mb-6">Số điện thoại <span className="font-bold text-gray-900">{duplicateData.phone}</span> đã tồn tại trên hệ thống.</p>
                       <div className="w-full bg-red-50 rounded-xl p-4 border border-red-100 mb-6 text-left space-y-2">
-                          <div className="flex justify-between items-center border-b border-red-200 pb-2">
-                              <span className="text-xs font-bold text-red-500 uppercase">Khách hàng cũ</span>
-                          </div>
-                          <div>
-                              <p className="text-xs text-gray-500">Họ tên</p>
-                              <p className="font-bold text-gray-900">{duplicateData.name}</p>
-                          </div>
-                          <div>
-                              <p className="text-xs text-gray-500">Đang thuộc về TVBH</p>
-                              <p className="font-bold text-red-600 uppercase">{duplicateData.sales_rep}</p>
-                          </div>
+                          <div className="flex justify-between items-center border-b border-red-200 pb-2"><span className="text-xs font-bold text-red-500 uppercase">Khách hàng cũ</span></div>
+                          <div><p className="text-xs text-gray-500">Họ tên</p><p className="font-bold text-gray-900">{duplicateData.name}</p></div>
+                          <div><p className="text-xs text-gray-500">Đang thuộc về TVBH</p><p className="font-bold text-red-600 uppercase">{duplicateData.sales_rep}</p></div>
                       </div>
-
                       <div className="flex flex-col gap-3 w-full">
-                          <button 
-                              onClick={handleRequestTransfer}
-                              className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors flex items-center justify-center gap-2"
-                          >
-                              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Yêu cầu chăm sóc Khách hàng này'}
-                          </button>
-                          <button 
-                              onClick={() => { setIsDuplicateWarningOpen(false); setDuplicateData(null); setIsSubmitting(false); }} 
-                              className="w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors"
-                          >
-                              Hủy bỏ
-                          </button>
+                          <button onClick={handleRequestTransfer} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors flex items-center justify-center gap-2">{isSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Yêu cầu chăm sóc Khách hàng này'}</button>
+                          <button onClick={() => { setIsDuplicateWarningOpen(false); setDuplicateData(null); setIsSubmitting(false); }} className="w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button>
                       </div>
                   </div>
               </div>
           </div>
       )}
 
+      {/* Duplicate Scanner Modal (Structure Unchanged) */}
       {isDuplicateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
            <div className="bg-white rounded-2xl w-full max-w-4xl p-6 max-h-[90vh] flex flex-col">

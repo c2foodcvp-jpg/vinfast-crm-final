@@ -54,6 +54,8 @@ export interface UserProfile {
   status: UserStatus;
   avatar_url?: string;
   manager_id?: string | null;
+  kpi_target?: number; // Target number of cars per month
+  is_part_time?: boolean; // New Flag for Part-time
   created_at?: string;
   discord_config?: any;
 }
@@ -148,4 +150,16 @@ export interface AppSettings {
   id: string;
   key: string;
   value: string;
+}
+
+export interface TeamFine {
+  id: string;
+  user_id: string; // Người bị phạt
+  user_name?: string; // Cache name
+  created_by: string; // Người phạt (Admin/Mod)
+  amount: number;
+  reason: string;
+  status: 'pending' | 'paid';
+  created_at: string;
+  paid_at?: string;
 }

@@ -1,8 +1,9 @@
-
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { User, Lock, Loader2, AlertCircle, ShieldCheck, Mail, ArrowLeft, ChevronRight } from 'lucide-react';
+
+const { useNavigate, Link } = ReactRouterDOM as any;
 
 const Login: React.FC = () => {
   const [emailOrPhone, setEmailOrPhone] = useState('');
@@ -11,6 +12,7 @@ const Login: React.FC = () => {
   // Forgot Password State
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -199,6 +201,17 @@ const Login: React.FC = () => {
                                 placeholder="••••••••"
                             />
                         </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <input 
+                            type="checkbox" 
+                            id="rememberMe" 
+                            checked={rememberMe} 
+                            onChange={(e) => setRememberMe(e.target.checked)} 
+                            className="w-4 h-4 text-primary-600 rounded border-slate-300 focus:ring-primary-500 cursor-pointer"
+                        />
+                        <label htmlFor="rememberMe" className="text-sm text-slate-600 cursor-pointer select-none font-medium">Duy trì đăng nhập</label>
                     </div>
 
                     <button

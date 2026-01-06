@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Lock, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+
+const { useNavigate } = ReactRouterDOM as any;
 
 const UpdatePassword: React.FC = () => {
   const [password, setPassword] = useState('');
@@ -116,10 +118,10 @@ const UpdatePassword: React.FC = () => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full rounded-xl bg-primary-600 py-3.5 font-bold text-white shadow-lg hover:bg-primary-700 disabled:opacity-70 flex justify-center items-center gap-2 transition-all"
+                className="w-full rounded-xl bg-primary-600 py-3 font-bold text-white shadow-lg hover:bg-primary-700 transition-all disabled:opacity-70 flex justify-center items-center gap-2"
               >
                 {isLoading && <Loader2 className="animate-spin" size={20} />}
-                Đổi mật khẩu
+                Cập nhật mật khẩu
               </button>
             </form>
           )}

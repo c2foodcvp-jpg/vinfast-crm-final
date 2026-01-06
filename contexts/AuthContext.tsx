@@ -21,20 +21,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) fetchProfile(session.user.id, session.user.email);
-      else setIsLoading(false);
-    });
+    // Check active session with error handling
+    const initializeAuth = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        
+        setSession(session);
+        if (session) {
+          await fetchProfile(session.user.id, session.user.email);
+        } else {
+          setIsLoading(false);
+        }
+      } catch (error) {
+        console.error("Auth initialization failed (Network or Config error):", error);
+        // Ensure we stop loading so the app doesn't freeze on white screen
+        setIsLoading(false);
+      }
+    };
+
+    initializeAuth();
 
     // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) fetchProfile(session.user.id, session.user.email);
-      else {
+      if (session) {
+        fetchProfile(session.user.id, session.user.email);
+      } else {
         setUserProfile(null);
         setIsLoading(false);
       }
@@ -84,7 +99,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
     setSession(null);
     setUserProfile(null);
   };

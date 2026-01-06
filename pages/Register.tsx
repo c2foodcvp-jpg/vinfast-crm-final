@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { User, Lock, Phone, UserCircle, Loader2, AlertCircle } from 'lucide-react';
 import { UserRole } from '../types';
+
+const { useNavigate, Link } = ReactRouterDOM as any;
 
 const Register: React.FC = () => {
   const [formData, setFormData] = useState({

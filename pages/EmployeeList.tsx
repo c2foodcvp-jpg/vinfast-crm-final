@@ -1,8 +1,9 @@
+
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { UserProfile, UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { CheckCircle, XCircle, Search, Shield, User, Edit2, Save, X, AlertTriangle, ShieldCheck, Users, Copy, Terminal, Trash2 } from 'lucide-react';
+import { CheckCircle, XCircle, Search, Shield, User, Edit2, Save, X, AlertTriangle, ShieldCheck, Users, Copy, Terminal, Trash2, Clock, LogOut, ArrowRightLeft } from 'lucide-react';
 
 const EmployeeList: React.FC = () => {
   const { userProfile } = useAuth();
@@ -14,12 +15,14 @@ const EmployeeList: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempRole, setTempRole] = useState<UserRole>(UserRole.EMPLOYEE);
   const [tempManagerId, setTempManagerId] = useState<string>('');
+  const [tempIsPartTime, setTempIsPartTime] = useState(false);
 
   // Approval Modal State
   const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
   const [selectedUserToApprove, setSelectedUserToApprove] = useState<UserProfile | null>(null);
   const [roleToAssign, setRoleToAssign] = useState<UserRole>(UserRole.EMPLOYEE);
   const [managerIdToAssign, setManagerIdToAssign] = useState<string>('');
+  const [assignAsPartTime, setAssignAsPartTime] = useState(false);
 
   // RLS Instruction Modal State
   const [showRLSModal, setShowRLSModal] = useState(false);
@@ -45,6 +48,12 @@ const EmployeeList: React.FC = () => {
     }
   };
 
+  const getSafeErrorMessage = (err: any) => {
+      if (typeof err === 'string') return err;
+      if (err?.message) return err.message;
+      return JSON.stringify(err);
+  };
+
   // Derived list of potential managers (Active MODs or Admins)
   const availableManagers = employees.filter(e => 
     e.status === 'active' && 
@@ -63,6 +72,7 @@ const EmployeeList: React.FC = () => {
   const openApprovalModal = (user: UserProfile) => {
     setSelectedUserToApprove(user);
     setRoleToAssign(UserRole.EMPLOYEE); 
+    setAssignAsPartTime(false);
     // If current user is MOD, auto-assign to themselves. If Admin, leave empty to choose.
     setManagerIdToAssign(userProfile?.role === UserRole.MOD ? userProfile.id : ''); 
     setIsApprovalModalOpen(true);
@@ -79,7 +89,8 @@ const EmployeeList: React.FC = () => {
     // 1. Prepare Payload
     const updates: any = {
       status: 'active',
-      role: roleToAssign
+      role: roleToAssign,
+      is_part_time: roleToAssign === UserRole.EMPLOYEE ? assignAsPartTime : false
     };
     if (roleToAssign === UserRole.EMPLOYEE && managerIdToAssign) {
       updates.manager_id = managerIdToAssign;
@@ -111,7 +122,7 @@ const EmployeeList: React.FC = () => {
     } catch (err: any) {
       console.error(err);
       setEmployees(originalEmployees);
-      const msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      const msg = getSafeErrorMessage(err);
       if (msg === "RLS_BLOCK" || msg.includes("policy")) {
           setShowRLSModal(true);
       } else {
@@ -137,7 +148,7 @@ const EmployeeList: React.FC = () => {
 
       } catch (err: any) {
         setEmployees(originalEmployees);
-        const msg = err?.message || String(err);
+        const msg = getSafeErrorMessage(err);
         if (msg === "RLS_BLOCK" || msg.includes("policy")) { setShowRLSModal(true); } else { alert("Lỗi: " + msg); }
       }
   };
@@ -153,7 +164,63 @@ const EmployeeList: React.FC = () => {
           if (error) throw error;
       } catch (err: any) {
           setEmployees(originalEmployees);
-          alert("Lỗi xóa nhân viên: " + (err.message || err));
+          alert("Lỗi xóa nhân viên: " + getSafeErrorMessage(err));
+      }
+  };
+
+  // --- END PART-TIME CONTRACT ---
+  const handleEndPartTimeContract = async (employee: UserProfile) => {
+      if (!employee.manager_id) {
+          alert("Lỗi: Nhân viên này không có người quản lý để chuyển khách!");
+          return;
+      }
+      
+      const manager = employees.find(e => e.id === employee.manager_id);
+      if (!manager) {
+          alert("Lỗi: Không tìm thấy thông tin người quản lý!");
+          return;
+      }
+
+      if (!window.confirm(`XÁC NHẬN: Kết thúc hợp đồng Part-time của "${employee.full_name}"?\n\n1. Toàn bộ khách hàng sẽ chuyển sang cho MOD "${manager.full_name}".\n2. Tài khoản nhân viên này sẽ bị KHÓA.`)) return;
+
+      const originalEmployees = [...employees];
+      // Optimistic update
+      setEmployees(employees.map(e => e.id === employee.id ? { ...e, status: 'blocked' } : e));
+
+      try {
+          // 1. Transfer Customers
+          const { error: updateError } = await supabase
+              .from('customers')
+              .update({ 
+                  creator_id: manager.id, 
+                  sales_rep: manager.full_name 
+              })
+              .eq('creator_id', employee.id);
+          
+          if (updateError) throw updateError;
+
+          // 2. Block User
+          const { error: blockError } = await supabase
+              .from('profiles')
+              .update({ status: 'blocked' })
+              .eq('id', employee.id);
+
+          if (blockError) throw blockError;
+
+          // 3. Log Note
+          await supabase.from('interactions').insert([{
+              user_id: userProfile?.id,
+              customer_id: null, // Global log
+              type: 'note',
+              content: `Hệ thống: Đã kết thúc HĐ Part-time của ${employee.full_name}. Khách hàng đã chuyển về ${manager.full_name}.`,
+              created_at: new Date().toISOString()
+          }]).catch(err => console.warn("Failed to log system note"));
+
+          alert("Đã hoàn tất! Khách hàng đã được chuyển và tài khoản đã bị khóa.");
+
+      } catch (err: any) {
+          setEmployees(originalEmployees);
+          alert("Có lỗi xảy ra: " + getSafeErrorMessage(err));
       }
   };
 
@@ -162,6 +229,7 @@ const EmployeeList: React.FC = () => {
     setEditingId(employee.id);
     setTempRole(employee.role);
     setTempManagerId(employee.manager_id || '');
+    setTempIsPartTime(employee.is_part_time || false);
   };
 
   const saveRole = async (id: string) => {
@@ -170,8 +238,10 @@ const EmployeeList: React.FC = () => {
     
     if (tempRole === UserRole.EMPLOYEE) {
         updates.manager_id = tempManagerId || null;
+        updates.is_part_time = tempIsPartTime;
     } else {
         updates.manager_id = null;
+        updates.is_part_time = false;
     }
 
     setEmployees(employees.map(e => e.id === id ? { ...e, ...updates } : e));
@@ -189,7 +259,7 @@ const EmployeeList: React.FC = () => {
       
     } catch (err: any) {
       setEmployees(originalEmployees);
-      const msg = err?.message || String(err);
+      const msg = getSafeErrorMessage(err);
       if (msg === "RLS_BLOCK" || msg.includes("policy")) { setShowRLSModal(true); } else { alert("Lỗi: " + msg); }
     }
   };
@@ -263,7 +333,12 @@ const EmployeeList: React.FC = () => {
                                       )}
                                   </div>
                                   <div>
-                                      <p className="font-semibold text-gray-900">{emp.full_name}</p>
+                                      <div className="flex items-center gap-2">
+                                          <p className="font-semibold text-gray-900 cursor-pointer hover:text-primary-600" onClick={() => (isAdmin || userProfile?.role === UserRole.MOD) && emp.status === 'active' && window.location.assign('#/employees/' + emp.id)}>{emp.full_name}</p>
+                                          {emp.is_part_time && (
+                                              <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[9px] font-bold rounded uppercase border border-orange-200">Part-time</span>
+                                          )}
+                                      </div>
                                       <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
                                         emp.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
                                         emp.status === 'blocked' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
@@ -294,16 +369,22 @@ const EmployeeList: React.FC = () => {
                                   </div>
                                   
                                   {tempRole === UserRole.EMPLOYEE && (
-                                      <select 
-                                        value={tempManagerId}
-                                        onChange={(e) => setTempManagerId(e.target.value)}
-                                        className="text-xs border rounded px-1 py-1 w-full bg-white outline-none text-gray-700"
-                                      >
-                                          <option value="">-- Chọn quản lý --</option>
-                                          {employees.filter(m => (m.role === 'admin' || m.role === 'mod') && m.id !== emp.id).map(m => (
-                                              <option key={m.id} value={m.id}>{m.full_name}</option>
-                                          ))}
-                                      </select>
+                                      <>
+                                          <select 
+                                            value={tempManagerId}
+                                            onChange={(e) => setTempManagerId(e.target.value)}
+                                            className="text-xs border rounded px-1 py-1 w-full bg-white outline-none text-gray-700"
+                                          >
+                                              <option value="">-- Chọn quản lý --</option>
+                                              {employees.filter(m => (m.role === 'admin' || m.role === 'mod') && m.id !== emp.id).map(m => (
+                                                  <option key={m.id} value={m.id}>{m.full_name}</option>
+                                              ))}
+                                          </select>
+                                          <div className="flex items-center gap-2 mt-1">
+                                              <input type="checkbox" id={`parttime-${emp.id}`} checked={tempIsPartTime} onChange={e => setTempIsPartTime(e.target.checked)} className="rounded text-orange-600 focus:ring-orange-500"/>
+                                              <label htmlFor={`parttime-${emp.id}`} className="text-xs font-bold text-orange-700">Part-time</label>
+                                          </div>
+                                      </>
                                   )}
 
                                   <div className="flex justify-end gap-2 mt-1">
@@ -360,13 +441,24 @@ const EmployeeList: React.FC = () => {
                                     </button>
                                 </div>
                             ) : isAdmin && (
-                                <button 
-                                    onClick={() => handleDeleteUser(emp.id)}
-                                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                    title="Xóa nhân viên"
-                                >
-                                    <Trash2 size={18} />
-                                </button>
+                                <div className="flex justify-end gap-2">
+                                    {emp.is_part_time && emp.status === 'active' && (
+                                        <button 
+                                            onClick={() => handleEndPartTimeContract(emp)}
+                                            className="flex items-center gap-1 px-3 py-1.5 bg-orange-100 text-orange-700 border border-orange-200 rounded-lg text-xs font-bold hover:bg-orange-200"
+                                            title="Kết thúc HĐ & Chuyển khách về MOD"
+                                        >
+                                            <ArrowRightLeft size={14} /> Kết thúc HĐ
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={() => handleDeleteUser(emp.id)}
+                                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                        title="Xóa nhân viên"
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
+                                </div>
                             )}
                           </td>
                       </tr>
@@ -451,24 +543,39 @@ const EmployeeList: React.FC = () => {
 
               {/* MANAGER SELECTION - Only if Role is Employee */}
               {roleToAssign === UserRole.EMPLOYEE && (
-                 <div className="animate-fade-in">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">2. Quản lý trực tiếp (MOD)</label>
-                    <div className="relative">
-                        <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                        <select
-                            value={managerIdToAssign}
-                            onChange={(e) => setManagerIdToAssign(e.target.value)}
-                            className="w-full rounded-xl border border-gray-300 pl-10 pr-4 py-2.5 text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 outline-none appearance-none bg-white"
-                        >
-                            <option value="">-- Chọn quản lý --</option>
-                            {availableManagers.map(manager => (
-                                <option key={manager.id} value={manager.id}>
-                                    {manager.full_name} ({manager.role === UserRole.ADMIN ? 'Admin' : 'MOD'})
-                                </option>
-                            ))}
-                        </select>
+                 <div className="animate-fade-in space-y-4">
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">2. Quản lý trực tiếp (MOD)</label>
+                        <div className="relative">
+                            <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                            <select
+                                value={managerIdToAssign}
+                                onChange={(e) => setManagerIdToAssign(e.target.value)}
+                                className="w-full rounded-xl border border-gray-300 pl-10 pr-4 py-2.5 text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-100 outline-none appearance-none bg-white"
+                            >
+                                <option value="">-- Chọn quản lý --</option>
+                                {availableManagers.map(manager => (
+                                    <option key={manager.id} value={manager.id}>
+                                        {manager.full_name} ({manager.role === UserRole.ADMIN ? 'Admin' : 'MOD'})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1.5 ml-1">Nhân viên này sẽ thuộc team của quản lý được chọn.</p>
+                    
+                    <div className="p-3 bg-orange-50 border border-orange-100 rounded-xl flex items-center gap-3">
+                        <input 
+                            type="checkbox" 
+                            id="partTimeCheck" 
+                            checked={assignAsPartTime} 
+                            onChange={e => setAssignAsPartTime(e.target.checked)} 
+                            className="w-5 h-5 text-orange-600 rounded focus:ring-orange-500"
+                        />
+                        <label htmlFor="partTimeCheck" className="text-sm font-bold text-orange-800 cursor-pointer">
+                            Nhân viên Part-time?
+                            <p className="text-xs font-normal text-orange-700 mt-0.5">Không KPI, tính 30% doanh thu.</p>
+                        </label>
+                    </div>
                  </div>
               )}
 
