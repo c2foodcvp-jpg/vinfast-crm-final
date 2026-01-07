@@ -5,7 +5,7 @@ import { supabase } from '../supabaseClient';
 import { Customer, CustomerStatus, Interaction, CustomerClassification, DealDetails, UserProfile, UserRole, Distributor, DealStatus, CAR_MODELS, Transaction, TransactionType } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus
+  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye
 } from 'lucide-react';
 
 const { useParams, useNavigate, useLocation } = ReactRouterDOM as any;
@@ -37,6 +37,9 @@ const CustomerDetail: React.FC = () => {
   const [isSpecialCare, setIsSpecialCare] = useState(false);
   const [isLongTerm, setIsLongTerm] = useState(false);
   
+  // Delegation State
+  const [isDelegatedViewOnly, setIsDelegatedViewOnly] = useState(false);
+  
   // Navigation
   const [nextCustomerId, setNextCustomerId] = useState<string | null>(null);
   const [prevCustomerId, setPrevCustomerId] = useState<string | null>(null);
@@ -55,7 +58,6 @@ const CustomerDetail: React.FC = () => {
   const [showChangeSalesConfirm, setShowChangeSalesConfirm] = useState<{rep: UserProfile, type: 'direct' | 'request'} | null>(null);
   
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  // Removed subtype from state
   const [expenseForm, setExpenseForm] = useState({ type: 'expense' as TransactionType, amount: '', reason: '' });
   
   const [showAddRevenueModal, setShowAddRevenueModal] = useState(false);
@@ -183,6 +185,32 @@ const CustomerDetail: React.FC = () => {
 
       setEditForm({ interest: data.interest || '', location: data.location || '', source: data.source || '', phone: data.phone || '', secondary_phone: data.secondary_phone || '' });
 
+      // Check Delegation
+      if (!isAdmin && data.creator_id !== userProfile?.id) {
+          try {
+              const { data: delegation } = await supabase
+                  .from('access_delegations')
+                  .select('access_level')
+                  .eq('recipient_id', userProfile?.id)
+                  .eq('target_user_id', data.creator_id)
+                  .single();
+              
+              if (delegation && delegation.access_level === 'view') {
+                  setIsDelegatedViewOnly(true);
+              } else {
+                  setIsDelegatedViewOnly(false);
+              }
+          } catch (e) { 
+              // If error or no data, and not mod/admin/owner, assume no access or view only?
+              // The list filter already handled visibility. This is for edit rights.
+              // If a mod is viewing a subordinate, they have implicit edit rights (usually).
+              // If a user sees another user's data without delegation record (e.g. glitch), default to view only.
+              if (!isMod) setIsDelegatedViewOnly(true);
+          }
+      } else {
+          setIsDelegatedViewOnly(false);
+      }
+
       const { data: interactionData } = await supabase.from('interactions').select('*').eq('customer_id', id).order('created_at', { ascending: false });
       if (interactionData) setInteractions(interactionData as Interaction[]);
 
@@ -196,6 +224,8 @@ const CustomerDetail: React.FC = () => {
       try {
           if (!id) return;
           let query = supabase.from('customers').select('id').order('created_at', { ascending: false });
+          // Note: Logic for siblings might be tricky with delegations mixed in. 
+          // Ideally pass list context from list page.
           if (!isAdmin && !isMod && userProfile?.id) query = query.eq('creator_id', userProfile.id);
           const { data } = await query;
           if (!data) return;
@@ -208,6 +238,7 @@ const CustomerDetail: React.FC = () => {
   };
 
   const handleAddNote = async (type: Interaction['type'] = 'note', customContent?: string) => {
+      if (isDelegatedViewOnly) { showToast("Bạn chỉ có quyền xem, không thể thêm ghi chú.", 'error'); return; }
       if (!id || (!newNote.trim() && !customContent)) return;
       const content = customContent || newNote;
       try {
@@ -219,6 +250,7 @@ const CustomerDetail: React.FC = () => {
   };
 
   const updateCustomerField = async (fields: Partial<Customer>) => {
+      if (isDelegatedViewOnly) { showToast("Bạn chỉ có quyền xem.", 'error'); return; }
       if (!id || !customer) return;
       const updatedLocal = { ...customer, ...fields };
       setCustomer(updatedLocal as Customer);
@@ -633,23 +665,27 @@ const CustomerDetail: React.FC = () => {
             </div>
         </div>
         <div className="flex flex-wrap items-center gap-4 justify-between">
-            <div className="flex items-center gap-3"><h1 className="text-2xl font-bold text-gray-900">{customer.name}</h1><span className="px-3 py-1 text-xs font-bold rounded-full uppercase tracking-wide border bg-blue-100 text-blue-800 border-blue-200">{customer.status}</span></div>
+            <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold text-gray-900">{customer.name}</h1>
+                <span className="px-3 py-1 text-xs font-bold rounded-full uppercase tracking-wide border bg-blue-100 text-blue-800 border-blue-200">{customer.status}</span>
+                {isDelegatedViewOnly && <span className="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-1 rounded-full border border-gray-300 flex items-center gap-1"><Eye size={14}/> CHẾ ĐỘ XEM</span>}
+            </div>
             <div className="flex gap-2">
-                {(isAdmin || isMod) && customer.pending_transfer_to && (
+                {(isAdmin || isMod) && customer.pending_transfer_to && !isDelegatedViewOnly && (
                     <div className="flex gap-2">
                         <button onClick={handleApproveTransfer} className="px-4 py-2 bg-purple-600 text-white font-bold rounded-lg shadow-md hover:bg-purple-700 flex items-center gap-2 animate-pulse"><CheckCircle2 size={18}/> Duyệt Chuyển</button>
                         <button onClick={handleRejectTransfer} className="px-4 py-2 bg-red-100 text-red-700 font-bold rounded-lg shadow-sm hover:bg-red-200 flex items-center gap-2"><X size={18}/> Từ chối</button>
                     </div>
                 )}
-                {customer.status === CustomerStatus.NEW && !customer.is_acknowledged && (
+                {customer.status === CustomerStatus.NEW && !customer.is_acknowledged && !isDelegatedViewOnly && (
                     <button onClick={handleAcknowledge} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 flex items-center gap-2 animate-bounce">
                         <UserCheck size={18}/> Tiếp nhận khách
                     </button>
                 )}
-                {isPending && (isAdmin || isMod) && (
+                {isPending && (isAdmin || isMod) && !isDelegatedViewOnly && (
                     <button onClick={handleApproveRequest} className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 flex items-center gap-2"><CheckCircle2 size={18}/> Duyệt Yêu Cầu</button>
                 )}
-                {!isWon && !isLost && (
+                {!isWon && !isLost && !isDelegatedViewOnly && (
                     <button onClick={() => setShowChangeSalesModal(true)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><ArrowRightLeft size={16}/> Đổi Sales</button>
                 )}
                 {(isAdmin || isMod) && (
@@ -671,42 +707,42 @@ const CustomerDetail: React.FC = () => {
         <div className="space-y-6">
           {/* ... Left Column Content (Care Panel) ... */}
           {isLost && (
-              <div className="bg-red-50 rounded-2xl p-6 shadow-sm border border-red-100 text-center animate-fade-in"><div className="flex justify-center mb-3"><Ban size={48} className="text-red-400" /></div><h3 className="font-bold text-red-700 text-lg mb-2">Khách hàng đang Ngưng Chăm Sóc</h3><p className="text-red-600 text-sm mb-4 italic">"{customer.stop_reason || 'Không có lý do'}"</p><button onClick={handleReopenCare} className="w-full py-2.5 bg-primary-600 text-white rounded-xl font-bold hover:bg-primary-700 transition-all flex items-center justify-center gap-2"><RefreshCcw size={18}/> Mở lại chăm sóc</button></div>
+              <div className="bg-red-50 rounded-2xl p-6 shadow-sm border border-red-100 text-center animate-fade-in"><div className="flex justify-center mb-3"><Ban size={48} className="text-red-400" /></div><h3 className="font-bold text-red-700 text-lg mb-2">Khách hàng đang Ngưng Chăm Sóc</h3><p className="text-red-600 text-sm mb-4 italic">"{customer.stop_reason || 'Không có lý do'}"</p><button onClick={handleReopenCare} disabled={isDelegatedViewOnly} className="w-full py-2.5 bg-primary-600 text-white rounded-xl font-bold hover:bg-primary-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"><RefreshCcw size={18}/> Mở lại chăm sóc</button></div>
           )}
           {isWon && (
-              <div className="bg-white rounded-2xl p-6 shadow-sm border border-green-200 animate-fade-in"><h3 className="font-bold text-green-800 mb-4 flex items-center gap-2"><FileCheck2 size={20}/> Trạng thái đơn hàng</h3><div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center mb-4"><p className="text-xs text-green-600 font-bold uppercase mb-1">TÌNH TRẠNG HIỆN TẠI</p><p className="text-xl font-bold text-green-800">{isCompleted ? 'Đã hoàn thành' : isRefunded ? 'Đã trả cọc' : customer.deal_status === 'completed_pending' ? 'Chờ duyệt hoàn thành' : customer.deal_status === 'refund_pending' ? 'Chờ duyệt trả cọc' : 'Đang Xử Lý'}</p></div><div className="space-y-3"><button className="w-full py-2.5 bg-white border border-green-600 text-green-700 rounded-xl font-bold text-sm hover:bg-green-50 flex items-center justify-center gap-2"><FileCheck2 size={16}/> Quản lý Đơn hàng</button>{!isCompleted && !isRefunded && (<><button onClick={() => handleDealAction('complete')} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 flex items-center justify-center gap-2"><CheckCircle2 size={16}/> Hoàn thành Đơn hàng</button><button onClick={() => handleDealAction('refund')} className="w-full py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 flex items-center justify-center gap-2"><RefreshCcw size={16}/> Yêu cầu trả cọc</button></>)}{isRefunded && (<button onClick={() => handleDealAction('reopen')} className="w-full py-2.5 bg-orange-100 text-orange-700 border border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-200 flex items-center justify-center gap-2"><RefreshCcw size={16}/> Mở xử lý lại</button>)}{(isAdmin || isMod) && (<button onClick={() => handleDealAction('cancel')} className="w-full py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><RefreshCcw size={16}/> Hủy chốt / Mở lại CS</button>)}</div></div>
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-green-200 animate-fade-in"><h3 className="font-bold text-green-800 mb-4 flex items-center gap-2"><FileCheck2 size={20}/> Trạng thái đơn hàng</h3><div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center mb-4"><p className="text-xs text-green-600 font-bold uppercase mb-1">TÌNH TRẠNG HIỆN TẠI</p><p className="text-xl font-bold text-green-800">{isCompleted ? 'Đã hoàn thành' : isRefunded ? 'Đã trả cọc' : customer.deal_status === 'completed_pending' ? 'Chờ duyệt hoàn thành' : customer.deal_status === 'refund_pending' ? 'Chờ duyệt trả cọc' : 'Đang Xử Lý'}</p></div><div className="space-y-3"><button className="w-full py-2.5 bg-white border border-green-600 text-green-700 rounded-xl font-bold text-sm hover:bg-green-50 flex items-center justify-center gap-2"><FileCheck2 size={16}/> Quản lý Đơn hàng</button>{!isCompleted && !isRefunded && !isDelegatedViewOnly && (<><button onClick={() => handleDealAction('complete')} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 flex items-center justify-center gap-2"><CheckCircle2 size={16}/> Hoàn thành Đơn hàng</button><button onClick={() => handleDealAction('refund')} className="w-full py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 flex items-center justify-center gap-2"><RefreshCcw size={16}/> Yêu cầu trả cọc</button></>)}{isRefunded && !isDelegatedViewOnly && (<button onClick={() => handleDealAction('reopen')} className="w-full py-2.5 bg-orange-100 text-orange-700 border border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-200 flex items-center justify-center gap-2"><RefreshCcw size={16}/> Mở xử lý lại</button>)}{(isAdmin || isMod) && (<button onClick={() => handleDealAction('cancel')} className="w-full py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><RefreshCcw size={16}/> Hủy chốt / Mở lại CS</button>)}</div></div>
           )}
           {!hideCarePanel && (
               <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                  <h3 className="font-bold text-gray-900 mb-4 border-b pb-2">Thao tác chăm sóc</h3>
+                  <h3 className="font-bold text-gray-900 mb-4 border-b pb-2">Thao tác chăm sóc {isDelegatedViewOnly && <span className="text-red-500 text-xs">(Chỉ xem)</span>}</h3>
                   <div className="mb-4">
                       <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Mức độ tiềm năng</label>
                       <div className="flex bg-gray-100 p-1 rounded-xl">
                           {(['Hot', 'Warm', 'Cool'] as CustomerClassification[]).map((cls) => (
-                              <button key={cls} onClick={() => handleClassificationChange(cls)} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${classification === cls ? cls === 'Hot' ? 'bg-red-500 text-white shadow-md' : cls === 'Warm' ? 'bg-orange-500 text-white shadow-md' : 'bg-blue-500 text-white shadow-md' : 'text-gray-500 hover:text-gray-700'}`}>{cls}</button>
+                              <button disabled={isDelegatedViewOnly} key={cls} onClick={() => handleClassificationChange(cls)} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${classification === cls ? cls === 'Hot' ? 'bg-red-500 text-white shadow-md' : cls === 'Warm' ? 'bg-orange-500 text-white shadow-md' : 'bg-blue-500 text-white shadow-md' : 'text-gray-500 hover:text-gray-700 disabled:opacity-50'}`}>{cls}</button>
                           ))}
                       </div>
                   </div>
                   <div className="space-y-3 mb-6">
-                      <div className="flex items-center justify-between"><span className="flex items-center gap-2 text-sm font-medium text-gray-700"><Flame size={16} className={isSpecialCare ? "text-red-500" : "text-gray-400"} /> CS Đặc biệt</span><div onClick={toggleSpecialCare} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${isSpecialCare ? 'bg-red-500' : 'bg-gray-300'}`}><div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${isSpecialCare ? 'translate-x-5' : ''}`}></div></div></div>
-                      <div className="flex items-center justify-between"><span className="flex items-center gap-2 text-sm font-medium text-gray-700"><Calendar size={16} className={isLongTerm ? "text-blue-500" : "text-gray-400"} /> CS Dài hạn</span><div onClick={toggleLongTerm} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${isLongTerm ? 'bg-blue-500' : 'bg-gray-300'}`}><div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${isLongTerm ? 'translate-x-5' : ''}`}></div></div></div>
+                      <div className="flex items-center justify-between"><span className="flex items-center gap-2 text-sm font-medium text-gray-700"><Flame size={16} className={isSpecialCare ? "text-red-500" : "text-gray-400"} /> CS Đặc biệt</span><div onClick={!isDelegatedViewOnly ? toggleSpecialCare : undefined} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${isSpecialCare ? 'bg-red-500' : 'bg-gray-300'} ${isDelegatedViewOnly ? 'opacity-50 cursor-not-allowed' : ''}`}><div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${isSpecialCare ? 'translate-x-5' : ''}`}></div></div></div>
+                      <div className="flex items-center justify-between"><span className="flex items-center gap-2 text-sm font-medium text-gray-700"><Calendar size={16} className={isLongTerm ? "text-blue-500" : "text-gray-400"} /> CS Dài hạn</span><div onClick={!isDelegatedViewOnly ? toggleLongTerm : undefined} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${isLongTerm ? 'bg-blue-500' : 'bg-gray-300'} ${isDelegatedViewOnly ? 'opacity-50 cursor-not-allowed' : ''}`}><div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${isLongTerm ? 'translate-x-5' : ''}`}></div></div></div>
                   </div>
                   {isSpecialCare ? (
                       <div className="mb-4 bg-white border border-red-200 rounded-xl p-4 shadow-sm animate-fade-in"><p className="text-xs font-bold text-gray-500 uppercase mb-1">TRẠNG THÁI ĐẶC BIỆT</p><div className="flex items-center gap-2 text-red-600 font-bold"><Flame size={18} className="fill-red-600 animate-pulse" /><span>Đang CS Đặc biệt</span></div><p className="text-gray-400 italic text-sm mt-1">Ngày chăm sóc tiếp theo bị ẩn.</p></div>
                   ) : (
                       <div className="mb-4">
                           <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">{isLongTerm ? 'Ngày CS Dài hạn' : 'Ngày chăm sóc tiếp theo'}</label>
-                          <div className="relative"><input type="date" min={getMinDate()} max={getMaxDate()} value={recareDate} onChange={handleDateChange} className={`w-full border rounded-xl px-4 py-2.5 bg-white text-gray-900 font-bold focus:border-primary-500 outline-none ${isLongTerm ? 'border-blue-300 ring-2 ring-blue-50' : 'border-gray-300'}`} /></div>
+                          <div className="relative"><input disabled={isDelegatedViewOnly} type="date" min={getMinDate()} max={getMaxDate()} value={recareDate} onChange={handleDateChange} className={`w-full border rounded-xl px-4 py-2.5 bg-white text-gray-900 font-bold focus:border-primary-500 outline-none ${isLongTerm ? 'border-blue-300 ring-2 ring-blue-50' : 'border-gray-300'} disabled:bg-gray-100 disabled:text-gray-500`} /></div>
                           {isLongTerm && <p className="text-xs text-blue-500 mt-1 italic">Chọn ngày xa nhất (Tối thiểu 10 ngày từ hôm nay).</p>}
                           {!isLongTerm && <p className="text-xs text-gray-400 mt-1 italic">Giới hạn chọn: Tối đa 4 ngày từ hôm nay.</p>}
                       </div>
                   )}
-                  <div className="space-y-3"><button className="w-full py-2.5 bg-gray-800 text-white rounded-xl font-bold text-sm hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200"><Mail size={16} /> Đặt lịch Lái thử</button><div className="grid grid-cols-2 gap-3"><button onClick={() => setShowStopModal(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1"><Ban size={16} /> Ngưng CS</button><button onClick={() => setShowWinModal(true)} className="py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-1"><CheckCircle2 size={16} /> Chốt Deal</button></div></div>
+                  <div className="space-y-3"><button className="w-full py-2.5 bg-gray-800 text-white rounded-xl font-bold text-sm hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200"><Mail size={16} /> Đặt lịch Lái thử</button><div className="grid grid-cols-2 gap-3"><button disabled={isDelegatedViewOnly} onClick={() => setShowStopModal(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"><Ban size={16} /> Ngưng CS</button><button disabled={isDelegatedViewOnly} onClick={() => setShowWinModal(true)} className="py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-1 disabled:opacity-50"><CheckCircle2 size={16} /> Chốt Deal</button></div></div>
               </div>
           )}
           {/* ... Customer Info & Finance Panels ... */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 relative">
-            <h3 className="font-bold text-gray-900 mb-4 border-b pb-2 flex justify-between items-center">Thông tin khách hàng{!isEditingInfo && !isWon && !isLost && (<button onClick={() => setIsEditingInfo(true)} className="text-primary-600 hover:text-primary-700 text-xs flex items-center gap-1 font-bold"><Edit size={14} /> Sửa</button>)}</h3>
+            <h3 className="font-bold text-gray-900 mb-4 border-b pb-2 flex justify-between items-center">Thông tin khách hàng{!isEditingInfo && !isWon && !isLost && !isDelegatedViewOnly && (<button onClick={() => setIsEditingInfo(true)} className="text-primary-600 hover:text-primary-700 text-xs flex items-center gap-1 font-bold"><Edit size={14} /> Sửa</button>)}</h3>
             {isEditingInfo && !isWon && !isLost ? (<div className="space-y-3 animate-fade-in"><input value={editForm.phone} disabled className="w-full border rounded px-2 py-1 text-sm font-bold bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" /><input value={editForm.secondary_phone} onChange={e => setEditForm({...editForm, secondary_phone: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập thêm số..." /><select value={editForm.interest} onChange={e => setEditForm({...editForm, interest: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none">{CAR_MODELS.map(m => <option key={m} value={m}>{m}</option>)}</select><input value={editForm.source} onChange={e => setEditForm({...editForm, source: e.target.value})} disabled={editForm.source.includes('MKT Group')} className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold outline-none ${editForm.source.includes('MKT Group') ? 'bg-gray-100' : 'bg-white'}`} /><input value={editForm.location} onChange={e => setEditForm({...editForm, location: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập địa chỉ..." /><div className="flex gap-2 pt-2"><button onClick={() => setIsEditingInfo(false)} className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded">Hủy</button><button onClick={handleSaveInfo} className="flex-1 py-1.5 bg-primary-600 text-white text-xs font-bold rounded flex items-center justify-center gap-1"><Save size={14}/> Lưu</button></div></div>) : (<div className="space-y-4 text-sm"><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Điện thoại</span><span className="font-bold text-gray-900">{customer.phone}</span></div>{customer.secondary_phone && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">SĐT Phụ</span><span className="font-bold text-gray-900">{customer.secondary_phone}</span></div>}
             <div className="flex gap-2 mb-2">
                 <a href={`tel:${customer.phone}`} className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors">
@@ -725,7 +761,7 @@ const CustomerDetail: React.FC = () => {
                       <div className="bg-green-50 p-3 rounded-xl border border-green-100"><p className="text-xs text-green-700 font-bold uppercase">Doanh thu dự kiến (Gốc)</p><p className="text-lg font-bold text-green-900">{formatCurrency(predictedRevenue)} VNĐ</p></div>
                       
                       <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                          <div className="flex justify-between items-center"><p className="text-xs text-emerald-700 font-bold uppercase">Doanh thu thực tế (Tổng)</p><button onClick={() => setShowAddRevenueModal(true)} className="p-1 bg-emerald-200 rounded hover:bg-emerald-300 text-emerald-800"><Plus size={14}/></button></div>
+                          <div className="flex justify-between items-center"><p className="text-xs text-emerald-700 font-bold uppercase">Doanh thu thực tế (Tổng)</p><button disabled={isDelegatedViewOnly} onClick={() => setShowAddRevenueModal(true)} className="p-1 bg-emerald-200 rounded hover:bg-emerald-300 text-emerald-800 disabled:opacity-50"><Plus size={14}/></button></div>
                           <p className="text-xl font-bold text-emerald-900">{formatCurrency(moneyInTotal)} VNĐ</p>
                           <p className="text-xs text-emerald-600 mt-1">Gốc: {formatCurrency(rawActualRevenue)} - Chi PS: {formatCurrency(totalIncurredExpenses)}</p>
                       </div>
@@ -734,7 +770,7 @@ const CustomerDetail: React.FC = () => {
                       <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
                           <div className="flex justify-between items-center">
                               <p className="text-xs text-gray-700 font-bold uppercase">Chi phí phát sinh (Trừ DT)</p>
-                              <button onClick={() => setShowIncurredExpenseModal(true)} className="p-1 bg-gray-200 rounded hover:bg-gray-300 text-gray-800"><Plus size={14}/></button>
+                              <button disabled={isDelegatedViewOnly} onClick={() => setShowIncurredExpenseModal(true)} className="p-1 bg-gray-200 rounded hover:bg-gray-300 text-gray-800 disabled:opacity-50"><Plus size={14}/></button>
                           </div>
                           <p className="text-lg font-bold text-gray-800">-{formatCurrency(totalIncurredExpenses)} VNĐ</p>
                           <p className="text-[10px] text-gray-500 italic mt-1">Không trừ vào quỹ nhóm.</p>
@@ -768,7 +804,7 @@ const CustomerDetail: React.FC = () => {
                                   {pendingRepaymentExists ? (
                                       <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded border border-yellow-200 animate-pulse">Đang chờ duyệt...</span>
                                   ) : (
-                                      <button onClick={() => { setRepayForm({ amount: outstandingAdvance.toLocaleString('vi-VN'), reason: 'Nộp lại tiền ứng' }); setShowRepayModal(true); }} className="px-2 py-1 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 flex items-center gap-1">
+                                      <button disabled={isDelegatedViewOnly} onClick={() => { setRepayForm({ amount: outstandingAdvance.toLocaleString('vi-VN'), reason: 'Nộp lại tiền ứng' }); setShowRepayModal(true); }} className="px-2 py-1 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 flex items-center gap-1 disabled:opacity-50">
                                           <Undo2 size={12}/> Nộp lại
                                       </button>
                                   )}
@@ -776,12 +812,12 @@ const CustomerDetail: React.FC = () => {
                           )}
                           
                           <div className="flex gap-2 mt-2">
-                              <button onClick={() => { setExpenseForm({type: 'advance', amount: '', reason: ''}); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50">Yêu cầu Ứng</button>
-                              <button onClick={() => { setExpenseForm({type: 'expense', amount: '', reason: ''}); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50">Yêu cầu Chi</button>
+                              <button disabled={isDelegatedViewOnly} onClick={() => { setExpenseForm({type: 'advance', amount: '', reason: ''}); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 disabled:opacity-50">Yêu cầu Ứng</button>
+                              <button disabled={isDelegatedViewOnly} onClick={() => { setExpenseForm({type: 'expense', amount: '', reason: ''}); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 disabled:opacity-50">Yêu cầu Chi</button>
                           </div>
                       </div>
                       
-                      <div className="pt-2 border-t border-green-50"><button onClick={() => setShowDealerDebtModal(true)} className="w-full py-2 bg-white border border-green-200 text-green-700 font-bold rounded-xl text-sm hover:bg-green-50 flex items-center justify-center gap-2"><Building2 size={16}/> Tạo khoản Đại lý nợ</button></div></div></div>
+                      <div className="pt-2 border-t border-green-50"><button disabled={isDelegatedViewOnly} onClick={() => setShowDealerDebtModal(true)} className="w-full py-2 bg-white border border-green-200 text-green-700 font-bold rounded-xl text-sm hover:bg-green-50 flex items-center justify-center gap-2 disabled:opacity-50"><Building2 size={16}/> Tạo khoản Đại lý nợ</button></div></div></div>
           )}
         </div>
 
@@ -799,7 +835,7 @@ const CustomerDetail: React.FC = () => {
             )}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-4 border-b bg-gray-50 flex items-center justify-between"><h3 className="font-bold text-gray-900">Lịch sử chăm sóc</h3></div>
-                {!isLost && (<div className="p-4 border-b border-gray-100 bg-white"><div className="flex gap-4"><div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 font-bold shrink-0"><UserIcon size={20} /></div><div className="flex-1"><textarea className="w-full border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary-100 focus:border-primary-500 outline-none resize-none bg-gray-50 text-gray-900 font-medium" rows={3} placeholder="Ghi chú..." value={newNote} onChange={(e) => setNewNote(e.target.value)}></textarea><div className="flex justify-end mt-2"><button onClick={() => handleAddNote('note')} disabled={!newNote.trim()} className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-black disabled:opacity-50 transition-colors"><Send size={14} /> Lưu</button></div></div></div></div>)}<div className="p-6 bg-gray-50 min-h-[400px] max-h-[600px] overflow-y-auto"><div className="space-y-6 relative before:absolute before:left-5 before:top-2 before:bottom-0 before:w-0.5 before:bg-gray-200">{interactions.map((item) => (<div key={item.id} className="relative pl-12 animate-fade-in"><div className={`absolute left-0 top-0 w-10 h-10 rounded-full border-4 border-gray-50 flex items-center justify-center z-10 ${item.type === 'call' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{item.type === 'call' ? <Phone size={16} /> : <MessageCircle size={16} />}</div><div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm"><div className="flex justify-between items-start mb-2"><span className="font-bold text-gray-900 text-sm">{item.type === 'call' ? 'Cuộc gọi đi' : 'Ghi chú'}</span><span className="text-xs text-gray-500 font-medium">{new Date(item.created_at).toLocaleString('vi-VN')}</span></div><p className="text-gray-900 text-sm leading-relaxed">{item.content}</p></div></div>))}</div></div>
+                {!isLost && !isDelegatedViewOnly && (<div className="p-4 border-b border-gray-100 bg-white"><div className="flex gap-4"><div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 font-bold shrink-0"><UserIcon size={20} /></div><div className="flex-1"><textarea className="w-full border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary-100 focus:border-primary-500 outline-none resize-none bg-gray-50 text-gray-900 font-medium" rows={3} placeholder="Ghi chú..." value={newNote} onChange={(e) => setNewNote(e.target.value)}></textarea><div className="flex justify-end mt-2"><button onClick={() => handleAddNote('note')} disabled={!newNote.trim()} className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-black disabled:opacity-50 transition-colors"><Send size={14} /> Lưu</button></div></div></div></div>)}<div className="p-6 bg-gray-50 min-h-[400px] max-h-[600px] overflow-y-auto"><div className="space-y-6 relative before:absolute before:left-5 before:top-2 before:bottom-0 before:w-0.5 before:bg-gray-200">{interactions.map((item) => (<div key={item.id} className="relative pl-12 animate-fade-in"><div className={`absolute left-0 top-0 w-10 h-10 rounded-full border-4 border-gray-50 flex items-center justify-center z-10 ${item.type === 'call' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{item.type === 'call' ? <Phone size={16} /> : <MessageCircle size={16} />}</div><div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm"><div className="flex justify-between items-start mb-2"><span className="font-bold text-gray-900 text-sm">{item.type === 'call' ? 'Cuộc gọi đi' : 'Ghi chú'}</span><span className="text-xs text-gray-500 font-medium">{new Date(item.created_at).toLocaleString('vi-VN')}</span></div><p className="text-gray-900 text-sm leading-relaxed">{item.content}</p></div></div>))}</div></div>
             </div>
         </div>
       </div>

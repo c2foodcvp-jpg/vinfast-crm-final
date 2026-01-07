@@ -56,6 +56,7 @@ export interface UserProfile {
   manager_id?: string | null;
   kpi_target?: number; // Target number of cars per month
   is_part_time?: boolean; // New Flag for Part-time
+  profit_share_ratio?: number; // Custom profit share ratio (optional)
   created_at?: string;
   discord_config?: any;
 }
@@ -90,6 +91,9 @@ export interface Customer {
 
   created_at: string;
   updated_at?: string;
+  
+  // Virtual field for UI
+  _is_delegated?: boolean;
 }
 
 export interface Interaction {
@@ -119,7 +123,7 @@ export interface SystemBackup {
 
 // --- NEW TYPES FOR FINANCE & PROMOTIONS ---
 
-export type TransactionType = 'revenue' | 'deposit' | 'advance' | 'expense' | 'adjustment' | 'dealer_debt' | 'repayment';
+export type TransactionType = 'revenue' | 'deposit' | 'advance' | 'expense' | 'adjustment' | 'dealer_debt' | 'repayment' | 'incurred_expense';
 export type TransactionStatus = 'pending' | 'approved' | 'rejected';
 
 export interface Transaction {
@@ -162,4 +166,20 @@ export interface TeamFine {
   status: 'pending' | 'paid';
   created_at: string;
   paid_at?: string;
+}
+
+export interface AccessDelegation {
+  id: string;
+  grantor_id: string; // Admin/Mod
+  recipient_id: string; // User A (Người xem)
+  target_user_id: string; // User B (Chủ dữ liệu)
+  access_level: 'view' | 'edit';
+  created_at: string;
+}
+
+export interface ProfitExclusion {
+  id: string;
+  user_id: string; // User bị loại trừ doanh thu từ khách này
+  customer_id: string;
+  created_at?: string;
 }

@@ -1,10 +1,10 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, CustomerClassification, UserProfile } from '../types';
+import { Customer, CustomerStatus, CustomerClassification, UserProfile, AccessDelegation } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import * as ReactRouterDOM from 'react-router-dom';
-import { Search, Plus, X, User, CarFront, Calendar, AlertCircle, Clock, CheckCircle2, MessageSquare, ShieldAlert, Upload, FileSpreadsheet, Download, AlertTriangle, Flame, History, RotateCcw, HardDrive, MapPin, Loader2, ChevronDown, List, Filter, Webhook, UserX, ScanSearch, Phone, Trash2 } from 'lucide-react';
+import { Search, Plus, X, User, CarFront, Calendar, AlertCircle, Clock, CheckCircle2, MessageSquare, ShieldAlert, Upload, FileSpreadsheet, Download, AlertTriangle, Flame, History, RotateCcw, HardDrive, MapPin, Loader2, ChevronDown, List, Filter, Webhook, UserX, ScanSearch, Phone, Trash2, Eye } from 'lucide-react';
 import { CAR_MODELS } from '../types';
 
 const { useNavigate, useLocation } = ReactRouterDOM as any;
@@ -118,7 +118,7 @@ const CustomerList: React.FC = () => {
              // MOD sees self + subordinates
              profileQuery = profileQuery.or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
           } else {
-             // Sales sees self (and maybe manager for context if needed, but here only self for isolation)
+             // Sales sees strictly self
              profileQuery = profileQuery.eq('id', userProfile.id);
           }
           const { data: profiles } = await profileQuery;
@@ -129,6 +129,21 @@ const CustomerList: React.FC = () => {
           }
       }
 
+      // 1.5 CHECK DELEGATIONS (New Logic)
+      let delegatedTargetIds: string[] = [];
+      if (!isAdmin) {
+          try {
+              const { data: delegations } = await supabase
+                  .from('access_delegations')
+                  .select('target_user_id')
+                  .eq('recipient_id', userProfile.id);
+              
+              if (delegations && delegations.length > 0) {
+                  delegatedTargetIds = delegations.map((d: any) => d.target_user_id);
+              }
+          } catch (e) { console.log('Delegation table might not exist yet'); }
+      }
+
       // 2. Fetch Customers
       let query = supabase
         .from('customers')
@@ -136,11 +151,15 @@ const CustomerList: React.FC = () => {
         .order('created_at', { ascending: false });
 
       if (!isAdmin) {
-          if (teamIds.length > 0) {
-              query = query.in('creator_id', teamIds);
+          // Combine Team IDs and Delegated IDs
+          // For Sales: teamIds = [self]. delegatedTargetIds = [userB, userC...]
+          // For Mod: teamIds = [self, sub1, sub2]. delegatedTargetIds = [modB...]
+          const viewableIds = [...new Set([...teamIds, ...delegatedTargetIds])];
+          
+          if (viewableIds.length > 0) {
+              query = query.in('creator_id', viewableIds);
           } else {
-              // Fallback
-              query = query.eq('creator_id', userProfile.id);
+              query = query.eq('creator_id', userProfile.id); // Fallback
           }
       }
 
@@ -148,6 +167,15 @@ const CustomerList: React.FC = () => {
       if (error) throw error;
       
       let fetchedCustomers = data as Customer[] || [];
+      
+      // Mark delegated customers for UI
+      if (delegatedTargetIds.length > 0) {
+          fetchedCustomers = fetchedCustomers.map(c => ({
+              ...c,
+              _is_delegated: c.creator_id ? delegatedTargetIds.includes(c.creator_id) : false
+          }));
+      }
+
       setCustomers(fetchedCustomers);
     } catch (err) {
       console.warn("Error fetching customers:", err);
@@ -342,6 +370,7 @@ const CustomerList: React.FC = () => {
           filtered = filtered.filter(c => teamMemberIds.includes(c.creator_id || ''));
       }
 
+      // Rep Filter (Strictly applied above, but apply filter here if Admin/Mod selects specific rep)
       if ((isAdmin || isMod) && selectedRep !== 'all') {
           filtered = filtered.filter(c => c.creator_id === selectedRep);
       }
@@ -400,13 +429,13 @@ const CustomerList: React.FC = () => {
   }), [baseFilteredCustomers, todayStr]);
 
   const tabs: {id: string; label: string; icon: any; count?: number; colorClass?: string}[] = [
-    { id: 'general', label: 'Khách hàng', icon: User, count: counts.general, colorClass: 'text-green-600 bg-green-100' }, // Xanh lá nhạt
-    { id: 'special', label: 'CS Đặc biệt', icon: AlertCircle, count: counts.special, colorClass: 'text-purple-600 bg-purple-100' }, // Tím
-    { id: 'due', label: 'Đến hạn CS', icon: Clock, count: counts.due, colorClass: 'text-orange-600 bg-orange-100' }, // Cam
-    { id: 'overdue', label: 'Quá hạn CS', icon: AlertTriangle, count: counts.overdue, colorClass: 'text-red-600 bg-red-100' }, // Đỏ
-    { id: 'longterm', label: 'CS Dài hạn', icon: Calendar, count: counts.longterm, colorClass: 'text-blue-600 bg-blue-100' }, // Xanh dương
+    { id: 'general', label: 'Khách hàng', icon: User, count: counts.general, colorClass: 'text-green-600 bg-green-100' }, 
+    { id: 'special', label: 'CS Đặc biệt', icon: AlertCircle, count: counts.special, colorClass: 'text-purple-600 bg-purple-100' }, 
+    { id: 'due', label: 'Đến hạn CS', icon: Clock, count: counts.due, colorClass: 'text-orange-600 bg-orange-100' }, 
+    { id: 'overdue', label: 'Quá hạn CS', icon: AlertTriangle, count: counts.overdue, colorClass: 'text-red-600 bg-red-100' }, 
+    { id: 'longterm', label: 'CS Dài hạn', icon: Calendar, count: counts.longterm, colorClass: 'text-blue-600 bg-blue-100' }, 
     { id: 'stopped', label: 'Ngưng CS', icon: X, count: counts.stopped, colorClass: 'text-gray-600 bg-gray-100' },
-    { id: 'won', label: 'Đã chốt', icon: CheckCircle2, count: counts.won, colorClass: 'text-emerald-700 bg-emerald-200' }, // Xanh lá đậm
+    { id: 'won', label: 'Đã chốt', icon: CheckCircle2, count: counts.won, colorClass: 'text-emerald-700 bg-emerald-200' },
   ];
 
   if (isAdmin || isMod) {
@@ -487,7 +516,7 @@ const CustomerList: React.FC = () => {
         })}
       </div>
 
-      {/* List content (same as before) */}
+      {/* List content */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredList.length === 0 ? (
           <div className="col-span-full py-12 text-center text-gray-500 bg-white rounded-2xl border border-gray-100 border-dashed">
@@ -505,9 +534,10 @@ const CustomerList: React.FC = () => {
                         customerIds: filteredList.map(c => c.id) // Pass current list context
                     } 
                 })} 
-                className="group bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-primary-200 transition-all cursor-pointer relative overflow-hidden"
+                className={`group bg-white rounded-2xl p-4 shadow-sm border hover:shadow-md transition-all cursor-pointer relative overflow-hidden ${customer._is_delegated ? 'border-indigo-200 bg-indigo-50/30' : 'border-gray-100 hover:border-primary-200'}`}
               >
                 <div className="absolute top-0 right-0 p-2 flex flex-col gap-1 items-end">
+                    {customer._is_delegated && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1"><Eye size={10}/> Được chia sẻ</span>}
                     {customer.is_special_care && <Flame size={18} className="text-red-500 animate-pulse" />}
                     {customer.is_long_term && <Calendar size={18} className="text-blue-500" />}
                     {customer.deal_status === 'completed_pending' && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">Chờ duyệt Hoàn thành</span>}
@@ -530,7 +560,9 @@ const CustomerList: React.FC = () => {
                    <div className="flex items-center gap-2"><CarFront size={14} className="text-gray-400" /><span className="font-medium">{customer.interest ? customer.interest.toUpperCase() : 'CHƯA RÕ'}</span></div>
                    {!(customer.is_special_care || customer.is_long_term || isFinishedStatus) && (<div className="flex items-center gap-2"><Clock size={14} className="text-gray-400" /><span className={`${recareStatus.color}`}>{recareStatus.text}</span></div>)}
                    {customer.location && (<div className="flex items-center gap-2"><MapPin size={14} className="text-gray-400" /><span className="truncate">{customer.location}</span></div>)}
-                   {(isAdmin || isMod) && customer.sales_rep && (<div className="flex items-center gap-2 mt-1 pt-1 border-t border-gray-100"><User size={12} className="text-blue-500" /><span className="text-xs text-blue-600 font-bold">{customer.sales_rep}</span></div>)}
+                   {/* Show owner if delegated */}
+                   {customer._is_delegated && customer.sales_rep && (<div className="flex items-center gap-2 mt-1 pt-1 border-t border-indigo-100"><User size={12} className="text-indigo-500" /><span className="text-xs text-indigo-600 font-bold">{customer.sales_rep}</span></div>)}
+                   {(isAdmin || isMod) && !customer._is_delegated && customer.sales_rep && (<div className="flex items-center gap-2 mt-1 pt-1 border-t border-gray-100"><User size={12} className="text-blue-500" /><span className="text-xs text-blue-600 font-bold">{customer.sales_rep}</span></div>)}
                 </div>
                 <div className="flex items-center justify-between pt-3 border-t border-gray-50 text-xs"><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-md font-medium">{customer.status}</span><span className="text-gray-400">{new Date(customer.created_at).toLocaleDateString('vi-VN')}</span></div>
               </div>

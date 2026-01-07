@@ -11,12 +11,11 @@ import { CustomerStatus, Customer, UserProfile, UserRole, CAR_MODELS, CustomerCl
 
 const { useNavigate } = ReactRouterDOM as any;
 
-// Colors updated to match the requested chart style
 const COLORS = {
   NEW: '#3b82f6',      // Blue
   WON: '#10b981',      // Green
-  LOST: '#f59e0b',     // Orange/Yellow (Changed from Red/Gray per request logic often implies Lost/Cancelled is distinct)
-  POTENTIAL: '#ef4444' // Red/Hot for Potential (Special Care)
+  LOST: '#f59e0b',     // Orange/Yellow
+  POTENTIAL: '#ef4444' // Red/Hot
 };
 
 const Dashboard: React.FC = () => {
@@ -70,7 +69,7 @@ const Dashboard: React.FC = () => {
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [userProfile, selectedTeam]); // Re-fetch when selectedTeam changes
+  }, [userProfile, selectedTeam]); 
 
   // --- TEAM ISOLATION LOGIC ---
   const fetchDataWithIsolation = async () => {
@@ -81,43 +80,47 @@ const Dashboard: React.FC = () => {
           let members: UserProfile[] = [];
 
           if (isAdmin) {
-              // Admin fetches all, but applies filter if selectedTeam is set
+              // Admin: Fetch all members first
               const { data } = await supabase.from('profiles').select('*');
               let allMembers = data as UserProfile[] || [];
               
               if (selectedTeam !== 'all') {
-                  // Filter members belonging to the selected team (Manager ID match or is the Manager)
+                  // Filter members belonging to the selected team
                   members = allMembers.filter(m => m.manager_id === selectedTeam || m.id === selectedTeam);
               } else {
                   members = allMembers;
               }
               teamIds = members.map(m => m.id);
-          } else {
-              if (isMod) {
-                  const { data } = await supabase.from('profiles').select('*').or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
-                  members = data as UserProfile[] || [];
-              } else {
-                  if (userProfile.manager_id) {
-                       const { data } = await supabase.from('profiles').select('*').or(`id.eq.${userProfile.manager_id},manager_id.eq.${userProfile.manager_id}`);
-                       members = data as UserProfile[] || [];
-                  } else {
-                       members = [userProfile];
-                  }
-              }
+          } else if (isMod) {
+              // MOD: See Self + Subordinates
+              const { data } = await supabase.from('profiles').select('*').or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
+              members = data as UserProfile[] || [];
               teamIds = members.map(m => m.id);
+          } else {
+              // Regular User (Sales): STRICTLY SELF ONLY
+              // Force teamIds to only contain current user ID
+              members = [userProfile];
+              teamIds = [userProfile.id];
           }
           
           setTeamMembers(members);
 
-          // 1. Fetch Customers filtered by Team
+          // 1. Fetch Customers filtered by Team/User
           let query = supabase.from('customers').select('*');
           
-          // Apply team filter for everyone (Admin included if selectedTeam is set)
-          if (teamIds.length > 0) {
-              query = query.in('creator_id', teamIds);
-          } else if (!isAdmin) {
-              // Fallback for non-admin with no team (should rare)
-              query = query.eq('creator_id', userProfile.id);
+          if (!isAdmin) {
+              // For Mod and User, strictly enforce Creator ID check
+              if (teamIds.length > 0) {
+                  query = query.in('creator_id', teamIds);
+              } else {
+                  // Fallback safety: If no team IDs found (shouldn't happen), show nothing or self
+                  query = query.eq('creator_id', userProfile.id);
+              }
+          } else {
+              // Admin: Apply team filter if selected
+              if (selectedTeam !== 'all' && teamIds.length > 0) {
+                  query = query.in('creator_id', teamIds);
+              }
           }
 
           const { data: customersData, error } = await query;
@@ -126,7 +129,7 @@ const Dashboard: React.FC = () => {
           setAllCustomers(customers);
 
           // 2. Calculate Stats
-          calculateDashboardStats(customers, members, teamIds);
+          await calculateDashboardStats(customers, members, teamIds);
 
       } catch (err) {
           console.error("Error fetching isolated data:", err);
@@ -162,11 +165,16 @@ const Dashboard: React.FC = () => {
       const overdueCount = customers.filter((c: any) => !c.is_special_care && !c.is_long_term && c.recare_date && c.recare_date < todayStr && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length;
       const expiredLongTerm = customers.filter((c: any) => c.is_long_term && c.recare_date && c.recare_date <= todayStr && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
       const assignedTodayToMe = customers.filter((c: Customer) => c.status === CustomerStatus.NEW && c.is_acknowledged === false && c.creator_id === userProfile?.id).length;
-      const unacknowledgedLeads = customers.filter((c: any) => c.status === CustomerStatus.NEW && c.is_acknowledged === false && c.sales_rep);
+      
+      // Only show pending ACKs for team if Admin/Mod
+      const unacknowledgedLeads = (isAdmin || isMod) 
+          ? customers.filter((c: any) => c.status === CustomerStatus.NEW && c.is_acknowledged === false && c.sales_rep)
+          : [];
+          
       const pendingAckCount = unacknowledgedLeads.length;
       const pendingAckReps = new Set(unacknowledgedLeads.map((c: any) => c.sales_rep)).size;
       
-      // Pending Finance (Need to fetch isolated transactions count)
+      // Pending Finance 
       let pendingFinance = 0;
       if (isAdmin || isMod) {
           let fQuery = supabase.from('transactions').select('*', {count: 'exact', head: true}).eq('status', 'pending');
@@ -222,10 +230,10 @@ const Dashboard: React.FC = () => {
   };
 
   const repStats = useMemo(() => {
+      // Only show rep stats for Admin or Mod
+      if (!isAdmin && !isMod) return [];
       if (!teamMembers.length || !allCustomers.length) return [];
       let targetProfiles = teamMembers.filter(p => p.role !== UserRole.ADMIN && p.status === 'active');
-      
-      // Filter logic handled in fetchDataWithIsolation for teamMembers already
       
       return targetProfiles.map(rep => {
           const repCustomers = allCustomers.filter(c => c.creator_id === rep.id);
@@ -236,23 +244,9 @@ const Dashboard: React.FC = () => {
           const conversionRate = total > 0 ? ((won / total) * 100).toFixed(1) : '0.0';
           return { id: rep.id, name: rep.full_name, avatar: rep.avatar_url, role: rep.role, total, active, won, stopped, conversionRate };
       }).sort((a, b) => b.won - a.won); 
-  }, [teamMembers, allCustomers, isAdmin, selectedTeam]);
+  }, [teamMembers, allCustomers, isAdmin, isMod, selectedTeam]);
 
-  // For Admin Filter Dropdown - Need full list of managers
-  const managers = useMemo(() => {
-      if (!isAdmin) return [];
-      // We need to fetch ALL profiles to get ALL managers list, not just current filtered ones. 
-      // But for simplicity/performance, let's assume if isAdmin, fetchData fetches all first.
-      // Actually fetchDataWithIsolation fetches 'data' (all) first. 
-      // But 'managers' is derived from 'teamMembers' which might be filtered.
-      // To fix this, we should fetch full list separately or just assume full list is cached somewhere?
-      // Better: In fetchDataWithIsolation, 'allMembers' was the full list. We can store it or fetch separately.
-      // Quick Fix: Fetch separate list for dropdown.
-      return []; 
-  }, []);
-  
-  // Actually, 'managers' needs to be populated even if a team is selected.
-  // We'll use a separate useEffect or state for the filter options.
+  // For Admin Filter Dropdown
   const [allManagers, setAllManagers] = useState<{id: string, name: string}[]>([]);
   useEffect(() => {
       if (isAdmin) {
@@ -276,6 +270,7 @@ const Dashboard: React.FC = () => {
   const totalPending = alerts.pendingCustomers + alerts.pendingEmployees + alerts.pendingTransfers + alerts.pendingDeals + alerts.overdue + alerts.pendingFinance;
   const displayNotifCount = (isAdmin || isMod) ? totalPending : (alerts.due + alerts.overdue + alerts.assignedTodayToMe);
 
+  // ... (Keep handler functions: handleInputChange, toggleZaloOnly, normalizePhone, handleAddCustomer, executeAddCustomer, handleRequestTransfer) ...
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -370,7 +365,7 @@ const Dashboard: React.FC = () => {
       
       {/* HEADER & ALERTS */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div><h1 className="text-2xl font-bold text-gray-900">Tổng quan (Team)</h1><p className="text-gray-500">Xin chào, {userProfile?.full_name}!</p></div>
+        <div><h1 className="text-2xl font-bold text-gray-900">Tổng quan {(isAdmin || isMod) ? '(Team)' : '(Cá nhân)'}</h1><p className="text-gray-500">Xin chào, {userProfile?.full_name}!</p></div>
         <div className="flex flex-wrap gap-3 items-center">
           <div className="relative mr-2" ref={notiRef}>
               <button onClick={() => setIsNotiOpen(!isNotiOpen)} className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-600 hover:text-primary-600 hover:bg-gray-50 shadow-sm transition-all relative">
@@ -389,9 +384,9 @@ const Dashboard: React.FC = () => {
                                   {alerts.pendingTransfers > 0 && <button onClick={() => navigate('/customers', { state: { initialTab: 'pending' } })} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-orange-100 text-orange-600 rounded-full h-fit"><ArrowRightLeft size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.pendingTransfers} Chuyển Sales (Team)</p><p className="text-xs text-gray-500">Đang chờ xử lý.</p></div></button>}
                                   {(isAdmin || isMod) && alerts.pendingFinance > 0 && <button onClick={() => navigate('/finance')} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-red-100 text-red-600 rounded-full h-fit"><BadgeDollarSign size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.pendingFinance} Yêu cầu Duyệt Quỹ</p><p className="text-xs text-gray-500">Nộp/Chi/Ứng cần xử lý.</p></div></button>}
                                   {(isAdmin || isMod) && alerts.pendingEmployees > 0 && <button onClick={() => navigate('/employees')} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-blue-100 text-blue-600 rounded-full h-fit"><UserPlus size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.pendingEmployees} Nhân sự mới</p><p className="text-xs text-gray-500">Đang chờ duyệt.</p></div></button>}
-                                  {alerts.due > 0 && <button onClick={() => navigate('/customers', { state: { initialTab: 'due' } })} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-orange-100 text-orange-600 rounded-full h-fit"><Clock size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.due} Khách đến hạn CS (Team)</p><p className="text-xs text-gray-500">Hôm nay.</p></div></button>}
-                                  {alerts.expiredLongTerm > 0 && <button onClick={() => navigate('/customers', { state: { filterType: 'expired_longterm' } })} className="p-4 hover:bg-blue-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-blue-100 text-blue-600 rounded-full h-fit"><Calendar size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.expiredLongTerm} Hết hạn CS Dài hạn (Team)</p><p className="text-xs text-gray-500">Cần chăm sóc lại.</p></div></button>}
-                                  {alerts.overdue > 0 && <button onClick={() => navigate('/customers', { state: { initialTab: 'overdue' } })} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-red-100 text-red-600 rounded-full h-fit"><AlertTriangle size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.overdue} Khách quá hạn (Team)</p><p className="text-xs text-gray-500">Cần xử lý gấp.</p></div></button>}
+                                  {alerts.due > 0 && <button onClick={() => navigate('/customers', { state: { initialTab: 'due' } })} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-orange-100 text-orange-600 rounded-full h-fit"><Clock size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.due} Khách đến hạn CS</p><p className="text-xs text-gray-500">Hôm nay.</p></div></button>}
+                                  {alerts.expiredLongTerm > 0 && <button onClick={() => navigate('/customers', { state: { filterType: 'expired_longterm' } })} className="p-4 hover:bg-blue-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-blue-100 text-blue-600 rounded-full h-fit"><Calendar size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.expiredLongTerm} Hết hạn CS Dài hạn</p><p className="text-xs text-gray-500">Cần chăm sóc lại.</p></div></button>}
+                                  {alerts.overdue > 0 && <button onClick={() => navigate('/customers', { state: { initialTab: 'overdue' } })} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-red-100 text-red-600 rounded-full h-fit"><AlertTriangle size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.overdue} Khách quá hạn CS</p><p className="text-xs text-gray-500">Cần xử lý gấp.</p></div></button>}
                               </div>
                           )}
                       </div>
@@ -402,13 +397,13 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ALERT BANNERS (RESTORED) */}
+      {/* ALERT BANNERS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in">
           {(!isAdmin && !isMod) && alerts.assignedTodayToMe > 0 && (<div onClick={() => navigate('/customers', { state: { filterType: 'today' } })} className="bg-green-50 border border-green-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-green-100 transition-colors shadow-sm md:col-span-3 lg:col-span-1"><div className="h-12 w-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center shrink-0 animate-bounce"><Hand size={24} /></div><div className="flex-1"><h4 className="font-bold text-green-800">Cần tiếp nhận khách!</h4><p className="text-sm text-green-700">Bạn có <span className="font-bold text-lg ml-1">{alerts.assignedTodayToMe}</span> khách mới chưa bấm "Đã nhận".</p></div><ChevronRight className="text-green-400" /></div>)}
           {(isAdmin || isMod) && alerts.pendingFinance > 0 && (<div onClick={() => navigate('/finance')} className="bg-purple-50 border border-purple-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-purple-100 transition-colors shadow-sm"><div className="h-12 w-12 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center shrink-0 animate-pulse"><BadgeDollarSign size={24} /></div><div className="flex-1"><h4 className="font-bold text-purple-800">Duyệt Quỹ / Tài chính</h4><p className="text-sm text-purple-700">Có <span className="font-bold text-lg ml-1">{alerts.pendingFinance}</span> yêu cầu chờ duyệt.</p></div><ChevronRight className="text-purple-400" /></div>)}
           {alerts.expiredLongTerm > 0 && <div onClick={() => navigate('/customers', { state: { filterType: 'expired_longterm' } })} className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-blue-100 transition-colors shadow-sm"><div className="h-12 w-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 animate-pulse"><Calendar size={24} /></div><div className="flex-1"><h4 className="font-bold text-blue-700">Hết hạn CS Dài hạn</h4><p className="text-sm text-blue-600">Hôm nay: <span className="font-bold text-lg ml-1">{alerts.expiredLongTerm}</span></p></div><ChevronRight className="text-blue-400" /></div>}
-          {alerts.overdue > 0 && <div onClick={() => navigate('/customers', { state: { initialTab: 'overdue' } })} className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-red-100 transition-colors shadow-sm"><div className="h-12 w-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center shrink-0 animate-pulse"><AlertTriangle size={24} /></div><div className="flex-1"><h4 className="font-bold text-red-700">Khách quá hạn CS</h4><p className="text-sm text-red-600">Toàn Team: <span className="font-bold text-lg ml-1">{alerts.overdue}</span></p></div><ChevronRight className="text-red-400" /></div>}
-          {alerts.due > 0 && <div onClick={() => navigate('/customers', { state: { initialTab: 'due' } })} className="bg-orange-50 border border-orange-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-orange-100 transition-colors shadow-sm"><div className="h-12 w-12 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0"><Clock size={24} /></div><div className="flex-1"><h4 className="font-bold text-orange-800">Đến hạn chăm sóc</h4><p className="text-sm text-orange-700">Hôm nay (Team): <span className="font-bold text-lg ml-1">{alerts.due}</span></p></div><ChevronRight className="text-orange-400" /></div>}
+          {alerts.overdue > 0 && <div onClick={() => navigate('/customers', { state: { initialTab: 'overdue' } })} className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-red-100 transition-colors shadow-sm"><div className="h-12 w-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center shrink-0 animate-pulse"><AlertTriangle size={24} /></div><div className="flex-1"><h4 className="font-bold text-red-700">Khách quá hạn CS</h4><p className="text-sm text-red-600">Tổng cộng: <span className="font-bold text-lg ml-1">{alerts.overdue}</span></p></div><ChevronRight className="text-red-400" /></div>}
+          {alerts.due > 0 && <div onClick={() => navigate('/customers', { state: { initialTab: 'due' } })} className="bg-orange-50 border border-orange-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-orange-100 transition-colors shadow-sm"><div className="h-12 w-12 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0"><Clock size={24} /></div><div className="flex-1"><h4 className="font-bold text-orange-800">Đến hạn chăm sóc</h4><p className="text-sm text-orange-700">Hôm nay: <span className="font-bold text-lg ml-1">{alerts.due}</span></p></div><ChevronRight className="text-orange-400" /></div>}
       </div>
 
       {/* STAT CARDS */}

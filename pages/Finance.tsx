@@ -4,19 +4,36 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import { Transaction, UserProfile, Customer, CustomerStatus, TransactionType } from '../types';
+import { Transaction, UserProfile, Customer, CustomerStatus, TransactionType, ProfitExclusion } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { 
   PiggyBank, Plus, CheckCircle2, AlertOctagon, History, User, Filter, 
   Loader2, X, Wallet, BellRing, ArrowUpRight, ArrowDownLeft, Terminal, 
   Copy, Database, Trash2, Check, XCircle, AlertTriangle, Calendar, 
-  BadgeDollarSign, Settings2, Undo2, ExternalLink, Building2, QrCode 
+  BadgeDollarSign, Settings2, Undo2, ExternalLink, Building2, QrCode,
+  Percent,
+  MinusCircle,
+  Gift
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis, Legend } from 'recharts';
 
 interface ExtendedTransaction extends Transaction {
     _source?: string;
     _is_part_time_creator?: boolean;
+}
+
+interface ProfitShareRow {
+    user: UserProfile;
+    kpiTarget: number;
+    kpiActual: number;
+    missedKpi: number;
+    penaltyPercent: number; // e.g., 0.03 for 3%
+    baseShareRatio: number; // e.g., 25%
+    finalShareRatio: number; // e.g., 25% * (1 - penalty)
+    personalNetPool: number; // Team Net - Excluded Deals
+    estimatedIncome: number;
+    excludedCustomerIds: string[];
+    redistributedIncome: number; // Bonus from others' exclusions
 }
 
 const Finance: React.FC = () => {
@@ -27,6 +44,7 @@ const Finance: React.FC = () => {
   const [transactions, setTransactions] = useState<ExtendedTransaction[]>([]);
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
   const [allProfiles, setAllProfiles] = useState<UserProfile[]>([]);
+  const [profitExclusions, setProfitExclusions] = useState<ProfitExclusion[]>([]);
   
   // Filter States
   const [selectedTeam, setSelectedTeam] = useState<string>('all');
@@ -48,6 +66,14 @@ const Finance: React.FC = () => {
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [newQrUrl, setNewQrUrl] = useState('');
   const [isSavingQr, setIsSavingQr] = useState(false);
+
+  // Exclusion Modal
+  const [showExclusionModal, setShowExclusionModal] = useState(false);
+  const [targetUserForExclusion, setTargetUserForExclusion] = useState<UserProfile | null>(null);
+  
+  // Ratio Edit
+  const [editingRatioId, setEditingRatioId] = useState<string | null>(null);
+  const [tempRatio, setTempRatio] = useState<string>('');
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
@@ -71,7 +97,7 @@ const Finance: React.FC = () => {
       }
   }, [toast]);
 
-  const showToast = (msg: string, type: 'success' | 'error') => setToast({ msg, type });
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => setToast({ msg, type });
 
   const fetchDataWithIsolation = async () => {
       try {
@@ -88,6 +114,10 @@ const Finance: React.FC = () => {
 
           const { data: trans } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
           let transList = (trans as Transaction[]) || [];
+
+          // Fetch Exclusions
+          const { data: exclusions } = await supabase.from('profit_exclusions').select('*');
+          if (exclusions) setProfitExclusions(exclusions as ProfitExclusion[]);
 
           const extendedTrans: ExtendedTransaction[] = transList.map(t => {
               const customer = t.customer_id ? custList.find(c => c.id === t.customer_id) : null;
@@ -109,6 +139,7 @@ const Finance: React.FC = () => {
       }
   };
 
+  // ... (Keep existing submission handlers: Deposit, Adjustment, QR, Advance, Repay, Delete, Reset ...)
   const handleSubmitDeposit = async () => {
       const amount = Number(depositForm.amount.replace(/\./g, ''));
       if (!amount || amount <= 0 || !depositForm.customerId) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; }
@@ -188,81 +219,128 @@ const Finance: React.FC = () => {
       } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); }
   };
 
-  const isMKT = (src?: string) => src === 'MKT Group' || (src || '').includes('MKT');
+  // --- NEW HANDLERS FOR PROFIT SHARING ---
+  const handleUpdateRatio = async (userId: string) => {
+      const ratio = parseFloat(tempRatio);
+      if (isNaN(ratio) || ratio < 0 || ratio > 100) { showToast("Tỉ lệ không hợp lệ", 'error'); return; }
+      try {
+          await supabase.from('profiles').update({ profit_share_ratio: ratio }).eq('id', userId);
+          setEditingRatioId(null);
+          fetchDataWithIsolation();
+          showToast("Đã cập nhật tỉ lệ!");
+      } catch (e) { showToast("Lỗi cập nhật", 'error'); }
+  };
+
+  const handleToggleExclusion = async (customerId: string) => {
+      if (!targetUserForExclusion) return;
+      try {
+          const exists = profitExclusions.find(e => e.user_id === targetUserForExclusion.id && e.customer_id === customerId);
+          if (exists) {
+              await supabase.from('profit_exclusions').delete().eq('id', exists.id);
+          } else {
+              await supabase.from('profit_exclusions').insert([{ user_id: targetUserForExclusion.id, customer_id: customerId }]);
+          }
+          fetchDataWithIsolation(); // Refresh exclusions
+      } catch (e) { console.error(e); }
+  };
+
+  // --- LOGIC ---
+  // STRICT MKT CHECK
+  const isMKT = (src?: string) => src === 'MKT Group';
   
   const isInMonthYear = (dateStr: string) => {
       if (!dateStr) return false;
       const d = new Date(dateStr);
-      const vnDate = new Date(d.getTime() + (7 * 60 * 60 * 1000));
-      return vnDate.getUTCMonth() + 1 === selectedMonth && vnDate.getUTCFullYear() === selectedYear;
+      return d.getMonth() + 1 === selectedMonth && d.getFullYear() === selectedYear;
   };
 
   const filteredTransactions = useMemo(() => {
       return transactions.filter(t => {
           if (!isInMonthYear(t.created_at)) return false;
-
           // 1. Permission / Hierarchy Filter
           if (isAdmin) {
-              // Admin: Check Team Filter
               if (selectedTeam !== 'all') {
                   const transUser = allProfiles.find(p => p.id === t.user_id);
-                  // Check if user belongs to the selected team (Manager is selectedTeam OR User is selectedTeam)
                   if (transUser?.manager_id !== selectedTeam && transUser?.id !== selectedTeam) return false;
               }
           } else if (isMod) {
-              // MOD: See Self + Subordinates
               const transUser = allProfiles.find(p => p.id === t.user_id);
               const isSelf = t.user_id === userProfile?.id;
               const isSubordinate = transUser?.manager_id === userProfile?.id;
-              
               if (!isSelf && !isSubordinate) return false;
           } else {
-              // Employee: See Self Only
               if (t.user_id !== userProfile?.id) return false;
           }
-
           // 2. Source Filter (MKT only for customer transactions)
           if (t.customer_id) return isMKT(t._source);
-          
           return true; 
       });
   }, [transactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, allProfiles, userProfile]);
 
   const filteredCustomers = useMemo(() => {
       return allCustomers.filter(c => {
-          // 1. Time Filter
           if (filterMode === 'creation') {
               if (!isInMonthYear(c.created_at)) return false;
           } else {
               if (c.status !== CustomerStatus.WON) return false;
               if (!c.updated_at || !isInMonthYear(c.updated_at)) return false;
           }
-
-          // 2. MKT Source Filter (Strict)
           if (!isMKT(c.source)) return false;
-
-          // 3. User/Team Isolation Filter
           const creator = allProfiles.find(p => p.id === c.creator_id);
-          
           if (isAdmin) {
               if (selectedTeam !== 'all') {
-                  // Check if creator belongs to the selected team
                   if (creator?.manager_id !== selectedTeam && creator?.id !== selectedTeam) return false;
               }
-              // If Admin and 'all', show all (return true)
           } else if (isMod) {
-              // Mod: See self + subordinates
               const isSelf = c.creator_id === userProfile?.id;
               const isSubordinate = creator?.manager_id === userProfile?.id;
               if (!isSelf && !isSubordinate) return false;
           } else {
-              // Sales: See self only
               if (c.creator_id !== userProfile?.id) return false;
+          }
+          return true;
+      });
+  }, [allCustomers, filterMode, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, allProfiles, userProfile]);
+
+  // SPECIFIC LIST FOR EXCLUSION MODAL (Strict Criteria: MKT Only + Won + No Refund + Current Month + HIERARCHY FILTER)
+  const exclusionCandidates = useMemo(() => {
+      if (!targetUserForExclusion) return [];
+      return allCustomers.filter(c => {
+          // 1. MUST BE MKT SOURCE
+          if (!isMKT(c.source)) return false; 
+          
+          // 2. Status WON
+          if (c.status !== CustomerStatus.WON) return false;
+          
+          // 3. Not Refunded
+          if (c.deal_status === 'refunded' || c.deal_status === 'refund_pending') return false;
+          
+          // 4. Timeframe (Current Month)
+          const dStr = c.updated_at || c.created_at;
+          if (!isInMonthYear(dStr)) return false;
+
+          // 5. HIERARCHY FILTER (Exclude customers from OTHER teams based on current filter)
+          const creator = allProfiles.find(p => p.id === c.creator_id);
+          if (!creator) return false;
+
+          if (isAdmin) {
+              if (selectedTeam !== 'all') {
+                  // Only show customers belonging to the SELECTED team
+                  if (creator.manager_id !== selectedTeam && creator.id !== selectedTeam) return false;
+              }
+          } else if (isMod) {
+              // Mod only sees own team's customers
+              const isSelf = creator.id === userProfile?.id;
+              const isSubordinate = creator.manager_id === userProfile?.id;
+              if (!isSelf && !isSubordinate) return false;
+          } else {
+              // Employee only sees self (rare case for this modal)
+              if (creator.id !== userProfile?.id) return false;
           }
 
           return true;
       });
-  }, [allCustomers, filterMode, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, allProfiles, userProfile]);
+  }, [allCustomers, allProfiles, targetUserForExclusion, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile]);
 
   const managers = useMemo(() => {
       const managerIds = Array.from(new Set(allProfiles.filter(p => p.manager_id).map(p => p.manager_id)));
@@ -274,78 +352,130 @@ const Finance: React.FC = () => {
 
   // --- Calculations ---
   
-  // 1. Calculate Revenue (Only Income from Business/Deposits/Adjustments)
-  // NOTE: Repayments are NOT revenue, they are return of capital.
-  const pnlRevenue = filteredTransactions
-      .filter(t => t.status === 'approved')
-      .filter(t => ['deposit', 'adjustment'].includes(t.type) && t.amount > 0)
-      .reduce((sum, t) => sum + t.amount, 0);
-
-  // 2. Calculate Real Expenses (Permanent outflows: Expense, Negative Adjustment)
-  // Advances are NOT permanent expenses yet.
-  const realExpenses = filteredTransactions
-      .filter(t => t.status === 'approved')
-      .filter(t => {
-          if (t.type === 'expense') return true;
-          if (t.type === 'adjustment' && t.amount < 0) return true;
-          return false;
-      })
-      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-
-  // 3. Calculate Part Time Salary (Liability)
-  const partTimeSalaryLiability = filteredTransactions
-      .filter(t => t._is_part_time_creator && ['deposit'].includes(t.type) && t.status === 'approved')
-      .reduce((sum, t) => sum + (t.amount * 0.3), 0);
-
-  // 4. Calculate Net Advances (Money currently OUT)
-  // Advances taken - Repayments made = Net Advance Expense (Temporary Expense)
-  // When Repayment happens, this decreases.
-  const totalAdvances = filteredTransactions
-      .filter(t => t.type === 'advance' && t.status === 'approved') 
-      .reduce((sum, t) => sum + t.amount, 0);
-  
-  const totalRepaid = filteredTransactions
-      .filter(t => t.type === 'repayment' && t.status === 'approved')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-  // This amount represents money that is "gone" from the fund temporarily.
-  // We treat it as an expense for the "Chi Quỹ" display until it is repaid.
+  const pnlRevenue = filteredTransactions.filter(t => t.status === 'approved' && ['deposit', 'adjustment'].includes(t.type) && t.amount > 0).reduce((sum, t) => sum + t.amount, 0);
+  const realExpenses = filteredTransactions.filter(t => t.status === 'approved' && (t.type === 'expense' || (t.type === 'adjustment' && t.amount < 0))).reduce((sum, t) => sum + Math.abs(t.amount), 0);
+  const partTimeSalaryLiability = filteredTransactions.filter(t => t._is_part_time_creator && ['deposit'].includes(t.type) && t.status === 'approved').reduce((sum, t) => sum + (t.amount * 0.3), 0);
+  const totalAdvances = filteredTransactions.filter(t => t.type === 'advance' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+  const totalRepaid = filteredTransactions.filter(t => t.type === 'repayment' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
   const netOutstandingAdvances = Math.max(0, totalAdvances - totalRepaid);
-
-  // 5. Incurred Expenses (Costs deducted from Revenue, not Fund)
-  const pnlIncurredExpenses = filteredTransactions
-      .filter(t => t.type === 'incurred_expense' && t.status === 'approved')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-  // 6. TOTAL DISPLAY EXPENSE (Chi Quỹ & Lương CTV)
-  // = Real Expenses + PartTime Salary + Net Outstanding Advances
+  const pnlIncurredExpenses = filteredTransactions.filter(t => t.type === 'incurred_expense' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+  
   const displayTotalExpense = realExpenses + partTimeSalaryLiability + netOutstandingAdvances;
+  const pnlNet = pnlRevenue - displayTotalExpense; // This is the Pool for Full-Time employees
 
-  // 7. Net PnL = (Revenue - Incurred) - Total Display Expense
-  // When Repayment happens -> netOutstandingAdvances drops -> displayTotalExpense drops -> Net PnL RISES.
-  const pnlNet = (pnlRevenue - pnlIncurredExpenses) - displayTotalExpense;
-
-  // 8. Fund Remaining (Physical Cash)
-  // Inflow (inc Repayment) - Outflow (inc Advance)
-  const totalIn = filteredTransactions
-      .filter(t => ['deposit', 'adjustment', 'repayment'].includes(t.type) && t.status === 'approved')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalOut = filteredTransactions
-      .filter(t => t.status === 'approved')
-      .filter(t => ['expense', 'advance'].includes(t.type) || (t.type === 'adjustment' && t.amount < 0))
-      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-
+  const totalIn = filteredTransactions.filter(t => ['deposit', 'adjustment', 'repayment'].includes(t.type) && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+  const totalOut = filteredTransactions.filter(t => t.status === 'approved' && (['expense', 'advance'].includes(t.type) || (t.type === 'adjustment' && t.amount < 0))).reduce((sum, t) => sum + Math.abs(t.amount), 0);
   const fundRemaining = totalIn - totalOut - partTimeSalaryLiability;
 
-  // Lists for UI
+  // --- PROFIT SHARING CALCULATION (WITH REDISTRIBUTION) ---
+  const profitSharingData: ProfitShareRow[] = useMemo(() => {
+      // 1. Get Eligible Employees
+      let eligibleProfiles = allProfiles.filter(p => !p.is_part_time && p.status === 'active' && p.role !== 'admin');
+      
+      if (isAdmin && selectedTeam !== 'all') {
+          eligibleProfiles = eligibleProfiles.filter(p => p.manager_id === selectedTeam || p.id === selectedTeam);
+      } else if (isMod) {
+          eligibleProfiles = eligibleProfiles.filter(p => p.id === userProfile?.id || p.manager_id === userProfile?.id);
+      } else if (!isAdmin && !isMod) {
+          eligibleProfiles = eligibleProfiles.filter(p => p.id === userProfile?.id);
+      }
+
+      const count = eligibleProfiles.length;
+      if (count === 0) return [];
+
+      const totalCustomRatio = eligibleProfiles.reduce((sum, p) => sum + (p.profit_share_ratio || 0), 0);
+      const profilesWithoutCustom = eligibleProfiles.filter(p => p.profit_share_ratio === null || p.profit_share_ratio === undefined);
+      const remainingPercent = Math.max(0, 100 - totalCustomRatio);
+      const defaultShare = profilesWithoutCustom.length > 0 ? remainingPercent / profilesWithoutCustom.length : 0;
+
+      // STEP 1: Basic Calculation (Initial Pools)
+      const rows = eligibleProfiles.map(emp => {
+          const baseRatio = emp.profit_share_ratio !== null && emp.profit_share_ratio !== undefined ? emp.profit_share_ratio : defaultShare;
+          
+          const kpiTarget = emp.kpi_target || 0;
+          const kpiActual = allCustomers.filter(c => {
+              if (c.creator_id !== emp.id || c.status !== CustomerStatus.WON) return false;
+              if (!isMKT(c.source)) return false;
+              const d = new Date(c.updated_at || c.created_at);
+              return d.getMonth() + 1 === selectedMonth && d.getFullYear() === selectedYear;
+          }).length;
+          
+          const missedKpi = Math.max(0, kpiTarget - kpiActual);
+          const penaltyPercent = missedKpi * 0.03; 
+          const finalShareRatio = Math.max(0, baseRatio * (1 - penaltyPercent)); 
+
+          const userExclusions = profitExclusions.filter(ex => ex.user_id === emp.id).map(ex => ex.customer_id);
+          
+          const excludedProfit = filteredTransactions
+              .filter(t => t.customer_id && userExclusions.includes(t.customer_id) && t.status === 'approved')
+              .reduce((sum, t) => {
+                  if (['revenue', 'deposit'].includes(t.type)) return sum + t.amount;
+                  if (['incurred_expense'].includes(t.type)) return sum - t.amount; 
+                  return sum;
+              }, 0);
+
+          const personalNetPool = pnlNet - excludedProfit;
+          const estimatedIncome = personalNetPool * (finalShareRatio / 100);
+
+          return {
+              user: emp,
+              kpiTarget,
+              kpiActual,
+              missedKpi,
+              penaltyPercent,
+              baseShareRatio: baseRatio,
+              finalShareRatio,
+              personalNetPool,
+              estimatedIncome,
+              excludedCustomerIds: userExclusions,
+              redistributedIncome: 0
+          };
+      });
+
+      // STEP 2: Redistribution Logic
+      // Iterate through each user to find who has exclusions, calculate what they 'lost', and distribute to others.
+      rows.forEach(sourceRow => {
+          if (sourceRow.excludedCustomerIds.length === 0) return;
+
+          sourceRow.excludedCustomerIds.forEach(custId => {
+              // Calculate Profit of this excluded customer
+              const custProfit = filteredTransactions
+                  .filter(t => t.customer_id === custId && t.status === 'approved')
+                  .reduce((sum, t) => {
+                       if (['revenue', 'deposit'].includes(t.type)) return sum + t.amount;
+                       if (['incurred_expense'].includes(t.type)) return sum - t.amount;
+                       return sum;
+                  }, 0);
+              
+              if (custProfit <= 0) return;
+
+              // Amount that the source user "lost" or "gave up"
+              // Only redistribute strictly MKT customers (though filter ensures this, double check)
+              // NOTE: We assume excludedCustomerIds are strictly MKT due to UI filter.
+              const lostAmount = custProfit * (sourceRow.finalShareRatio / 100);
+
+              // Distribute equally to all OTHER active users in this list
+              const beneficiaries = rows.filter(r => r.user.id !== sourceRow.user.id);
+              if (beneficiaries.length > 0) {
+                  const bonusPerPerson = lostAmount / beneficiaries.length;
+                  beneficiaries.forEach(beneficiary => {
+                      beneficiary.estimatedIncome += bonusPerPerson;
+                      beneficiary.redistributedIncome += bonusPerPerson;
+                  });
+              }
+          });
+      });
+
+      return rows;
+  }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, pnlNet, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile]);
+
+
   const expenses = filteredTransactions.filter(t => t.type === 'expense' || t.type === 'advance');
   const deposits = filteredTransactions.filter(t => ['deposit', 'revenue', 'adjustment', 'repayment'].includes(t.type));
   const refundableAdvancesList = filteredTransactions.filter(t => t.type === 'advance');
   const allRepayments = transactions.filter(t => t.type === 'repayment');
   const pendingDealerDebts = filteredTransactions.filter(t => t.type === 'dealer_debt' && !t.reason.includes('(Đã thu)'));
-
-  const outstandingAdvances = netOutstandingAdvances; // Alias for UI display
+  const outstandingAdvances = netOutstandingAdvances; 
 
   const pieData1 = [
       { name: 'Tồn quỹ công ty', value: fundRemaining > 0 ? fundRemaining : 0 },
@@ -363,49 +493,48 @@ const Finance: React.FC = () => {
 
   const availableCustomersForDeposit = useMemo(() => {
       return allCustomers.filter(c => {
-          // 1. Basic Status Checks
           const isWon = c.status === CustomerStatus.WON;
           const isNotFinished = c.deal_status !== 'completed' && c.deal_status !== 'refunded';
-          
-          // 2. Source Check
           const isMKTSource = c.source === 'MKT Group' || (c.source || '').includes('MKT');
-
           if (!isWon || !isNotFinished || !isMKTSource) return false;
-
-          // 3. Permission/Isolation Checks
           if (isAdmin) {
               if (selectedTeam !== 'all') {
                   const creator = allProfiles.find(p => p.id === c.creator_id);
-                  // Check if creator belongs to selected team (is manager or has manager)
                   return creator?.manager_id === selectedTeam || creator?.id === selectedTeam;
               }
               return true;
           } 
-          
           if (isMod) {
               const creator = allProfiles.find(p => p.id === c.creator_id);
               const isSelf = c.creator_id === userProfile?.id;
               const isSubordinate = creator?.manager_id === userProfile?.id;
               return isSelf || isSubordinate;
           }
-
-          // Regular Employee (TVBH)
           return c.creator_id === userProfile?.id;
       });
   }, [allCustomers, allProfiles, isAdmin, isMod, selectedTeam, userProfile]);
 
   const sqlFixCode = `
--- Fix RLS Code
-alter table public.transactions add column if not exists subtype text;
-alter table public.transactions enable row level security;
-drop policy if exists "Enable all for admins/mods" on public.transactions;
-drop policy if exists "Enable insert for authenticated" on public.transactions;
-drop policy if exists "Enable read for authenticated" on public.transactions;
-create policy "Enable read for authenticated" on public.transactions for select using (true);
-create policy "Enable insert for authenticated" on public.transactions for insert with check (true);
-create policy "Enable all for admins/mods" on public.transactions for all using (
+-- 1. Thêm cột tỉ lệ chia sẻ vào profile
+alter table public.profiles add column if not exists profit_share_ratio numeric default null;
+
+-- 2. Tạo bảng loại trừ lợi nhuận
+create table if not exists public.profit_exclusions (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references public.profiles(id),
+  customer_id uuid references public.customers(id),
+  created_at timestamptz default now()
+);
+
+-- 3. RLS cho bảng mới
+alter table public.profit_exclusions enable row level security;
+create policy "Allow read for all" on public.profit_exclusions for select using (true);
+create policy "Allow write for admins/mods" on public.profit_exclusions for all using (
   exists (select 1 from profiles where id = auth.uid() and role in ('admin', 'mod'))
 );
+
+-- Fix previous RLS if needed
+alter table public.transactions add column if not exists subtype text;
 `;
 
   return (
@@ -434,6 +563,7 @@ create policy "Enable all for admins/mods" on public.transactions for all using 
           </div>
       )}
 
+      {/* FILTER HEADER */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><BadgeDollarSign className="text-green-600"/> Quỹ & Thu Chi (MKT Group)</h1>
           <div className="flex flex-col md:flex-row gap-2 w-full xl:w-auto items-center">
@@ -476,6 +606,7 @@ create policy "Enable all for admins/mods" on public.transactions for all using 
           </div>
       </div>
 
+      {/* DASHBOARD CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
               <h3 className="font-bold text-gray-700 mb-4">Tổng quan Quỹ (MKT Only)</h3>
@@ -503,17 +634,97 @@ create policy "Enable all for admins/mods" on public.transactions for all using 
               </div>
               <div className="w-full h-px bg-gray-100"></div>
               <div className="text-center w-full">
-                  <p className="text-gray-500 font-bold uppercase text-xs">CHI PHÍ PHÁT SINH</p>
-                  <p className="text-xl font-bold text-orange-600">-{formatCurrency(pnlIncurredExpenses)}</p>
-              </div>
-              <div className="w-full h-px bg-gray-100"></div>
-              <div className="text-center w-full">
                   <p className="text-gray-500 font-bold uppercase text-xs">CHI QUỸ & LƯƠNG CTV</p>
                   <p className="text-xl font-bold text-red-600">-{formatCurrency(displayTotalExpense)}</p>
                   <p className="text-[10px] text-gray-400 mt-1 italic">(*Đã bao gồm tiền ứng chưa trả)</p>
               </div>
               <div className="w-full h-px bg-gray-100"></div>
               <div className="text-center bg-blue-50 w-full py-2 rounded-xl border border-blue-100"><p className="text-blue-800 font-bold uppercase text-xs">LỢI NHUẬN RÒNG (NET)</p><p className="text-xl font-bold text-blue-900">{formatCurrency(pnlNet)} VNĐ</p></div>
+          </div>
+      </div>
+
+      {/* --- PROFIT DISTRIBUTION SECTION --- */}
+      <div className="bg-white rounded-2xl border border-indigo-100 shadow-sm overflow-hidden mb-6">
+          <div className="p-4 bg-indigo-50 border-b border-indigo-100 flex justify-between items-center">
+              <h3 className="font-bold text-indigo-900 flex items-center gap-2"><Percent size={20} className="text-indigo-600"/> Phân chia Lợi Nhuận (Bonus)</h3>
+              <span className="text-xs font-medium text-indigo-600 bg-white px-2 py-1 rounded-lg border border-indigo-200">
+                  Pool Net: <strong>{formatCurrency(pnlNet)}</strong> VNĐ
+              </span>
+          </div>
+          <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                  <thead className="text-xs text-gray-500 uppercase bg-gray-50">
+                      <tr>
+                          <th className="px-4 py-3">Nhân viên</th>
+                          <th className="px-4 py-3 text-center">KPI (Thực/Mục tiêu)</th>
+                          <th className="px-4 py-3 text-center">Tỉ lệ cơ bản</th>
+                          <th className="px-4 py-3 text-center">Phạt KPI</th>
+                          <th className="px-4 py-3 text-center">Tỉ lệ cuối</th>
+                          <th className="px-4 py-3 text-right">Pool Cá nhân</th>
+                          <th className="px-4 py-3 text-right">Thực nhận (Dự kiến)</th>
+                          {(isAdmin || isMod) && <th className="px-4 py-3 text-center">Hành động</th>}
+                      </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                      {profitSharingData.length === 0 ? (
+                          <tr><td colSpan={8} className="p-4 text-center text-gray-400">Không có nhân viên Full-time nào trong danh sách.</td></tr>
+                      ) : profitSharingData.map(row => (
+                          <tr key={row.user.id} className="hover:bg-indigo-50/30 transition-colors">
+                              <td className="px-4 py-3 font-bold text-gray-800">
+                                  <div className="flex flex-col">
+                                      <span className="flex items-center gap-2">
+                                          {row.user.full_name}
+                                          {row.excludedCustomerIds.length > 0 && <span className="text-[10px] bg-red-100 text-red-600 px-1 rounded font-normal" title="Có khách hàng bị loại trừ">Excl: {row.excludedCustomerIds.length}</span>}
+                                      </span>
+                                      {row.redistributedIncome > 0 && (
+                                          <span className="text-[10px] text-green-600 flex items-center gap-1 mt-0.5 font-semibold">
+                                              <Gift size={10}/> Thưởng lại: +{formatCurrency(row.redistributedIncome)}
+                                          </span>
+                                      )}
+                                  </div>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                  <span className={`font-bold ${row.missedKpi > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                      {row.kpiActual}
+                                  </span>
+                                  <span className="text-gray-400"> / {row.kpiTarget}</span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                  {editingRatioId === row.user.id ? (
+                                      <div className="flex items-center justify-center gap-1">
+                                          <input type="number" className="w-12 border rounded px-1 py-0.5 text-center font-bold" value={tempRatio} onChange={e => setTempRatio(e.target.value)} autoFocus />
+                                          <button onClick={() => handleUpdateRatio(row.user.id)} className="text-green-600 hover:bg-green-100 p-1 rounded"><Check size={14}/></button>
+                                          <button onClick={() => setEditingRatioId(null)} className="text-gray-400 hover:bg-gray-100 p-1 rounded"><X size={14}/></button>
+                                      </div>
+                                  ) : (
+                                      <span className="font-bold text-gray-700 cursor-pointer hover:text-indigo-600 hover:underline" onClick={() => { if(isAdmin || isMod) { setEditingRatioId(row.user.id); setTempRatio(row.baseShareRatio.toString()); }}}>
+                                          {row.baseShareRatio.toFixed(1)}%
+                                      </span>
+                                  )}
+                              </td>
+                              <td className="px-4 py-3 text-center text-red-500 font-medium">
+                                  {row.penaltyPercent > 0 ? `-${(row.penaltyPercent * 100).toFixed(0)}% (share)` : '-'}
+                              </td>
+                              <td className="px-4 py-3 text-center font-bold text-indigo-700">
+                                  {row.finalShareRatio.toFixed(2)}%
+                              </td>
+                              <td className="px-4 py-3 text-right text-gray-500 text-xs">
+                                  {formatCurrency(row.personalNetPool)}
+                              </td>
+                              <td className="px-4 py-3 text-right font-bold text-green-600 text-lg">
+                                  {formatCurrency(row.estimatedIncome)}
+                              </td>
+                              {(isAdmin || isMod) && (
+                                  <td className="px-4 py-3 text-center">
+                                      <button onClick={() => { setTargetUserForExclusion(row.user); setShowExclusionModal(true); }} className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-red-50 hover:text-red-600 transition-colors" title="Loại trừ Khách hàng">
+                                          <MinusCircle size={16}/>
+                                      </button>
+                                  </td>
+                              )}
+                          </tr>
+                      ))}
+                  </tbody>
+              </table>
           </div>
       </div>
 
@@ -583,6 +794,45 @@ create policy "Enable all for admins/mods" on public.transactions for all using 
 
       {showConfigModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><h3 className="text-lg font-bold text-gray-900 mb-4">Cấu hình QR Code</h3><div className="mb-4"><label className="block text-sm font-bold text-gray-700 mb-1">Link ảnh QR</label><input type="text" placeholder="Dán link ảnh QR Code..." className="w-full border p-2 rounded-xl text-gray-900 outline-none focus:border-primary-500" value={newQrUrl} onChange={e => setNewQrUrl(e.target.value)} /></div>{newQrUrl && (<div className="mb-4 p-2 bg-gray-50 border rounded-xl flex justify-center"><img src={newQrUrl} alt="Preview" className="h-32 object-contain" /></div>)}<div className="flex justify-end gap-2"><button onClick={() => setShowConfigModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg font-bold">Hủy</button><button onClick={handleSaveQr} disabled={isSavingQr} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold flex items-center gap-2">{isSavingQr && <Loader2 className="animate-spin" size={16} />} Lưu</button></div></div></div>)}
       
+      {/* EXCLUSION MODAL */}
+      {showExclusionModal && targetUserForExclusion && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[80vh] flex flex-col">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-bold text-gray-900">Loại trừ khách hàng</h3>
+                      <button onClick={() => setShowExclusionModal(false)}><X size={24} className="text-gray-400"/></button>
+                  </div>
+                  <div className="bg-yellow-50 p-3 rounded-xl mb-4 border border-yellow-100">
+                      <p className="text-sm text-yellow-800">
+                          Đang chọn loại trừ cho: <strong>{targetUserForExclusion.full_name}</strong>
+                      </p>
+                      <p className="text-xs text-yellow-700 mt-1">
+                          Danh sách hiển thị: Khách <strong>MKT Group</strong>, Đã chốt, Chưa hoàn tiền (Thuộc Team đang chọn).
+                      </p>
+                  </div>
+                  <div className="overflow-y-auto flex-1 space-y-2 border-t border-gray-100 pt-2">
+                      {exclusionCandidates.length === 0 ? <p className="text-center text-gray-400 py-4">Không có khách hàng MKT nào phù hợp.</p> : exclusionCandidates.map(c => {
+                          const isExcluded = profitExclusions.some(e => e.user_id === targetUserForExclusion.id && e.customer_id === c.id);
+                          return (
+                              <div key={c.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 cursor-pointer" onClick={() => handleToggleExclusion(c.id)}>
+                                  <div>
+                                      <p className="font-bold text-sm text-gray-900">{c.name} <span className="font-normal text-gray-500">({c.sales_rep})</span></p>
+                                      <p className="text-xs text-gray-500">{formatCurrency(c.deal_details?.revenue || 0)} VNĐ • {c.source}</p>
+                                  </div>
+                                  <div className={`w-5 h-5 rounded border flex items-center justify-center ${isExcluded ? 'bg-red-500 border-red-500 text-white' : 'border-gray-300'}`}>
+                                      {isExcluded && <Check size={14}/>}
+                                  </div>
+                              </div>
+                          );
+                      })}
+                  </div>
+                  <div className="mt-4 pt-2 border-t flex justify-end">
+                      <button onClick={() => setShowExclusionModal(false)} className="px-4 py-2 bg-gray-100 font-bold rounded-xl text-gray-700 hover:bg-gray-200">Đóng</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {transactionToDelete && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-red-100">
