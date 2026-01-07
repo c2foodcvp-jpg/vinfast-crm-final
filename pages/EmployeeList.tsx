@@ -27,17 +27,44 @@ const EmployeeList: React.FC = () => {
   // RLS Instruction Modal State
   const [showRLSModal, setShowRLSModal] = useState(false);
 
+  const isAdmin = userProfile?.role === UserRole.ADMIN;
+  const isMod = userProfile?.role === UserRole.MOD;
+
   useEffect(() => {
     fetchEmployees();
   }, [userProfile]);
 
   const fetchEmployees = async () => {
+    if (!userProfile) return;
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+      
+      let query = supabase.from('profiles').select('*').order('created_at', { ascending: false });
+      
+      // ISOLATION LOGIC
+      if (!isAdmin) {
+          // If MOD: See self + subordinates + Admin(for info)
+          // Actually requirement says "ngang hàng và trên cấp". 
+          // But practically for a CRM: 
+          // - Admin: All
+          // - Mod: Self + Subordinates. Cross-team isolation means Don't see other MOD's subordinates.
+          // - Sales: Self + Peers + Manager.
+          
+          if (isMod) {
+              query = query.or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id},role.eq.admin`); 
+          } else {
+              // Sales
+              if (userProfile.manager_id) {
+                  // See self + manager + peers
+                  query = query.or(`id.eq.${userProfile.id},id.eq.${userProfile.manager_id},manager_id.eq.${userProfile.manager_id},role.eq.admin`);
+              } else {
+                  // See self + admin
+                  query = query.or(`id.eq.${userProfile.id},role.eq.admin`);
+              }
+          }
+      }
+
+      const { data, error } = await query;
       
       if (error) throw error;
       setEmployees(data as UserProfile[] || []);
@@ -269,14 +296,12 @@ const EmployeeList: React.FC = () => {
       return e.status === 'active' || e.status === 'blocked';
   });
 
-  const isAdmin = userProfile?.role === UserRole.ADMIN;
-
   if (loading) return <div className="p-8 text-center text-gray-500">Đang tải danh sách nhân sự...</div>;
 
   return (
     <div className="space-y-6 relative">
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-        <h1 className="text-2xl font-bold text-gray-900">Quản lý Nhân sự</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Quản lý Nhân sự (Team)</h1>
       </div>
 
       {/* Tabs */}
@@ -334,7 +359,7 @@ const EmployeeList: React.FC = () => {
                                   </div>
                                   <div>
                                       <div className="flex items-center gap-2">
-                                          <p className="font-semibold text-gray-900 cursor-pointer hover:text-primary-600" onClick={() => (isAdmin || userProfile?.role === UserRole.MOD) && emp.status === 'active' && window.location.assign('#/employees/' + emp.id)}>{emp.full_name}</p>
+                                          <p className="font-semibold text-gray-900 cursor-pointer hover:text-primary-600" onClick={() => (isAdmin || isMod) && emp.status === 'active' && window.location.assign('#/employees/' + emp.id)}>{emp.full_name}</p>
                                           {emp.is_part_time && (
                                               <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[9px] font-bold rounded uppercase border border-orange-200">Part-time</span>
                                           )}
@@ -425,7 +450,7 @@ const EmployeeList: React.FC = () => {
                               )}
                           </td>
                           <td className="px-6 py-4 text-right">
-                            {emp.status === 'pending' && (isAdmin || userProfile?.role === UserRole.MOD) ? (
+                            {emp.status === 'pending' && (isAdmin || isMod) ? (
                                 <div className="flex justify-end gap-2">
                                     <button 
                                         onClick={() => openApprovalModal(emp)}

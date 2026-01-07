@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
+
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Customer, CustomerStatus, Interaction, CustomerClassification, DealDetails, UserProfile, UserRole, Distributor, DealStatus, CAR_MODELS, Transaction, TransactionType } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard
+  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus
 } from 'lucide-react';
 
 const { useParams, useNavigate, useLocation } = ReactRouterDOM as any;
@@ -39,7 +40,7 @@ const CustomerDetail: React.FC = () => {
   // Navigation
   const [nextCustomerId, setNextCustomerId] = useState<string | null>(null);
   const [prevCustomerId, setPrevCustomerId] = useState<string | null>(null);
-  const [customerListContext, setCustomerListContext] = useState<string[]>([]); // New state for navigation context
+  const [customerListContext, setCustomerListContext] = useState<string[]>([]);
 
   // Modals
   const [showStopModal, setShowStopModal] = useState(false);
@@ -54,10 +55,14 @@ const CustomerDetail: React.FC = () => {
   const [showChangeSalesConfirm, setShowChangeSalesConfirm] = useState<{rep: UserProfile, type: 'direct' | 'request'} | null>(null);
   
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [expenseForm, setExpenseForm] = useState({ type: 'expense' as TransactionType, subtype: 'deductible', amount: '', reason: '' });
+  // Removed subtype from state
+  const [expenseForm, setExpenseForm] = useState({ type: 'expense' as TransactionType, amount: '', reason: '' });
   
   const [showAddRevenueModal, setShowAddRevenueModal] = useState(false);
   const [revenueForm, setRevenueForm] = useState({ amount: '', note: '' });
+
+  const [showIncurredExpenseModal, setShowIncurredExpenseModal] = useState(false);
+  const [incurredExpenseForm, setIncurredExpenseForm] = useState({ amount: '', reason: '' });
 
   const [showRepayModal, setShowRepayModal] = useState(false);
   const [repayForm, setRepayForm] = useState({ amount: '', reason: 'Nộp lại tiền ứng' });
@@ -65,16 +70,14 @@ const CustomerDetail: React.FC = () => {
   const [showDealerDebtModal, setShowDealerDebtModal] = useState(false);
   const [dealerDebtForm, setDealerDebtForm] = useState({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền' });
 
-  // Transaction Delete Modal
   const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
+  const [dealerDebtToConfirm, setDealerDebtToConfirm] = useState<Transaction | null>(null);
 
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
   const longTermTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // GMT+7 Today String
   const todayStr = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-  // Helper for Long-term date (Min 10 days from today)
   const getMinDate = () => {
       if (isLongTerm) {
           const d = new Date();
@@ -84,6 +87,13 @@ const CustomerDetail: React.FC = () => {
       return todayStr;
   };
 
+  const getMaxDate = () => {
+      if (isLongTerm) return undefined;
+      const d = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
+      d.setDate(d.getDate() + 4);
+      return d.toISOString().split('T')[0];
+  };
+
   useEffect(() => {
     fetchCustomerData();
     fetchDistributors();
@@ -91,7 +101,6 @@ const CustomerDetail: React.FC = () => {
     setIsEditingInfo(false);
   }, [id, userProfile]); 
 
-  // Updated navigation logic
   useEffect(() => { 
       if (location.state?.customerIds) {
           const ids = location.state.customerIds;
@@ -102,20 +111,16 @@ const CustomerDetail: React.FC = () => {
               setNextCustomerId(currentIndex < ids.length - 1 ? ids[currentIndex + 1] : null);
           }
       } else if (id) {
-          // Fallback if no context provided (e.g. direct link or F5)
           fetchSiblingCustomers();
       }
   }, [id, location.state]);
 
-  // --- KEYBOARD NAVIGATION EFFECT ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        // Prevent navigation if user is typing in an input or textarea
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
             return;
         }
-
         if (e.key === 'ArrowLeft' && prevCustomerId) {
             navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext } });
         } else if (e.key === 'ArrowRight' && nextCustomerId) {
@@ -132,43 +137,11 @@ const CustomerDetail: React.FC = () => {
             }
         }
     };
-
     window.addEventListener('keydown', handleKeyDown);
-    return () => {
-        window.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => { window.removeEventListener('keydown', handleKeyDown); };
   }, [prevCustomerId, nextCustomerId, customerListContext, id, navigate]);
 
   useEffect(() => { if (toast) { const timer = setTimeout(() => setToast(null), 3000); return () => clearTimeout(timer); } }, [toast]);
-
-  useEffect(() => {
-      if (customer && customer.is_long_term && customer.recare_date) {
-          if (customer.recare_date <= todayStr) {
-              updateCustomerField({ is_long_term: false });
-              setIsLongTerm(false);
-              showToast("Đã đến hạn CS Dài hạn. Chuyển về chế độ thường.", 'success');
-              handleAddNote('note', `Hệ thống: Đã đến hạn chăm sóc dài hạn (${new Date(customer.recare_date).toLocaleDateString('vi-VN')}).`);
-          }
-      }
-
-      if (isLongTerm && !recareDate) {
-          if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
-          longTermTimeoutRef.current = setTimeout(() => {
-              setIsLongTerm(false);
-              updateCustomerField({ is_long_term: false });
-              showToast("Đã tắt CS Dài hạn do chưa chọn ngày!", 'error');
-          }, 7000);
-      } else {
-          if (longTermTimeoutRef.current) {
-              clearTimeout(longTermTimeoutRef.current);
-              longTermTimeoutRef.current = null;
-          }
-      }
-
-      return () => {
-          if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
-      };
-  }, [customer, isLongTerm, recareDate]);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => setToast({ msg, type });
   const formatCurrency = (value: number) => !value ? '0' : value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
@@ -178,10 +151,19 @@ const CustomerDetail: React.FC = () => {
   const fetchEmployees = async () => { 
       try { 
           let query = supabase.from('profiles').select('*').eq('status', 'active');
-          const { data } = await query;
-          if (data) {
-              setEmployees(data as UserProfile[]); 
+          if (!isAdmin) {
+              if (isMod) {
+                  query = query.or(`id.eq.${userProfile?.id},manager_id.eq.${userProfile?.id}`);
+              } else {
+                  if (userProfile?.manager_id) {
+                      query = query.eq('manager_id', userProfile.manager_id);
+                  } else {
+                      query = query.eq('id', userProfile?.id);
+                  }
+              }
           }
+          const { data } = await query;
+          if (data) { setEmployees(data as UserProfile[]); }
       } catch (e) { console.error("Error fetching employees", e); } 
   };
 
@@ -215,10 +197,8 @@ const CustomerDetail: React.FC = () => {
           if (!id) return;
           let query = supabase.from('customers').select('id').order('created_at', { ascending: false });
           if (!isAdmin && !isMod && userProfile?.id) query = query.eq('creator_id', userProfile.id);
-          
           const { data } = await query;
           if (!data) return;
-          
           const currentIndex = data.findIndex(c => c.id === id);
           if (currentIndex !== -1) {
               setPrevCustomerId(currentIndex > 0 ? data[currentIndex - 1].id : null);
@@ -318,11 +298,17 @@ const CustomerDetail: React.FC = () => {
       showToast("Đã mở lại chăm sóc!");
   };
 
+  // CHECK IF MKT GROUP (For strictly enforcing finance visibility)
+  const isMKTSource = useMemo(() => {
+      return customer?.source === 'MKT Group' || (customer?.source || '').includes('MKT');
+  }, [customer]);
+
   const handleApproveRequest = async () => {
       if (!customer) return;
       if (customer.status === CustomerStatus.WON_PENDING) {
           await updateCustomerField({ status: CustomerStatus.WON, deal_status: 'processing' });
-          if (customer.deal_details?.revenue) {
+          // Only create revenue transaction if customer is MKT
+          if (customer.deal_details?.revenue && isMKTSource) {
              await supabase.from('transactions').insert([{
                 customer_id: id, customer_name: customer.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
                 type: 'revenue', amount: customer.deal_details.revenue, reason: 'Doanh thu dự kiến (Duyệt chốt)', status: 'approved'
@@ -432,6 +418,7 @@ const CustomerDetail: React.FC = () => {
           const newActual = currentActual + amount;
           const newDealDetails = { ...customer?.deal_details, actual_revenue: newActual };
 
+          // UPDATE CUSTOMER DB ONLY - NO TRANSACTION
           const { error } = await supabase.from('customers').update({ deal_details: newDealDetails }).eq('id', id);
           if (error) throw error;
           
@@ -443,20 +430,41 @@ const CustomerDetail: React.FC = () => {
       } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); }
   };
 
+  const handleAddIncurredExpense = async () => {
+      const amount = Number(incurredExpenseForm.amount.replace(/\./g, ''));
+      if (!amount || amount <= 0 || !incurredExpenseForm.reason) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; }
+      try {
+          const { data, error } = await supabase.from('transactions').insert([{
+              customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
+              type: 'incurred_expense', // New Type
+              amount: amount, 
+              reason: incurredExpenseForm.reason, 
+              status: 'approved' // Usually auto-approved as it doesn't affect fund, just record keeping
+          }]).select().single();
+          if (error) throw error;
+          
+          setTransactions(prev => [data as Transaction, ...prev]);
+          setShowIncurredExpenseModal(false);
+          setIncurredExpenseForm({ amount: '', reason: '' });
+          handleAddNote('note', `Thêm khoản chi phát sinh: ${formatCurrency(amount)} VNĐ. Lý do: ${incurredExpenseForm.reason}`);
+          showToast("Đã thêm khoản chi phát sinh!");
+      } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); }
+  };
+
   const handleRequestExpense = async () => {
       const amount = Number(expenseForm.amount.replace(/\./g, ''));
       if (!amount || amount <= 0 || !expenseForm.reason) { showToast("Vui lòng nhập đủ thông tin.", 'error'); return; }
       try {
           const { data, error } = await supabase.from('transactions').insert([{
               customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
-              type: expenseForm.type, subtype: expenseForm.type === 'advance' ? expenseForm.subtype as any : undefined,
+              type: expenseForm.type, 
               amount: amount, reason: expenseForm.reason, status: 'pending'
           }]).select().single();
           if (error) throw error;
           setTransactions(prev => [data as Transaction, ...prev]);
           setShowExpenseModal(false);
-          setExpenseForm({ type: 'expense', subtype: 'deductible', amount: '', reason: '' });
-          const actionText = expenseForm.type === 'advance' ? `ứng tiền (${expenseForm.subtype === 'refundable' ? 'Hoàn trả' : 'Cấn trừ'})` : 'chi tiền';
+          setExpenseForm({ type: 'expense', amount: '', reason: '' });
+          const actionText = expenseForm.type === 'advance' ? `ứng tiền` : 'chi tiền';
           handleAddNote('note', `Đã gửi yêu cầu ${actionText}: ${formatCurrency(amount)} VNĐ.`);
           showToast("Đã gửi yêu cầu duyệt!");
       } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); }
@@ -468,14 +476,18 @@ const CustomerDetail: React.FC = () => {
       try {
           const { data, error } = await supabase.from('transactions').insert([{
               customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
-              type: 'repayment', amount: amount, reason: repayForm.reason, status: 'approved'
+              type: 'repayment', 
+              amount: amount, 
+              reason: `${repayForm.reason} [Ref:Self]`,
+              status: 'pending'
           }]).select().single();
+          
           if (error) throw error;
           setTransactions(prev => [data as Transaction, ...prev]);
           setShowRepayModal(false);
           setRepayForm({ amount: '', reason: 'Nộp lại tiền ứng' });
-          handleAddNote('note', `Đã nộp lại tiền ứng: ${formatCurrency(amount)} VNĐ.`);
-          showToast("Đã nộp tiền thành công!");
+          handleAddNote('note', `Đã gửi yêu cầu nộp lại tiền ứng: ${formatCurrency(amount)} VNĐ.`);
+          showToast("Đã gửi yêu cầu nộp tiền! Chờ Admin duyệt.", 'success');
       } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); }
   };
 
@@ -484,16 +496,39 @@ const CustomerDetail: React.FC = () => {
       if (!amount || amount <= 0 || !dealerDebtForm.targetDate) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; }
       try {
           const { data, error } = await supabase.from('transactions').insert([{
-              customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
+              customer_id: id, customer_name: customer?.name, user_id: customer?.creator_id || userProfile?.id, user_name: customer?.sales_rep || userProfile?.full_name,
               type: 'dealer_debt', target_date: dealerDebtForm.targetDate, amount: amount, reason: dealerDebtForm.reason, status: 'approved'
           }]).select().single();
           if (error) throw error;
+          const currentPredicted = customer?.deal_details?.revenue || 0;
+          const currentActual = customer?.deal_details?.actual_revenue || 0;
+          const newDealDetails = { ...customer?.deal_details, revenue: currentPredicted + amount, actual_revenue: currentActual + amount };
+          await updateCustomerField({ deal_details: newDealDetails as any });
           setTransactions(prev => [data as Transaction, ...prev]);
           setShowDealerDebtModal(false);
           setDealerDebtForm({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền' });
-          handleAddNote('note', `Tạo khoản Đại lý nợ: ${formatCurrency(amount)} VNĐ. Dự kiến chi: ${new Date(dealerDebtForm.targetDate).toLocaleDateString('vi-VN')}`);
+          handleAddNote('note', `Tạo khoản Đại lý nợ: ${formatCurrency(amount)} VNĐ. Dự kiến thu: ${new Date(dealerDebtForm.targetDate).toLocaleDateString('vi-VN')}`);
           showToast("Đã tạo khoản nợ!");
       } catch (e) { showToast("Lỗi tạo khoản nợ", 'error'); }
+  };
+
+  const handleDealerDebtPaid = (debtTransaction: Transaction) => { setDealerDebtToConfirm(debtTransaction); };
+
+  const executeDealerDebtPaid = async () => {
+      if (!dealerDebtToConfirm) return;
+      try {
+          const targetUserId = customer?.creator_id || dealerDebtToConfirm.user_id;
+          const targetUserName = customer?.sales_rep || dealerDebtToConfirm.user_name;
+          const { data, error } = await supabase.from('transactions').insert([{
+              customer_id: id, customer_name: customer?.name, user_id: targetUserId, user_name: targetUserName,
+              type: 'deposit', amount: dealerDebtToConfirm.amount, reason: `Thu nợ đại lý: ${dealerDebtToConfirm.reason}`, status: 'approved', approved_by: userProfile?.id
+          }]).select().single();
+          if (error) throw error;
+          await supabase.from('transactions').update({ reason: `${dealerDebtToConfirm.reason} (Đã thu)` }).eq('id', dealerDebtToConfirm.id);
+          setTransactions(prev => [data as Transaction, ...prev.map(t => t.id === dealerDebtToConfirm.id ? {...t, reason: `${t.reason} (Đã thu)`} : t)]);
+          showToast("Đã thu nợ thành công!");
+          handleAddNote('note', `Đã thu hồi khoản nợ đại lý: ${formatCurrency(dealerDebtToConfirm.amount)} VNĐ.`);
+      } catch (e: any) { showToast("Lỗi: " + (e.message || "Unknown"), 'error'); } finally { setDealerDebtToConfirm(null); }
   };
 
   const handleRequestWin = async () => {
@@ -501,19 +536,17 @@ const CustomerDetail: React.FC = () => {
           showToast("Vui lòng nhập đầy đủ thông tin bắt buộc (*) trước khi chốt deal!", 'error');
           return;
       }
-      
       const newStatus = (isAdmin || isMod) ? CustomerStatus.WON : CustomerStatus.WON_PENDING;
-      const revenueNum = Number(dealForm.revenue);
-
+      const revenueNum = Number(dealForm.revenue.replace(/\./g, ''));
       await updateCustomerField({ status: newStatus, deal_details: {...dealForm, revenue: revenueNum}, deal_status: newStatus === CustomerStatus.WON ? 'processing' : undefined });
       
-      if (newStatus === CustomerStatus.WON) {
+      // ONLY create transaction if customer is MKT
+      if (newStatus === CustomerStatus.WON && isMKTSource) {
           await supabase.from('transactions').insert([{
               customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
               type: 'revenue', amount: revenueNum, reason: 'Doanh thu dự kiến (Chốt đơn)', status: 'approved'
           }]);
       }
-
       handleAddNote('note', `Chốt deal: ${formatCurrency(revenueNum)} VNĐ.`);
       setShowWinModal(false);
       showToast("Đã cập nhật!");
@@ -530,14 +563,42 @@ const CustomerDetail: React.FC = () => {
       } catch (e: any) { showToast("Lỗi xóa: " + e.message, 'error'); }
   };
 
+  // --- CALCULATION LOGIC ---
   const predictedRevenue = customer?.deal_details?.revenue || 0;
-  const moneyIn = customer?.deal_details?.actual_revenue || 0;
-  const totalApprovedExpenses = transactions.filter(t => t.type === 'expense' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
-  const actualRevenue = moneyIn - totalApprovedExpenses;
-  const refundableAdvances = transactions.filter(t => t.type === 'advance' && t.subtype === 'refundable' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
-  const repayments = transactions.filter(t => t.type === 'repayment' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
-  const outstandingAdvance = refundableAdvances - repayments;
+  
+  // Calculate Incurred Expenses (Non-Fund Expenses)
+  const totalIncurredExpenses = transactions
+      .filter(t => t.type === 'incurred_expense' && t.status === 'approved')
+      .reduce((acc, curr) => acc + curr.amount, 0);
+
+  const rawActualRevenue = customer?.deal_details?.actual_revenue || 0;
+  
+  // Adjusted Actual Revenue (Total) = Raw Revenue - Incurred Expenses
+  const moneyInTotal = rawActualRevenue - totalIncurredExpenses;
+  
+  // "Deposited" = Sum of all 'deposit' or 'revenue' type transactions that are NOT the initial predicted revenue
+  const totalDeposited = transactions
+      .filter(t => (t.type === 'deposit' || t.type === 'repayment') && t.status === 'approved')
+      .reduce((acc, curr) => acc + curr.amount, 0);
+
+  const pendingDeposit = Math.max(0, moneyInTotal - totalDeposited);
+
+  // Refundable Advances Calculation (All Advances are Refundable now)
+  const refundableAdvances = transactions
+      .filter(t => t.type === 'advance' && t.status === 'approved')
+      .reduce((acc, curr) => acc + curr.amount, 0);
+  
+  const repayments = transactions
+      .filter(t => t.type === 'repayment' && t.status === 'approved')
+      .reduce((acc, curr) => acc + curr.amount, 0);
+  
+  const outstandingAdvance = Math.max(0, refundableAdvances - repayments);
+  
+  const pendingRepaymentExists = transactions.some(t => t.type === 'repayment' && t.status === 'pending');
+
   const totalExpense = transactions.filter(t => (t.type === 'expense' || t.type === 'advance') && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
+
+  const netRevenue = totalDeposited - totalExpense; 
 
   if (loading) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-primary-600" /></div>;
   if (!customer) return <div className="text-center p-8">Không tìm thấy khách hàng</div>;
@@ -548,11 +609,13 @@ const CustomerDetail: React.FC = () => {
   const isCompleted = customer.deal_status === 'completed';
   const isRefunded = customer.deal_status === 'refunded';
   const hideCarePanel = isWon || isLost;
-  const showFinance = isWon && !isCompleted && !isRefunded;
+  
+  // Updated showFinance Logic: Must be Won AND not finished AND MKT Source
+  const showFinance = isWon && !isCompleted && !isRefunded && isMKTSource;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10 relative">
-      {/* HEADER */}
+      {/* HEADER (Unchanged) */}
       <div className="flex flex-col gap-3 mb-2">
         <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -606,7 +669,7 @@ const CustomerDetail: React.FC = () => {
       {/* ... Content Grids (Existing) ... */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="space-y-6">
-          {/* ... Left Column Content (Existing) ... */}
+          {/* ... Left Column Content (Care Panel) ... */}
           {isLost && (
               <div className="bg-red-50 rounded-2xl p-6 shadow-sm border border-red-100 text-center animate-fade-in"><div className="flex justify-center mb-3"><Ban size={48} className="text-red-400" /></div><h3 className="font-bold text-red-700 text-lg mb-2">Khách hàng đang Ngưng Chăm Sóc</h3><p className="text-red-600 text-sm mb-4 italic">"{customer.stop_reason || 'Không có lý do'}"</p><button onClick={handleReopenCare} className="w-full py-2.5 bg-primary-600 text-white rounded-xl font-bold hover:bg-primary-700 transition-all flex items-center justify-center gap-2"><RefreshCcw size={18}/> Mở lại chăm sóc</button></div>
           )}
@@ -633,8 +696,9 @@ const CustomerDetail: React.FC = () => {
                   ) : (
                       <div className="mb-4">
                           <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">{isLongTerm ? 'Ngày CS Dài hạn' : 'Ngày chăm sóc tiếp theo'}</label>
-                          <div className="relative"><input type="date" min={getMinDate()} value={recareDate} onChange={handleDateChange} className={`w-full border rounded-xl px-4 py-2.5 bg-white text-gray-900 font-bold focus:border-primary-500 outline-none ${isLongTerm ? 'border-blue-300 ring-2 ring-blue-50' : 'border-gray-300'}`} /></div>
+                          <div className="relative"><input type="date" min={getMinDate()} max={getMaxDate()} value={recareDate} onChange={handleDateChange} className={`w-full border rounded-xl px-4 py-2.5 bg-white text-gray-900 font-bold focus:border-primary-500 outline-none ${isLongTerm ? 'border-blue-300 ring-2 ring-blue-50' : 'border-gray-300'}`} /></div>
                           {isLongTerm && <p className="text-xs text-blue-500 mt-1 italic">Chọn ngày xa nhất (Tối thiểu 10 ngày từ hôm nay).</p>}
+                          {!isLongTerm && <p className="text-xs text-gray-400 mt-1 italic">Giới hạn chọn: Tối đa 4 ngày từ hôm nay.</p>}
                       </div>
                   )}
                   <div className="space-y-3"><button className="w-full py-2.5 bg-gray-800 text-white rounded-xl font-bold text-sm hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200"><Mail size={16} /> Đặt lịch Lái thử</button><div className="grid grid-cols-2 gap-3"><button onClick={() => setShowStopModal(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1"><Ban size={16} /> Ngưng CS</button><button onClick={() => setShowWinModal(true)} className="py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-1"><CheckCircle2 size={16} /> Chốt Deal</button></div></div>
@@ -643,17 +707,95 @@ const CustomerDetail: React.FC = () => {
           {/* ... Customer Info & Finance Panels ... */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 relative">
             <h3 className="font-bold text-gray-900 mb-4 border-b pb-2 flex justify-between items-center">Thông tin khách hàng{!isEditingInfo && !isWon && !isLost && (<button onClick={() => setIsEditingInfo(true)} className="text-primary-600 hover:text-primary-700 text-xs flex items-center gap-1 font-bold"><Edit size={14} /> Sửa</button>)}</h3>
-            {isEditingInfo && !isWon && !isLost ? (<div className="space-y-3 animate-fade-in"><input value={editForm.phone} disabled className="w-full border rounded px-2 py-1 text-sm font-bold bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" /><input value={editForm.secondary_phone} onChange={e => setEditForm({...editForm, secondary_phone: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập thêm số..." /><select value={editForm.interest} onChange={e => setEditForm({...editForm, interest: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none">{CAR_MODELS.map(m => <option key={m} value={m}>{m}</option>)}</select><input value={editForm.source} onChange={e => setEditForm({...editForm, source: e.target.value})} disabled={editForm.source.includes('MKT Group')} className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold outline-none ${editForm.source.includes('MKT Group') ? 'bg-gray-100' : 'bg-white'}`} /><input value={editForm.location} onChange={e => setEditForm({...editForm, location: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập địa chỉ..." /><div className="flex gap-2 pt-2"><button onClick={() => setIsEditingInfo(false)} className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded">Hủy</button><button onClick={handleSaveInfo} className="flex-1 py-1.5 bg-primary-600 text-white text-xs font-bold rounded flex items-center justify-center gap-1"><Save size={14}/> Lưu</button></div></div>) : (<div className="space-y-4 text-sm"><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Điện thoại</span><span className="font-bold text-gray-900">{customer.phone}</span></div>{customer.secondary_phone && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">SĐT Phụ</span><span className="font-bold text-gray-900">{customer.secondary_phone}</span></div>}<div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Dòng xe</span><span className="font-bold text-primary-700">{customer.interest?.toUpperCase() || '---'}</span></div><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Nguồn</span><span className="font-medium text-gray-900">{customer.source}</span></div><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Phụ trách</span><span className="font-medium text-gray-900">{customer.sales_rep}</span></div><div><span className="text-gray-500 block mb-1">Địa chỉ</span><span className="font-medium text-gray-900">{customer.location || '---'}</span></div></div>)}
+            {isEditingInfo && !isWon && !isLost ? (<div className="space-y-3 animate-fade-in"><input value={editForm.phone} disabled className="w-full border rounded px-2 py-1 text-sm font-bold bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" /><input value={editForm.secondary_phone} onChange={e => setEditForm({...editForm, secondary_phone: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập thêm số..." /><select value={editForm.interest} onChange={e => setEditForm({...editForm, interest: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none">{CAR_MODELS.map(m => <option key={m} value={m}>{m}</option>)}</select><input value={editForm.source} onChange={e => setEditForm({...editForm, source: e.target.value})} disabled={editForm.source.includes('MKT Group')} className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold outline-none ${editForm.source.includes('MKT Group') ? 'bg-gray-100' : 'bg-white'}`} /><input value={editForm.location} onChange={e => setEditForm({...editForm, location: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập địa chỉ..." /><div className="flex gap-2 pt-2"><button onClick={() => setIsEditingInfo(false)} className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded">Hủy</button><button onClick={handleSaveInfo} className="flex-1 py-1.5 bg-primary-600 text-white text-xs font-bold rounded flex items-center justify-center gap-1"><Save size={14}/> Lưu</button></div></div>) : (<div className="space-y-4 text-sm"><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Điện thoại</span><span className="font-bold text-gray-900">{customer.phone}</span></div>{customer.secondary_phone && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">SĐT Phụ</span><span className="font-bold text-gray-900">{customer.secondary_phone}</span></div>}
+            <div className="flex gap-2 mb-2">
+                <a href={`tel:${customer.phone}`} className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors">
+                    <Phone size={14} /> Gọi điện
+                </a>
+                <a href={`https://zalo.me/${customer.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors">
+                    <MessageCircle size={14} /> Chat Zalo
+                </a>
+            </div>
+            <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Dòng xe</span><span className="font-bold text-primary-700">{customer.interest?.toUpperCase() || '---'}</span></div><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Nguồn</span><span className="font-medium text-gray-900">{customer.source}</span></div><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Phụ trách</span><span className="font-medium text-gray-900">{customer.sales_rep}</span></div><div><span className="text-gray-500 block mb-1">Địa chỉ</span><span className="font-medium text-gray-900">{customer.location || '---'}</span></div></div>)}
           </div>
           {showFinance && (
-              <div className="bg-white rounded-2xl p-6 shadow-sm border border-green-200"><h3 className="font-bold text-green-800 mb-4 border-b border-green-100 pb-2 flex items-center gap-2"><BadgeDollarSign size={20} /> Tài chính Đơn hàng</h3><div className="space-y-4"><div className="bg-green-50 p-3 rounded-xl border border-green-100"><p className="text-xs text-green-700 font-bold uppercase">Doanh thu dự kiến (Gốc)</p><p className="text-lg font-bold text-green-900">{formatCurrency(predictedRevenue)} VNĐ</p></div><div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100"><div className="flex justify-between items-center"><p className="text-xs text-emerald-700 font-bold uppercase">Doanh thu thực tế (Tổng)</p><button onClick={() => setShowAddRevenueModal(true)} className="p-1 bg-emerald-200 rounded hover:bg-emerald-300 text-emerald-800"><Plus size={14}/></button></div><p className="text-xl font-bold text-emerald-900">{formatCurrency(actualRevenue)} VNĐ</p></div><div className="bg-red-50 p-3 rounded-xl border border-red-100"><p className="text-xs text-red-700 font-bold uppercase">Tổng chi phí (Đã duyệt)</p><p className="text-lg font-bold text-red-900">{formatCurrency(totalExpense)} VNĐ</p>{outstandingAdvance > 0 && (<div className="mt-2 pt-2 border-t border-red-100 flex items-center justify-between"><div><p className="text-[10px] text-red-600 font-bold uppercase">Nợ ứng cần hoàn trả</p><p className="text-sm font-bold text-red-800">{formatCurrency(outstandingAdvance)} VNĐ</p></div><button onClick={() => setShowRepayModal(true)} className="px-2 py-1 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 flex items-center gap-1"><Undo2 size={12}/> Nộp lại</button></div>)}<div className="flex gap-2 mt-2"><button onClick={() => { setExpenseForm({type: 'advance', subtype: 'deductible', amount: '', reason: ''}); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50">Yêu cầu Ứng</button><button onClick={() => { setExpenseForm({type: 'expense', subtype: 'deductible', amount: '', reason: ''}); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50">Yêu cầu Chi</button></div></div><div className="pt-2 border-t border-green-50"><button onClick={() => setShowDealerDebtModal(true)} className="w-full py-2 bg-white border border-green-200 text-green-700 font-bold rounded-xl text-sm hover:bg-green-50 flex items-center justify-center gap-2"><Building2 size={16}/> Tạo khoản Đại lý nợ</button></div></div></div>
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-green-200">
+                  <h3 className="font-bold text-green-800 mb-4 border-b border-green-100 pb-2 flex items-center gap-2"><BadgeDollarSign size={20} /> Tài chính Đơn hàng</h3>
+                  <div className="space-y-4">
+                      <div className="bg-green-50 p-3 rounded-xl border border-green-100"><p className="text-xs text-green-700 font-bold uppercase">Doanh thu dự kiến (Gốc)</p><p className="text-lg font-bold text-green-900">{formatCurrency(predictedRevenue)} VNĐ</p></div>
+                      
+                      <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+                          <div className="flex justify-between items-center"><p className="text-xs text-emerald-700 font-bold uppercase">Doanh thu thực tế (Tổng)</p><button onClick={() => setShowAddRevenueModal(true)} className="p-1 bg-emerald-200 rounded hover:bg-emerald-300 text-emerald-800"><Plus size={14}/></button></div>
+                          <p className="text-xl font-bold text-emerald-900">{formatCurrency(moneyInTotal)} VNĐ</p>
+                          <p className="text-xs text-emerald-600 mt-1">Gốc: {formatCurrency(rawActualRevenue)} - Chi PS: {formatCurrency(totalIncurredExpenses)}</p>
+                      </div>
+
+                      {/* Incurred Expenses Section */}
+                      <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
+                          <div className="flex justify-between items-center">
+                              <p className="text-xs text-gray-700 font-bold uppercase">Chi phí phát sinh (Trừ DT)</p>
+                              <button onClick={() => setShowIncurredExpenseModal(true)} className="p-1 bg-gray-200 rounded hover:bg-gray-300 text-gray-800"><Plus size={14}/></button>
+                          </div>
+                          <p className="text-lg font-bold text-gray-800">-{formatCurrency(totalIncurredExpenses)} VNĐ</p>
+                          <p className="text-[10px] text-gray-500 italic mt-1">Không trừ vào quỹ nhóm.</p>
+                      </div>
+                      
+                      {/* --- PENDING DEPOSIT SECTION --- */}
+                      <div className="bg-orange-50 p-3 rounded-xl border border-orange-100">
+                          <p className="text-xs text-orange-700 font-bold uppercase flex justify-between">
+                              <span>Đã nộp quỹ: {formatCurrency(totalDeposited)}</span>
+                          </p>
+                          <div className="flex justify-between items-end mt-1">
+                              <div>
+                                  <p className="text-[10px] text-orange-600 font-bold uppercase">Chưa vào quỹ</p>
+                                  <p className="text-lg font-bold text-orange-800">{formatCurrency(pendingDeposit)} VNĐ</p>
+                              </div>
+                              <button onClick={() => { navigate('/finance'); }} className="px-2 py-1 bg-white border border-orange-200 text-orange-700 text-xs font-bold rounded hover:bg-orange-100 shadow-sm">Nộp ngay</button>
+                          </div>
+                      </div>
+
+                      <div className="bg-red-50 p-3 rounded-xl border border-red-100">
+                          <p className="text-xs text-red-700 font-bold uppercase">Tổng chi phí (Đã duyệt)</p>
+                          <p className="text-lg font-bold text-red-900">{formatCurrency(totalExpense)} VNĐ</p>
+                          
+                          {outstandingAdvance > 0 && (
+                              <div className="mt-2 pt-2 border-t border-red-100 flex items-center justify-between">
+                                  <div>
+                                      <p className="text-[10px] text-red-600 font-bold uppercase">Nợ ứng cần hoàn trả</p>
+                                      <p className="text-sm font-bold text-red-800">{formatCurrency(outstandingAdvance)} VNĐ</p>
+                                  </div>
+                                  
+                                  {pendingRepaymentExists ? (
+                                      <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded border border-yellow-200 animate-pulse">Đang chờ duyệt...</span>
+                                  ) : (
+                                      <button onClick={() => { setRepayForm({ amount: outstandingAdvance.toLocaleString('vi-VN'), reason: 'Nộp lại tiền ứng' }); setShowRepayModal(true); }} className="px-2 py-1 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 flex items-center gap-1">
+                                          <Undo2 size={12}/> Nộp lại
+                                      </button>
+                                  )}
+                              </div>
+                          )}
+                          
+                          <div className="flex gap-2 mt-2">
+                              <button onClick={() => { setExpenseForm({type: 'advance', amount: '', reason: ''}); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50">Yêu cầu Ứng</button>
+                              <button onClick={() => { setExpenseForm({type: 'expense', amount: '', reason: ''}); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50">Yêu cầu Chi</button>
+                          </div>
+                      </div>
+                      
+                      <div className="pt-2 border-t border-green-50"><button onClick={() => setShowDealerDebtModal(true)} className="w-full py-2 bg-white border border-green-200 text-green-700 font-bold rounded-xl text-sm hover:bg-green-50 flex items-center justify-center gap-2"><Building2 size={16}/> Tạo khoản Đại lý nợ</button></div></div></div>
           )}
         </div>
 
         {/* RIGHT PANEL */}
         <div className="lg:col-span-2 space-y-6">
             {showFinance && transactions.length > 0 && (
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"><div className="p-4 border-b bg-gray-50 flex items-center justify-between"><h3 className="font-bold text-gray-900">Lịch sử Tài chính</h3></div><div className="p-4 overflow-y-auto max-h-[300px] space-y-3">{transactions.map(t => (<div key={t.id} className="flex justify-between items-center p-3 rounded-lg border border-gray-100 bg-gray-50"><div className="flex items-center gap-3"><div className={`p-2 rounded-full ${['revenue','deposit','repayment'].includes(t.type) ? 'bg-green-100 text-green-600' : t.type === 'dealer_debt' ? 'bg-orange-100 text-orange-600' : 'bg-red-100 text-red-600'}`}>{['revenue','deposit','repayment'].includes(t.type) ? <BadgeDollarSign size={16}/> : t.type === 'dealer_debt' ? <Building2 size={16}/> : <Wallet size={16}/>}</div><div><p className="text-sm font-bold text-gray-900">{t.reason}</p><p className="text-xs text-gray-500">{t.type === 'dealer_debt' ? `Dự kiến chi: ${t.target_date ? new Date(t.target_date).toLocaleDateString('vi-VN') : 'N/A'}` : `${new Date(t.created_at).toLocaleDateString('vi-VN')} • ${t.user_name}`}</p></div></div><div className="flex items-center gap-2"><div className="text-right"><p className={`font-bold text-sm ${['revenue','deposit','repayment'].includes(t.type) ? 'text-green-600' : t.type === 'dealer_debt' ? 'text-orange-600' : 'text-red-600'}`}>{['revenue','deposit','repayment'].includes(t.type) ? '+' : '-'}{formatCurrency(t.amount)}</p><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${t.status === 'approved' ? 'bg-green-100 text-green-700' : t.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{t.status === 'approved' ? 'Đã duyệt' : t.status === 'pending' ? 'Chờ duyệt' : 'Từ chối'}</span></div>{(isAdmin || isMod) && (<button onClick={() => setTransactionToDelete(t)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>)}</div></div>))}</div></div>
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"><div className="p-4 border-b bg-gray-50 flex items-center justify-between"><h3 className="font-bold text-gray-900">Lịch sử Tài chính</h3></div><div className="p-4 overflow-y-auto max-h-[300px] space-y-3">{transactions.map(t => (<div key={t.id} className="flex justify-between items-center p-3 rounded-lg border border-gray-100 bg-gray-50"><div className="flex items-center gap-3"><div className={`p-2 rounded-full ${['revenue','deposit','repayment'].includes(t.type) ? 'bg-green-100 text-green-600' : t.type === 'dealer_debt' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{['revenue','deposit','repayment'].includes(t.type) ? <BadgeDollarSign size={16}/> : t.type === 'dealer_debt' ? <Building2 size={16}/> : <Wallet size={16}/>}</div><div><p className="text-sm font-bold text-gray-900">{t.reason}</p><p className="text-xs text-gray-500">{t.type === 'dealer_debt' ? `Hạn thanh toán: ${t.target_date ? new Date(t.target_date).toLocaleDateString('vi-VN') : 'N/A'}` : `${new Date(t.created_at).toLocaleDateString('vi-VN')} • ${t.user_name}`}</p></div></div><div className="flex items-center gap-2"><div className="text-right"><p className={`font-bold text-sm ${['revenue','deposit','repayment'].includes(t.type) ? 'text-green-600' : t.type === 'dealer_debt' ? 'text-green-600' : t.type === 'incurred_expense' ? 'text-gray-600' : 'text-red-600'}`}>{['revenue','deposit','repayment'].includes(t.type) ? '+' : t.type === 'dealer_debt' ? '+' : '-'}{formatCurrency(t.amount)}</p><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${t.status === 'approved' ? 'bg-green-100 text-green-700' : t.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{t.status === 'approved' ? 'Đã duyệt' : t.status === 'pending' ? 'Chờ duyệt' : 'Từ chối'}</span></div>{(isAdmin || isMod) && (<button onClick={() => setTransactionToDelete(t)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>)}
+            {/* DEALER DEBT PAID BUTTON */}
+            {t.type === 'dealer_debt' && !t.reason.includes('(Đã thu)') && (isAdmin || isMod) && (
+                <button onClick={() => setDealerDebtToConfirm(t)} className="px-2 py-1 bg-green-50 text-green-700 border border-green-200 text-xs font-bold rounded flex items-center gap-1 hover:bg-green-100 transition-colors ml-2" title="Đại lý đã chi tiền">
+                    <Check size={12}/> Đại lý đã chi
+                </button>
+            )}
+            </div></div>))}</div></div>
             )}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-4 border-b bg-gray-50 flex items-center justify-between"><h3 className="font-bold text-gray-900">Lịch sử chăm sóc</h3></div>
@@ -662,18 +804,25 @@ const CustomerDetail: React.FC = () => {
         </div>
       </div>
 
-      {/* ... Modals (Structure Unchanged) ... */}
+      {/* ... Modals ... */}
       {showChangeSalesModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 max-h-[80vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Chuyển quyền chăm sóc</h3><button onClick={() => setShowChangeSalesModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="space-y-2">{employees.map(emp => (<button key={emp.id} onClick={() => prepareChangeSales(emp)} className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors text-left group"><div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center font-bold text-gray-600 group-hover:bg-primary-100 group-hover:text-primary-700">{emp.full_name.charAt(0)}</div><div><p className="font-bold text-gray-900">{emp.full_name}</p><p className="text-xs text-gray-500 capitalize">{emp.role}</p></div></button>))}</div></div></div>)}
       {showDeleteConfirm && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl"><div className="flex flex-col items-center text-center"><div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-3"><Trash2 size={24}/></div><h3 className="text-lg font-bold text-gray-900 mb-2">Xóa khách hàng?</h3><p className="text-sm text-gray-500 mb-6">Hành động này sẽ xóa vĩnh viễn toàn bộ lịch sử chăm sóc và giao dịch. Không thể hoàn tác.</p><div className="flex gap-3 w-full"><button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Hủy</button><button onClick={executeDeleteCustomer} className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200">Xóa ngay</button></div></div></div></div>)}
       {showChangeSalesConfirm && (<div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl"><div className="flex flex-col items-center text-center"><div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-3"><UserPlus size={24}/></div><h3 className="text-lg font-bold text-gray-900 mb-2">Xác nhận chuyển quyền</h3><p className="text-sm text-gray-500 mb-4">Bạn có chắc chắn muốn {showChangeSalesConfirm.type === 'direct' ? 'chuyển ngay' : 'gửi yêu cầu chuyển'} khách hàng này sang <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</p><div className="flex gap-3 w-full"><button onClick={() => setShowChangeSalesConfirm(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Hủy</button><button onClick={executeChangeSales} className="flex-1 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200">{showChangeSalesConfirm.type === 'direct' ? 'Chuyển ngay' : 'Gửi yêu cầu'}</button></div></div></div></div>)}
-      {showExpenseModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4"><h3 className="text-lg font-bold text-red-700">{expenseForm.type === 'advance' ? 'Yêu cầu Ứng tiền' : 'Yêu cầu Chi tiền'}</h3>{expenseForm.type === 'advance' && (<div className="flex gap-2 p-1 bg-gray-100 rounded-lg"><button onClick={() => setExpenseForm({...expenseForm, subtype: 'deductible'})} className={`flex-1 py-1 text-xs font-bold rounded ${expenseForm.subtype === 'deductible' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>Cấn trừ doanh thu</button><button onClick={() => setExpenseForm({...expenseForm, subtype: 'refundable'})} className={`flex-1 py-1 text-xs font-bold rounded ${expenseForm.subtype === 'refundable' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>Sẽ hoàn trả lại</button></div>)}<div><label className="text-sm font-bold text-gray-600">Số tiền (VNĐ)</label><input type="text" value={expenseForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do chi</label><input type="text" value={expenseForm.reason} onChange={e => setExpenseForm({...expenseForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder={expenseForm.type === 'advance' ? "VD: Ứng đi đăng ký xe" : "VD: Mua hoa tặng khách"} /></div><div className="flex justify-end gap-2"><button onClick={() => setShowExpenseModal(false)} className="px-3 py-2 bg-gray-100 rounded-lg text-gray-600 font-bold">Hủy</button><button onClick={handleRequestExpense} className="px-3 py-2 bg-red-600 text-white rounded-lg font-bold">Gửi yêu cầu</button></div></div></div>)}
-      {showDealerDebtModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4"><h3 className="text-lg font-bold text-orange-700">Tạo khoản Đại lý nợ</h3><div><label className="text-sm font-bold text-gray-600">Số tiền nợ (VNĐ)</label><input type="text" value={dealerDebtForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealerDebtForm({...dealerDebtForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Dự kiến chi</label><input type="date" value={dealerDebtForm.targetDate} onChange={e => setDealerDebtForm({...dealerDebtForm, targetDate: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><div><label className="text-sm font-bold text-gray-600">Ghi chú</label><input type="text" value={dealerDebtForm.reason} onChange={e => setDealerDebtForm({...dealerDebtForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><div className="flex justify-end gap-2"><button onClick={() => setShowDealerDebtModal(false)} className="px-3 py-2 bg-gray-100 rounded-lg text-gray-600 font-bold">Hủy</button><button onClick={handleSubmitDealerDebt} className="px-3 py-2 bg-orange-600 text-white rounded-lg font-bold">Tạo khoản nợ</button></div></div></div>)}
-      {showStopModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><h3 className="text-lg font-bold text-gray-900 mb-4">Ngưng chăm sóc</h3><textarea value={stopReason} onChange={(e) => setStopReason(e.target.value)} className="w-full border border-gray-300 rounded-xl p-3 mb-4 outline-none focus:border-red-500" placeholder="Lý do (VD: Khách đã mua xe hãng khác...)" rows={3}></textarea><div className="flex gap-2"><button onClick={() => setShowStopModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl">Hủy</button><button onClick={handleStopCare} className="flex-1 py-2 bg-red-600 text-white font-bold rounded-xl">Xác nhận</button></div></div></div>)}
-      {showWinModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Xác nhận Chốt Deal</h3><button onClick={() => setShowWinModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Doanh thu dự kiến (VNĐ) <span className="text-red-500">*</span></label><input type="text" value={dealForm.revenue} onChange={(e) => { const v = e.target.value.replace(/\D/g, ''); setDealForm({...dealForm, revenue: v ? v : ''}); }} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none font-bold" /></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Đại lý phân phối <span className="text-red-500">*</span></label><select value={dealForm.distributor} onChange={(e) => setDealForm({...dealForm, distributor: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none appearance-none bg-white"><option value="">-- Chọn đại lý --</option>{distributors.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Hình thức <span className="text-red-500">*</span></label><select value={dealForm.payment_method} onChange={(e) => setDealForm({...dealForm, payment_method: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none appearance-none bg-white"><option value="Tiền mặt">Tiền mặt</option><option value="Ngân hàng">Ngân hàng</option></select></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Biển số <span className="text-red-500">*</span></label><select value={dealForm.plate_type} onChange={(e) => setDealForm({...dealForm, plate_type: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none appearance-none bg-white"><option value="Biển trắng">Biển trắng</option><option value="Biển vàng">Biển vàng</option></select></div></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Tình trạng xe <span className="text-red-500">*</span></label><select value={dealForm.car_availability} onChange={(e) => setDealForm({...dealForm, car_availability: e.target.value as any})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none appearance-none bg-white"><option value="Sẵn xe">Sẵn xe</option><option value="Đợi xe">Đợi xe</option></select></div><div className="flex items-center gap-2 pt-2"><input type="checkbox" checked={dealForm.has_accessories} onChange={(e) => setDealForm({...dealForm, has_accessories: e.target.checked})} className="w-5 h-5 text-primary-600 rounded" /><label className="text-sm font-bold text-gray-700">Có làm phụ kiện</label></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú thêm</label><textarea value={dealForm.notes} onChange={(e) => setDealForm({...dealForm, notes: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none h-20 resize-none"></textarea></div><button onClick={handleRequestWin} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg mt-2">Xác nhận Chốt</button></div></div></div>)}
-      {showAddRevenueModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4"><h3 className="text-lg font-bold text-green-700">Thêm doanh thu thực tế</h3><div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg text-xs">Lưu ý: Doanh thu này chỉ cập nhật số liệu hiển thị, KHÔNG tạo lịch sử giao dịch (cần Nộp quỹ).</div><div><label className="text-sm font-bold text-gray-600">Số tiền (VNĐ)</label><input type="text" value={revenueForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setRevenueForm({...revenueForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Ghi chú</label><input type="text" value={revenueForm.note} onChange={e => setRevenueForm({...revenueForm, note: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder="VD: Lắp thêm phụ kiện" /></div><div className="flex justify-end gap-2"><button onClick={() => setShowAddRevenueModal(false)} className="px-3 py-2 bg-gray-100 rounded-lg text-gray-600 font-bold">Hủy</button><button onClick={handleAddRevenue} className="px-3 py-2 bg-green-600 text-white rounded-lg font-bold">Thêm</button></div></div></div>)}
-      {showRepayModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4"><h3 className="text-lg font-bold text-green-700">Nộp lại tiền ứng</h3><div><label className="text-sm font-bold text-gray-600">Số tiền hoàn trả (VNĐ)</label><input type="text" value={repayForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setRepayForm({...repayForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do/Nguồn tiền</label><input type="text" value={repayForm.reason} onChange={e => setRepayForm({...repayForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><div className="flex justify-end gap-2"><button onClick={() => setShowRepayModal(false)} className="px-3 py-2 bg-gray-100 rounded-lg text-gray-600 font-bold">Hủy</button><button onClick={handleRepayAdvance} className="px-3 py-2 bg-green-600 text-white rounded-lg font-bold">Hoàn trả</button></div></div></div>)}
       
-      {/* DELETE CONFIRMATION MODAL */}
+      {showExpenseModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4"><h3 className="text-lg font-bold text-red-700">{expenseForm.type === 'advance' ? 'Yêu cầu Ứng tiền' : 'Yêu cầu Chi tiền'}</h3><div><label className="text-sm font-bold text-gray-600">Số tiền (VNĐ)</label><input type="text" value={expenseForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do chi</label><input type="text" value={expenseForm.reason} onChange={e => setExpenseForm({...expenseForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder={expenseForm.type === 'advance' ? "VD: Ứng đi đăng ký xe" : "VD: Mua hoa tặng khách"} /></div><div className="flex justify-end gap-2"><button onClick={() => setShowExpenseModal(false)} className="px-3 py-2 bg-gray-100 rounded-lg text-gray-600 font-bold">Hủy</button><button onClick={handleRequestExpense} className="px-3 py-2 bg-red-600 text-white rounded-lg font-bold">Gửi yêu cầu</button></div></div></div>)}
+      
+      {showDealerDebtModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4"><h3 className="text-lg font-bold text-orange-700">Tạo khoản Đại lý nợ</h3><div><label className="text-sm font-bold text-gray-600">Số tiền nợ (VNĐ)</label><input type="text" value={dealerDebtForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealerDebtForm({...dealerDebtForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Dự kiến thu</label><input type="date" value={dealerDebtForm.targetDate} onChange={e => setDealerDebtForm({...dealerDebtForm, targetDate: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><div><label className="text-sm font-bold text-gray-600">Ghi chú</label><input type="text" value={dealerDebtForm.reason} onChange={e => setDealerDebtForm({...dealerDebtForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><div className="flex justify-end gap-2"><button onClick={() => setShowDealerDebtModal(false)} className="px-3 py-2 bg-gray-100 rounded-lg text-gray-600 font-bold">Hủy</button><button onClick={handleSubmitDealerDebt} className="px-3 py-2 bg-orange-600 text-white rounded-lg font-bold">Tạo khoản nợ</button></div></div></div>)}
+      {showStopModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><h3 className="text-lg font-bold text-gray-900 mb-4">Ngưng chăm sóc</h3><textarea value={stopReason} onChange={(e) => setStopReason(e.target.value)} className="w-full border border-gray-300 rounded-xl p-3 mb-4 outline-none focus:border-red-500" placeholder="Lý do (VD: Khách đã mua xe hãng khác...)" rows={3}></textarea><div className="flex gap-2"><button onClick={() => setShowStopModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl">Hủy</button><button onClick={handleStopCare} className="flex-1 py-2 bg-red-600 text-white font-bold rounded-xl">Xác nhận</button></div></div></div>)}
+      
+      {showWinModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Xác nhận Chốt Deal</h3><button onClick={() => setShowWinModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Doanh thu dự kiến (VNĐ) <span className="text-red-500">*</span></label><input type="text" value={dealForm.revenue} onChange={(e) => { const v = e.target.value.replace(/\D/g, ''); setDealForm({...dealForm, revenue: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none font-bold" /></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Đại lý phân phối <span className="text-red-500">*</span></label><select value={dealForm.distributor} onChange={(e) => setDealForm({...dealForm, distributor: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none appearance-none bg-white"><option value="">-- Chọn đại lý --</option>{distributors.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Hình thức <span className="text-red-500">*</span></label><select value={dealForm.payment_method} onChange={(e) => setDealForm({...dealForm, payment_method: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none appearance-none bg-white"><option value="Tiền mặt">Tiền mặt</option><option value="Ngân hàng">Ngân hàng</option></select></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Biển số <span className="text-red-500">*</span></label><select value={dealForm.plate_type} onChange={(e) => setDealForm({...dealForm, plate_type: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none appearance-none bg-white"><option value="Biển trắng">Biển trắng</option><option value="Biển vàng">Biển vàng</option></select></div></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Tình trạng xe <span className="text-red-500">*</span></label><select value={dealForm.car_availability} onChange={(e) => setDealForm({...dealForm, car_availability: e.target.value as any})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none appearance-none bg-white"><option value="Sẵn xe">Sẵn xe</option><option value="Đợi xe">Đợi xe</option></select></div><div className="flex items-center gap-2 pt-2"><input type="checkbox" checked={dealForm.has_accessories} onChange={(e) => setDealForm({...dealForm, has_accessories: e.target.checked})} className="w-5 h-5 text-primary-600 rounded" /><label className="text-sm font-bold text-gray-700">Có làm phụ kiện</label></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú thêm</label><textarea value={dealForm.notes} onChange={(e) => setDealForm({...dealForm, notes: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none h-20 resize-none"></textarea></div><button onClick={handleRequestWin} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg mt-2">Xác nhận Chốt</button></div></div></div>)}
+      
+      {showAddRevenueModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4"><h3 className="text-lg font-bold text-green-700">Thêm doanh thu thực tế</h3><div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg text-xs">Lưu ý: Doanh thu này chỉ cập nhật số liệu hiển thị, KHÔNG tạo lịch sử giao dịch.</div><div><label className="text-sm font-bold text-gray-600">Số tiền (VNĐ)</label><input type="text" value={revenueForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setRevenueForm({...revenueForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Ghi chú</label><input type="text" value={revenueForm.note} onChange={e => setRevenueForm({...revenueForm, note: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder="VD: Lắp thêm phụ kiện" /></div><div className="flex justify-end gap-2"><button onClick={() => setShowAddRevenueModal(false)} className="px-3 py-2 bg-gray-100 rounded-lg text-gray-600 font-bold">Hủy</button><button onClick={handleAddRevenue} className="px-3 py-2 bg-green-600 text-white rounded-lg font-bold">Thêm</button></div></div></div>)}
+      
+      {/* Incurred Expense Modal */}
+      {showIncurredExpenseModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4"><h3 className="text-lg font-bold text-gray-800">Thêm chi phí phát sinh</h3><div className="bg-yellow-50 text-yellow-800 p-2 rounded text-xs">Khoản này sẽ trừ trực tiếp vào <strong>Doanh thu thực tế</strong> của đơn hàng, không ảnh hưởng đến Quỹ nhóm.</div><div><label className="text-sm font-bold text-gray-600">Số tiền (VNĐ)</label><input type="text" value={incurredExpenseForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setIncurredExpenseForm({...incurredExpenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Nội dung</label><input type="text" value={incurredExpenseForm.reason} onChange={e => setIncurredExpenseForm({...incurredExpenseForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><div className="flex justify-end gap-2"><button onClick={() => setShowIncurredExpenseModal(false)} className="px-3 py-2 bg-gray-100 rounded-lg text-gray-600 font-bold">Hủy</button><button onClick={handleAddIncurredExpense} className="px-3 py-2 bg-gray-800 text-white rounded-lg font-bold">Lưu</button></div></div></div>)}
+
+      {showRepayModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4"><h3 className="text-lg font-bold text-green-700">Nộp lại tiền ứng</h3><div><label className="text-sm font-bold text-gray-600">Số tiền hoàn trả (VNĐ)</label><input type="text" value={repayForm.amount} disabled className="w-full border border-gray-200 bg-gray-100 p-2 rounded-lg outline-none text-gray-500 font-bold cursor-not-allowed" /></div><div><label className="text-sm font-bold text-gray-600">Lý do/Nguồn tiền</label><input type="text" value={repayForm.reason} onChange={e => setRepayForm({...repayForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><div className="flex justify-end gap-2"><button onClick={() => setShowRepayModal(false)} className="px-3 py-2 bg-gray-100 rounded-lg text-gray-600 font-bold">Hủy</button><button onClick={handleRepayAdvance} className="px-3 py-2 bg-green-600 text-white rounded-lg font-bold">Gửi yêu cầu</button></div></div></div>)}
+      
       {transactionToDelete && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-red-100">
@@ -712,6 +861,49 @@ const CustomerDetail: React.FC = () => {
                               className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors"
                           >
                               Xóa ngay
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {dealerDebtToConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-green-100">
+                  <div className="flex flex-col items-center text-center">
+                      <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600">
+                          <CheckCircle2 size={32} />
+                      </div>
+                      <h3 className="text-xl font-bold text-gray-900 mb-2">Đại lý đã chi tiền?</h3>
+                      <p className="text-sm text-gray-500 mb-4">
+                          Bạn xác nhận đại lý đã chi trả khoản nợ này? <br/>
+                          Tiền sẽ được cộng vào quỹ nhóm.
+                      </p>
+                      
+                      <div className="w-full bg-green-50 rounded-xl p-4 border border-green-100 mb-6 text-left space-y-2">
+                          <div>
+                              <p className="text-xs text-gray-500">Nội dung</p>
+                              <p className="font-bold text-gray-900">{dealerDebtToConfirm.reason}</p>
+                          </div>
+                          <div>
+                              <p className="text-xs text-gray-500">Số tiền cộng quỹ</p>
+                              <p className="font-bold text-green-600 text-lg">+{formatCurrency(dealerDebtToConfirm.amount)} VNĐ</p>
+                          </div>
+                      </div>
+
+                      <div className="flex gap-3 w-full">
+                          <button 
+                              onClick={() => setDealerDebtToConfirm(null)}
+                              className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+                          >
+                              Hủy bỏ
+                          </button>
+                          <button 
+                              onClick={executeDealerDebtPaid}
+                              className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-colors"
+                          >
+                              Xác nhận
                           </button>
                       </div>
                   </div>

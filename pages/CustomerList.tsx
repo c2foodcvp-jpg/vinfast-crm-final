@@ -24,6 +24,7 @@ const CustomerList: React.FC = () => {
   
   // Filter States
   const [selectedRep, setSelectedRep] = useState<string>('all');
+  const [selectedTeam, setSelectedTeam] = useState<string>('all'); // Add Team Filter
   const [isTodayFilter, setIsTodayFilter] = useState(false);
   const [isUnacknowledgedFilter, setIsUnacknowledgedFilter] = useState(false); 
   const [isExpiredLongTermFilter, setIsExpiredLongTermFilter] = useState(false);
@@ -65,10 +66,7 @@ const CustomerList: React.FC = () => {
   const [formData, setFormData] = useState(initialFormState);
 
   useEffect(() => {
-    fetchCustomers();
-    if (isAdmin || isMod) {
-        fetchEmployees();
-    }
+    fetchCustomersWithIsolation();
   }, [userProfile]);
 
   useEffect(() => {
@@ -100,21 +98,50 @@ const CustomerList: React.FC = () => {
     }
   }, [location.state]);
 
-  const fetchEmployees = async () => {
-      const { data } = await supabase.from('profiles').select('id, full_name').eq('status', 'active');
-      if (data) setEmployees(data as UserProfile[]);
-  };
-
-  const fetchCustomers = async () => {
+  const fetchCustomersWithIsolation = async () => {
+    if (!userProfile) return;
     try {
       setLoading(true);
+      
+      // 1. Determine Team (Isolation)
+      let teamIds: string[] = [];
+      let teamMembers: UserProfile[] = [];
+
+      if (isAdmin) {
+          // Admin fetches all employees for filter dropdown
+          const { data } = await supabase.from('profiles').select('*').eq('status', 'active');
+          if (data) setEmployees(data as UserProfile[]);
+      } else {
+          // MOD or Sales
+          let profileQuery = supabase.from('profiles').select('*');
+          if (isMod) {
+             // MOD sees self + subordinates
+             profileQuery = profileQuery.or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
+          } else {
+             // Sales sees self (and maybe manager for context if needed, but here only self for isolation)
+             profileQuery = profileQuery.eq('id', userProfile.id);
+          }
+          const { data: profiles } = await profileQuery;
+          if (profiles) {
+              teamMembers = profiles as UserProfile[];
+              setEmployees(teamMembers); // Filter dropdown only shows team
+              teamIds = teamMembers.map(p => p.id);
+          }
+      }
+
+      // 2. Fetch Customers
       let query = supabase
         .from('customers')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!isAdmin && !isMod && userProfile?.id) {
-        query = query.eq('creator_id', userProfile.id);
+      if (!isAdmin) {
+          if (teamIds.length > 0) {
+              query = query.in('creator_id', teamIds);
+          } else {
+              // Fallback
+              query = query.eq('creator_id', userProfile.id);
+          }
       }
 
       const { data, error } = await query;
@@ -128,6 +155,15 @@ const CustomerList: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Managers for Dropdown (Admin View)
+  const managers = useMemo(() => {
+      const managerIds = Array.from(new Set(employees.filter(p => p.manager_id).map(p => p.manager_id)));
+      return managerIds.map(id => {
+          const m = employees.find(p => p.id === id);
+          return { id: id as string, name: m?.full_name || 'Unknown' };
+      }).filter(m => m.name !== 'Unknown');
+  }, [employees]);
 
   // ... (Keep existing handler functions: handleScanDuplicates, handleInputChange, toggleZaloOnly, normalizePhone, sendNewCustomerWebhook, handleAddCustomer, executeAddCustomer, handleRequestTransfer, handleDeleteCustomer) ...
   const handleScanDuplicates = async () => {
@@ -250,7 +286,7 @@ const CustomerList: React.FC = () => {
             setIsAddModalOpen(false);
             setIsDuplicateWarningOpen(false);
             setDuplicateData(null);
-            fetchCustomers();
+            fetchCustomersWithIsolation();
             alert("Thêm khách hàng thành công!");
         }
       } catch (err: any) { alert("Lỗi thêm khách: " + err.message); } finally { setIsSubmitting(false); }
@@ -299,6 +335,13 @@ const CustomerList: React.FC = () => {
         );
       });
 
+      // Team Filter (Admin Only)
+      if (isAdmin && selectedTeam !== 'all') {
+          // Find employees in this team
+          const teamMemberIds = employees.filter(e => e.manager_id === selectedTeam || e.id === selectedTeam).map(e => e.id);
+          filtered = filtered.filter(c => teamMemberIds.includes(c.creator_id || ''));
+      }
+
       if ((isAdmin || isMod) && selectedRep !== 'all') {
           filtered = filtered.filter(c => c.creator_id === selectedRep);
       }
@@ -327,7 +370,7 @@ const CustomerList: React.FC = () => {
       }
 
       return filtered;
-  }, [customers, searchTerm, selectedRep, isTodayFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, isAdmin, isMod, todayStr]);
+  }, [customers, searchTerm, selectedRep, selectedTeam, isTodayFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, isAdmin, isMod, todayStr, employees]);
 
   // Tab Filtering logic applied to base list
   const filteredList = useMemo(() => {
@@ -405,12 +448,27 @@ const CustomerList: React.FC = () => {
           <input type="text" placeholder="Tìm kiếm theo tên, SĐT..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all" />
         </div>
         {(isAdmin || isMod) && (
-            <div className="md:w-64">
-                <div className="relative">
+            <div className="flex gap-2 w-full md:w-auto">
+                {/* Team Filter */}
+                {isAdmin && (
+                    <div className="relative md:w-48">
+                        <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                        <select value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-8 text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all appearance-none cursor-pointer">
+                            <option value="all">Tất cả Team</option>
+                            {managers.map(mgr => (<option key={mgr.id} value={mgr.id}>Team {mgr.name}</option>))}
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
+                    </div>
+                )}
+                
+                {/* Rep Filter */}
+                <div className="relative md:w-64">
                     <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                     <select value={selectedRep} onChange={(e) => setSelectedRep(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-8 text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all appearance-none cursor-pointer">
                         <option value="all">Tất cả nhân viên</option>
-                        {employees.map(emp => (<option key={emp.id} value={emp.id}>{emp.full_name}</option>))}
+                        {employees
+                            .filter(emp => isAdmin && selectedTeam !== 'all' ? (emp.manager_id === selectedTeam || emp.id === selectedTeam) : true)
+                            .map(emp => (<option key={emp.id} value={emp.id}>{emp.full_name}</option>))}
                     </select>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
                 </div>

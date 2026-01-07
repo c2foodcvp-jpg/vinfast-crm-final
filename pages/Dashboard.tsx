@@ -4,14 +4,20 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../supabaseClient';
 import * as ReactRouterDOM from 'react-router-dom';
 import { 
-  Users, TrendingUp, CheckCircle, Plus, Loader2, AlertTriangle, Clock, Calendar, BellRing, ChevronRight, Webhook, Send, X, Settings, Zap, MessageSquarePlus, BarChart3, UserPlus, Mail, Copy, Terminal, ExternalLink, ArrowRightLeft, FileCheck2, FileText, Save, Bell, Hand, Filter, Briefcase, Trophy, UserX, MapPin, CarFront, ChevronDown, BadgeDollarSign
+  Users, TrendingUp, CheckCircle, Plus, Loader2, AlertTriangle, Clock, Calendar, BellRing, ChevronRight, Send, X, Settings, Zap, MessageSquarePlus, BarChart3, UserPlus, Mail, Copy, Terminal, ExternalLink, ArrowRightLeft, FileCheck2, FileText, Save, Bell, Hand, Filter, Briefcase, Trophy, UserX, MapPin, CarFront, ChevronDown, BadgeDollarSign
 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { CustomerStatus, Customer, UserProfile, UserRole, CAR_MODELS, CustomerClassification } from '../types';
 
 const { useNavigate } = ReactRouterDOM as any;
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ff6b6b'];
+// Colors updated to match the requested chart style
+const COLORS = {
+  NEW: '#3b82f6',      // Blue
+  WON: '#10b981',      // Green
+  LOST: '#f59e0b',     // Orange/Yellow (Changed from Red/Gray per request logic often implies Lost/Cancelled is distinct)
+  POTENTIAL: '#ef4444' // Red/Hot for Potential (Special Care)
+};
 
 const Dashboard: React.FC = () => {
   const { userProfile, isAdmin, isMod } = useAuth();
@@ -24,23 +30,10 @@ const Dashboard: React.FC = () => {
   const [statusData, setStatusData] = useState<any[]>([]);
   const [leadData, setLeadData] = useState<any[]>([]);
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
-  const [allProfiles, setAllProfiles] = useState<UserProfile[]>([]);
+  const [teamMembers, setTeamMembers] = useState<UserProfile[]>([]);
 
-  // Performance Filter State
+  // Performance Filter State (For Admin to filter by specific teams)
   const [selectedTeam, setSelectedTeam] = useState<string>('all');
-
-  // Discord State (Global Config)
-  const [isDiscordModalOpen, setIsDiscordModalOpen] = useState(false);
-  // State to hold URLs for editing (Admin) or using (All users)
-  const [discordConfig, setDiscordConfig] = useState({
-      webhookUrl: '',
-      newCustomerWebhookUrl: '',
-      summaryWebhookUrl: '',
-      assignWebhookUrl: ''
-  });
-  const [isAutoSend, setIsAutoSend] = useState(false);
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [sendingTest, setSendingTest] = useState(false);
 
   // Notification Bell State
   const [isNotiOpen, setIsNotiOpen] = useState(false);
@@ -49,7 +42,6 @@ const Dashboard: React.FC = () => {
   // --- ADD CUSTOMER MODAL STATE ---
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [sendToDiscord, setSendToDiscord] = useState(true);
   
   // DUPLICATE MODAL STATE
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
@@ -57,9 +49,7 @@ const Dashboard: React.FC = () => {
 
   // GMT+7 Helper
   const getLocalTodayStr = () => {
-    // Create date object for current time
     const now = new Date();
-    // Offset for Vietnam (GMT+7) = 7 * 60 * 60 * 1000 milliseconds
     const vnTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
     return vnTime.toISOString().split('T')[0];
   };
@@ -72,8 +62,7 @@ const Dashboard: React.FC = () => {
   const [formData, setFormData] = useState(initialFormState);
 
   useEffect(() => {
-    fetchStats();
-    loadDiscordSettings(); // Load for EVERYONE so Sales can trigger webhooks too
+    fetchDataWithIsolation();
     const handleClickOutside = (event: MouseEvent) => {
       if (notiRef.current && !notiRef.current.contains(event.target as Node)) {
         setIsNotiOpen(false);
@@ -81,95 +70,76 @@ const Dashboard: React.FC = () => {
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [userProfile]);
+  }, [userProfile, selectedTeam]); // Re-fetch when selectedTeam changes
 
-  const loadDiscordSettings = async () => { 
-      // Try fetching from app_settings first (Source of Truth)
-      try {
-          const { data } = await supabase.from('app_settings').select('*').in('key', ['discord_webhook_new_lead', 'discord_webhook_summary', 'discord_webhook_assign', 'discord_webhook_report']);
-          
-          const newConfig = { ...discordConfig };
-          if (data) {
-              data.forEach((setting: any) => {
-                  if (setting.key === 'discord_webhook_report') newConfig.webhookUrl = setting.value;
-                  if (setting.key === 'discord_webhook_new_lead') newConfig.newCustomerWebhookUrl = setting.value;
-                  if (setting.key === 'discord_webhook_summary') newConfig.summaryWebhookUrl = setting.value;
-                  if (setting.key === 'discord_webhook_assign') newConfig.assignWebhookUrl = setting.value;
-              });
-          }
-          setDiscordConfig(newConfig);
-          
-          // Legacy/Fallback: Update local storage for other pages
-          localStorage.setItem('vinfast_crm_discord_webhook_new_lead', newConfig.newCustomerWebhookUrl);
-          localStorage.setItem('vinfast_crm_discord_webhook_assign', newConfig.assignWebhookUrl);
-      } catch (e) {
-          console.error("Error loading global discord settings", e);
-      }
-  };
-
-  const saveDiscordSettings = async () => {
-      setSavingSettings(true);
-      try {
-          // Save to app_settings table
-          await supabase.from('app_settings').upsert([
-              { key: 'discord_webhook_report', value: discordConfig.webhookUrl },
-              { key: 'discord_webhook_new_lead', value: discordConfig.newCustomerWebhookUrl },
-              { key: 'discord_webhook_summary', value: discordConfig.summaryWebhookUrl },
-              { key: 'discord_webhook_assign', value: discordConfig.assignWebhookUrl },
-          ]);
-          
-          // Sync Local Storage
-          localStorage.setItem('vinfast_crm_discord_webhook', discordConfig.webhookUrl);
-          localStorage.setItem('vinfast_crm_discord_webhook_new_lead', discordConfig.newCustomerWebhookUrl);
-          localStorage.setItem('vinfast_crm_discord_webhook_summary', discordConfig.summaryWebhookUrl);
-          localStorage.setItem('vinfast_crm_discord_webhook_assign', discordConfig.assignWebhookUrl);
-
-          alert("Đã lưu cấu hình Discord cho toàn hệ thống!");
-          setIsDiscordModalOpen(false);
-      } catch (e) {
-          alert("Lỗi lưu cấu hình. Đảm bảo bảng app_settings đã được tạo.");
-      } finally {
-          setSavingSettings(false);
-      }
-  };
-
-  const handleSendDiscordReport = async (isSilent = false) => { };
-
-  const fetchStats = async () => {
-    try {
+  // --- TEAM ISOLATION LOGIC ---
+  const fetchDataWithIsolation = async () => {
+      if (!userProfile) return;
       setLoading(true);
-      let query = supabase.from('customers').select('*');
-      
-      // Determine IDs to filter
-      let teamIds: string[] = [];
-      
-      if (isAdmin) {
-          // Admin sees all
-      } else if (isMod && userProfile) {
-          const { data: teamMembers } = await supabase.from('profiles').select('id').eq('manager_id', userProfile.id);
-          teamIds = teamMembers ? teamMembers.map(m => m.id) : [];
-          teamIds.push(userProfile.id);
-          query = query.in('creator_id', teamIds);
-      } else if (userProfile) {
-          query = query.eq('creator_id', userProfile.id);
-      }
+      try {
+          let teamIds: string[] = [];
+          let members: UserProfile[] = [];
 
-      const { data, error } = await query;
-      if (error) { console.warn("Error loading dashboard data", error); setLoading(false); return; }
-      const customers = data as Customer[] || [];
-      setAllCustomers(customers);
+          if (isAdmin) {
+              // Admin fetches all, but applies filter if selectedTeam is set
+              const { data } = await supabase.from('profiles').select('*');
+              let allMembers = data as UserProfile[] || [];
+              
+              if (selectedTeam !== 'all') {
+                  // Filter members belonging to the selected team (Manager ID match or is the Manager)
+                  members = allMembers.filter(m => m.manager_id === selectedTeam || m.id === selectedTeam);
+              } else {
+                  members = allMembers;
+              }
+              teamIds = members.map(m => m.id);
+          } else {
+              if (isMod) {
+                  const { data } = await supabase.from('profiles').select('*').or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
+                  members = data as UserProfile[] || [];
+              } else {
+                  if (userProfile.manager_id) {
+                       const { data } = await supabase.from('profiles').select('*').or(`id.eq.${userProfile.manager_id},manager_id.eq.${userProfile.manager_id}`);
+                       members = data as UserProfile[] || [];
+                  } else {
+                       members = [userProfile];
+                  }
+              }
+              teamIds = members.map(m => m.id);
+          }
+          
+          setTeamMembers(members);
 
-      if (isAdmin || isMod) {
-          const { data: profiles } = await supabase.from('profiles').select('*');
-          if (profiles) setAllProfiles(profiles as UserProfile[]);
+          // 1. Fetch Customers filtered by Team
+          let query = supabase.from('customers').select('*');
+          
+          // Apply team filter for everyone (Admin included if selectedTeam is set)
+          if (teamIds.length > 0) {
+              query = query.in('creator_id', teamIds);
+          } else if (!isAdmin) {
+              // Fallback for non-admin with no team (should rare)
+              query = query.eq('creator_id', userProfile.id);
+          }
+
+          const { data: customersData, error } = await query;
+          if (error) throw error;
+          const customers = customersData as Customer[] || [];
+          setAllCustomers(customers);
+
+          // 2. Calculate Stats
+          calculateDashboardStats(customers, members, teamIds);
+
+      } catch (err) {
+          console.error("Error fetching isolated data:", err);
+      } finally {
+          setLoading(false);
       }
-      
+  };
+
+  const calculateDashboardStats = async (customers: Customer[], members: UserProfile[], teamIds: string[]) => {
       const total = customers.length;
       
-      // GMT+7 Date Comparison
       const newLeads = customers.filter((c: any) => {
           if (!c.created_at) return false;
-          // Convert UTC created_at to GMT+7 Date object
           const d = new Date(c.created_at);
           const vnDate = new Date(d.getTime() + (7 * 60 * 60 * 1000));
           const cDate = vnDate.toISOString().split('T')[0];
@@ -178,52 +148,34 @@ const Dashboard: React.FC = () => {
 
       const won = customers.filter((c: any) => c.status === CustomerStatus.WON).length;
       
+      // LOGIC: Potential = Special Care only
       const potential = customers.filter((c: any) => 
-          c.classification === 'Hot' && 
+          c.is_special_care === true && 
           c.status !== CustomerStatus.WON && 
           c.status !== CustomerStatus.LOST
       ).length;
 
       setStats({ total, new: newLeads, won, potential });
 
-      // Alerts Logic (Using todayStr which is now GMT+7)
-      const dueCount = customers.filter((c: any) => {
-          if (c.is_special_care || c.is_long_term) return false;
-          if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false;
-          return c.recare_date === todayStr;
-      }).length;
-
-      // UPDATE: Logic quá hạn (Đã fix chính xác để khớp CustomerList)
-      const overdueCount = customers.filter((c: any) => {
-          if (c.is_special_care) return false; 
-          if (c.is_long_term) return false; // Loại trừ CS Dài hạn
-          if (c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false;
-          if (!c.recare_date) return false;
-          return c.recare_date < todayStr;
-      }).length;
-
-      // UPDATE: Hết hạn CS Dài hạn (Chỉ tính ĐÚNG ngày hôm nay hoặc trễ hơn)
-      const expiredLongTerm = customers.filter((c: any) => {
-          if (!c.is_long_term) return false;
-          if (c.status === CustomerStatus.WON || c.status === CustomerStatus.LOST) return false;
-          // Logic mới: Chỉ báo alert nếu recare_date <= todayStr (đến hạn phải chăm sóc lại)
-          if (!c.recare_date) return false;
-          return c.recare_date <= todayStr;
-      }).length;
-
-      const assignedTodayToMe = (!isAdmin && !isMod) ? customers.filter((c: Customer) => {
-          return c.status === CustomerStatus.NEW && c.is_acknowledged === false && c.creator_id === userProfile?.id;
-      }).length : 0;
-
+      // Alerts Calculation
+      const dueCount = customers.filter((c: any) => !c.is_special_care && !c.is_long_term && c.recare_date === todayStr && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length;
+      const overdueCount = customers.filter((c: any) => !c.is_special_care && !c.is_long_term && c.recare_date && c.recare_date < todayStr && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length;
+      const expiredLongTerm = customers.filter((c: any) => c.is_long_term && c.recare_date && c.recare_date <= todayStr && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
+      const assignedTodayToMe = customers.filter((c: Customer) => c.status === CustomerStatus.NEW && c.is_acknowledged === false && c.creator_id === userProfile?.id).length;
       const unacknowledgedLeads = customers.filter((c: any) => c.status === CustomerStatus.NEW && c.is_acknowledged === false && c.sales_rep);
       const pendingAckCount = unacknowledgedLeads.length;
-      const uniqueReps = new Set(unacknowledgedLeads.map((c: any) => c.sales_rep));
-      const pendingAckReps = uniqueReps.size;
-
+      const pendingAckReps = new Set(unacknowledgedLeads.map((c: any) => c.sales_rep)).size;
+      
+      // Pending Finance (Need to fetch isolated transactions count)
       let pendingFinance = 0;
       if (isAdmin || isMod) {
-          const { count: financeCount } = await supabase.from('transactions').select('*', {count: 'exact', head: true}).eq('status', 'pending');
-          pendingFinance = financeCount || 0;
+          let fQuery = supabase.from('transactions').select('*', {count: 'exact', head: true}).eq('status', 'pending');
+          // If filtered by team, also filter finance
+          if (!isAdmin || (isAdmin && selectedTeam !== 'all')) {
+              fQuery = fQuery.in('user_id', teamIds);
+          }
+          const { count } = await fQuery;
+          pendingFinance = count || 0;
       }
 
       const pendingCustomers = customers.filter((c: any) => c.status === CustomerStatus.WON_PENDING || c.status === CustomerStatus.LOST_PENDING).length;
@@ -232,55 +184,49 @@ const Dashboard: React.FC = () => {
 
       let pendingEmployees = 0;
       if (isAdmin || isMod) {
-          const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('status', 'pending');
-          pendingEmployees = count || 0;
+          if (isAdmin && selectedTeam === 'all') {
+              const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+              pendingEmployees = count || 0;
+          }
       }
 
       setAlerts({ due: dueCount, overdue: overdueCount, pendingCustomers, pendingEmployees, pendingTransfers, pendingDeals, assignedTodayToMe, pendingAckCount, pendingAckReps, expiredLongTerm, pendingFinance });
 
-      const statusCounts = customers.reduce((acc: any, curr: any) => { acc[curr.status] = (acc[curr.status] || 0) + 1; return acc; }, {});
-      const pieData = Object.keys(statusCounts).map(status => ({ name: status, value: statusCounts[status] }));
+      const countWon = customers.filter(c => c.status === CustomerStatus.WON).length;
+      const countLost = customers.filter(c => c.status === CustomerStatus.LOST).length;
+      const countPotential = customers.filter(c => c.is_special_care && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
+      const countNew = customers.filter(c => !c.is_special_care && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
+
+      const pieData = [
+          { name: 'Mới / Đang CS', value: countNew, color: COLORS.NEW },
+          { name: 'Chốt đơn', value: countWon, color: COLORS.WON },
+          { name: 'Đã hủy', value: countLost, color: COLORS.LOST },
+          { name: 'Tiềm năng', value: countPotential, color: COLORS.POTENTIAL },
+      ].filter(d => d.value > 0);
+      
       setStatusData(pieData);
 
-      // Trend Data Logic (GMT+7 Adjusted)
+      // Trend Data (Last 7 Days)
       const last7Days = [];
       const now = new Date();
-      // Adjust 'now' to GMT+7 to get correct "Today" reference
       const vnNow = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-      
       for (let i = 6; i >= 0; i--) {
           const d = new Date(vnNow);
           d.setDate(vnNow.getDate() - i);
-          const y = d.getFullYear();
-          const m = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          last7Days.push(`${y}-${m}-${day}`); 
+          const dateStr = d.toISOString().split('T')[0];
+          const [y, m, day] = dateStr.split('-');
+          const count = customers.filter((c: any) => c.created_at && c.created_at.startsWith(dateStr)).length;
+          last7Days.push({ name: `${day}/${m}`, customers: count });
       }
-
-      const trendData = last7Days.map(dateStr => {
-          const count = customers.filter((c: any) => {
-              if (!c.created_at) return false;
-              const d = new Date(c.created_at);
-              const vnDate = new Date(d.getTime() + (7 * 60 * 60 * 1000));
-              const cDate = vnDate.toISOString().split('T')[0];
-              return cDate === dateStr;
-          }).length;
-          const [y, m, d] = dateStr.split('-');
-          return { name: `${d}/${m}`, customers: count };
-      });
-
-      setLeadData(trendData);
-
-    } catch (err) { console.warn("Could not fetch stats:", err); } finally { setLoading(false); }
+      setLeadData(last7Days);
   };
 
-  // ... (rest of the file remains unchanged)
   const repStats = useMemo(() => {
-      if (!allProfiles.length || !allCustomers.length) return [];
-      let targetProfiles = allProfiles.filter(p => p.role !== UserRole.ADMIN && p.status === 'active');
-      if (isMod && userProfile) targetProfiles = targetProfiles.filter(p => p.manager_id === userProfile.id);
-      if (isAdmin && selectedTeam !== 'all') targetProfiles = targetProfiles.filter(p => p.manager_id === selectedTeam);
-
+      if (!teamMembers.length || !allCustomers.length) return [];
+      let targetProfiles = teamMembers.filter(p => p.role !== UserRole.ADMIN && p.status === 'active');
+      
+      // Filter logic handled in fetchDataWithIsolation for teamMembers already
+      
       return targetProfiles.map(rep => {
           const repCustomers = allCustomers.filter(c => c.creator_id === rep.id);
           const total = repCustomers.length;
@@ -290,21 +236,46 @@ const Dashboard: React.FC = () => {
           const conversionRate = total > 0 ? ((won / total) * 100).toFixed(1) : '0.0';
           return { id: rep.id, name: rep.full_name, avatar: rep.avatar_url, role: rep.role, total, active, won, stopped, conversionRate };
       }).sort((a, b) => b.won - a.won); 
-  }, [allProfiles, allCustomers, isMod, isAdmin, userProfile, selectedTeam]);
+  }, [teamMembers, allCustomers, isAdmin, selectedTeam]);
 
+  // For Admin Filter Dropdown - Need full list of managers
   const managers = useMemo(() => {
-      const managerIds = Array.from(new Set(allProfiles.filter(p => p.manager_id).map(p => p.manager_id)));
-      return managerIds.map(id => {
-          const m = allProfiles.find(p => p.id === id);
-          return { id: id as string, name: m?.full_name || 'Unknown' };
-      }).filter(m => m.name !== 'Unknown');
-  }, [allProfiles]);
+      if (!isAdmin) return [];
+      // We need to fetch ALL profiles to get ALL managers list, not just current filtered ones. 
+      // But for simplicity/performance, let's assume if isAdmin, fetchData fetches all first.
+      // Actually fetchDataWithIsolation fetches 'data' (all) first. 
+      // But 'managers' is derived from 'teamMembers' which might be filtered.
+      // To fix this, we should fetch full list separately or just assume full list is cached somewhere?
+      // Better: In fetchDataWithIsolation, 'allMembers' was the full list. We can store it or fetch separately.
+      // Quick Fix: Fetch separate list for dropdown.
+      return []; 
+  }, []);
+  
+  // Actually, 'managers' needs to be populated even if a team is selected.
+  // We'll use a separate useEffect or state for the filter options.
+  const [allManagers, setAllManagers] = useState<{id: string, name: string}[]>([]);
+  useEffect(() => {
+      if (isAdmin) {
+          const fetchManagers = async () => {
+              const { data } = await supabase.from('profiles').select('*');
+              if (data) {
+                  const profiles = data as UserProfile[];
+                  const mgrIds = Array.from(new Set(profiles.filter(p => p.manager_id).map(p => p.manager_id)));
+                  const list = mgrIds.map(id => {
+                      const m = profiles.find(p => p.id === id);
+                      return { id: id as string, name: m?.full_name || 'Unknown' };
+                  }).filter(m => m.name !== 'Unknown');
+                  setAllManagers(list);
+              }
+          };
+          fetchManagers();
+      }
+  }, [isAdmin]);
+
 
   const totalPending = alerts.pendingCustomers + alerts.pendingEmployees + alerts.pendingTransfers + alerts.pendingDeals + alerts.overdue + alerts.pendingFinance;
-  const userNotifCount = alerts.due + alerts.overdue + alerts.assignedTodayToMe + alerts.expiredLongTerm; 
-  const displayNotifCount = (isAdmin || isMod) ? totalPending : userNotifCount;
+  const displayNotifCount = (isAdmin || isMod) ? totalPending : (alerts.due + alerts.overdue + alerts.assignedTodayToMe);
 
-  // --- ADD CUSTOMER LOGIC ---
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -317,28 +288,6 @@ const Dashboard: React.FC = () => {
   const normalizePhone = (p: string) => {
     if (!p) return '';
     return p.toString().replace(/\D/g, '');
-  };
-
-  const sendNewCustomerWebhook = async (customer: Customer, notes: string) => {
-      const url = discordConfig.newCustomerWebhookUrl;
-      if (!url) { console.warn("No Webhook URL found for New Customer"); return; }
-      try {
-          await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-              username: "Thông báo Khách Mới",
-              embeds: [{
-                  title: "🔥 CÓ KHÁCH HÀNG MỚI!",
-                  description: `**${customer.name}** vừa được thêm vào hệ thống.`,
-                  color: 5763719,
-                  fields: [
-                      { name: "📞 SĐT", value: customer.phone, inline: true },
-                      { name: "🚗 Quan tâm", value: customer.interest || 'Chưa rõ', inline: true },
-                      { name: "📍 Khu vực", value: customer.location || 'Chưa rõ', inline: true },
-                      { name: "📝 Ghi chú", value: notes || "Không có", inline: false },
-                      { name: "👤 Người tạo", value: userProfile?.full_name || 'System', inline: true }
-                  ]
-              }]
-          }) });
-      } catch (e) { console.error("Discord Error", e); }
   };
 
   const handleAddCustomer = async (e: React.FormEvent) => {
@@ -381,12 +330,12 @@ const Dashboard: React.FC = () => {
                 content: `Khách hàng mới được tạo. Ghi chú: ${formData.notes}`,
                 created_at: new Date().toISOString()
             }]);
-            if (sendToDiscord) { await sendNewCustomerWebhook(data[0] as Customer, formData.notes); }
+            
             setFormData(initialFormState);
             setIsAddModalOpen(false);
             setIsDuplicateModalOpen(false);
             setDuplicateData(null);
-            fetchStats();
+            fetchDataWithIsolation();
             alert("Thêm khách hàng thành công!");
         }
       } catch (err: any) { alert("Lỗi thêm khách: " + err.message); } finally { setIsSubmitting(false); }
@@ -402,7 +351,7 @@ const Dashboard: React.FC = () => {
               content: `⚠️ Yêu cầu chuyển quyền chăm sóc từ ${userProfile.full_name}.`,
               created_at: new Date().toISOString()
           }]);
-          alert("Đã gửi yêu cầu chuyển quyền chăm sóc cho Admin/Mod!");
+          alert("Đã gửi yêu cầu chuyển quyền chăm sóc!");
           setIsDuplicateModalOpen(false);
           setIsAddModalOpen(false);
           setDuplicateData(null);
@@ -421,7 +370,7 @@ const Dashboard: React.FC = () => {
       
       {/* HEADER & ALERTS */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div><h1 className="text-2xl font-bold text-gray-900">Tổng quan (GMT+7)</h1><p className="text-gray-500">Xin chào, {userProfile?.full_name}!</p></div>
+        <div><h1 className="text-2xl font-bold text-gray-900">Tổng quan (Team)</h1><p className="text-gray-500">Xin chào, {userProfile?.full_name}!</p></div>
         <div className="flex flex-wrap gap-3 items-center">
           <div className="relative mr-2" ref={notiRef}>
               <button onClick={() => setIsNotiOpen(!isNotiOpen)} className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-600 hover:text-primary-600 hover:bg-gray-50 shadow-sm transition-all relative">
@@ -434,7 +383,6 @@ const Dashboard: React.FC = () => {
                       <div className="max-h-[300px] overflow-y-auto">
                           {displayNotifCount === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Không có thông báo mới.</div> : (
                               <div className="flex flex-col">
-                                  {/* ... Alerts ... */}
                                   {alerts.assignedTodayToMe > 0 && <button onClick={() => navigate('/customers', { state: { filterType: 'today' } })} className="p-4 hover:bg-green-50 border-b border-gray-50 text-left transition-colors flex gap-3 bg-green-50/50"><div className="p-2 bg-green-100 text-green-600 rounded-full h-fit animate-pulse"><Hand size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.assignedTodayToMe} Khách mới phân bổ (Bạn)</p><p className="text-xs text-gray-500">Hãy vào xác nhận ngay!</p></div></button>}
                                   {alerts.pendingAckCount > 0 && <button onClick={() => navigate('/customers', { state: { filterType: 'unacknowledged' } })} className="p-4 hover:bg-purple-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-purple-100 text-purple-600 rounded-full h-fit"><UserX size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.pendingAckCount} Khách chưa nhận (Team)</p><p className="text-xs text-gray-500">Thuộc {alerts.pendingAckReps} TVBH.</p></div></button>}
                                   {(alerts.pendingCustomers > 0 || alerts.pendingDeals > 0) && <button onClick={() => navigate('/customers', { state: { initialTab: 'pending' } })} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-orange-100 text-orange-600 rounded-full h-fit"><FileCheck2 size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.pendingCustomers + alerts.pendingDeals} Yêu cầu duyệt (Team)</p><p className="text-xs text-gray-500">Đơn hàng/Trạng thái.</p></div></button>}
@@ -450,12 +398,11 @@ const Dashboard: React.FC = () => {
                   </div>
               )}
           </div>
-          {isAdmin && (<button onClick={() => setIsDiscordModalOpen(true)} className="hidden md:flex items-center gap-2 rounded-xl bg-[#5865F2] px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition-colors hover:bg-[#4752C4]"><Webhook size={18} /> Discord</button>)}
           <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary-200 transition-colors hover:bg-primary-700"><Plus size={18} /> Thêm khách</button>
         </div>
       </div>
 
-      {/* ALERTS SECTION */}
+      {/* ALERT BANNERS (RESTORED) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in">
           {(!isAdmin && !isMod) && alerts.assignedTodayToMe > 0 && (<div onClick={() => navigate('/customers', { state: { filterType: 'today' } })} className="bg-green-50 border border-green-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-green-100 transition-colors shadow-sm md:col-span-3 lg:col-span-1"><div className="h-12 w-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center shrink-0 animate-bounce"><Hand size={24} /></div><div className="flex-1"><h4 className="font-bold text-green-800">Cần tiếp nhận khách!</h4><p className="text-sm text-green-700">Bạn có <span className="font-bold text-lg ml-1">{alerts.assignedTodayToMe}</span> khách mới chưa bấm "Đã nhận".</p></div><ChevronRight className="text-green-400" /></div>)}
           {(isAdmin || isMod) && alerts.pendingFinance > 0 && (<div onClick={() => navigate('/finance')} className="bg-purple-50 border border-purple-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-purple-100 transition-colors shadow-sm"><div className="h-12 w-12 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center shrink-0 animate-pulse"><BadgeDollarSign size={24} /></div><div className="flex-1"><h4 className="font-bold text-purple-800">Duyệt Quỹ / Tài chính</h4><p className="text-sm text-purple-700">Có <span className="font-bold text-lg ml-1">{alerts.pendingFinance}</span> yêu cầu chờ duyệt.</p></div><ChevronRight className="text-purple-400" /></div>)}
@@ -468,11 +415,11 @@ const Dashboard: React.FC = () => {
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Tổng khách hàng" value={stats.total} icon={Users} color="bg-blue-500" onClick={() => navigate('/customers', { state: { initialTab: 'all' } })} />
         <StatCard title="Khách mới (Hôm nay)" value={stats.new} icon={Plus} color="bg-emerald-500" onClick={() => navigate('/customers', { state: { filterType: 'today' } })} />
-        <StatCard title="Khách tiềm năng (Hot)" value={stats.potential} icon={TrendingUp} color="bg-amber-500" onClick={() => navigate('/customers', { state: { initialTab: 'special' } })} />
-        <StatCard title="Đã chốt đơn" value={stats.won} icon={CheckCircle} color="bg-purple-500" onClick={() => navigate('/customers', { state: { initialTab: 'won' } })} />
+        <StatCard title="Tiềm năng (Hot/Special)" value={stats.potential} icon={TrendingUp} color="bg-red-500" onClick={() => navigate('/customers', { state: { initialTab: 'special' } })} />
+        <StatCard title="Đã chốt đơn" value={stats.won} icon={CheckCircle} color="bg-green-500" onClick={() => navigate('/customers', { state: { initialTab: 'won' } })} />
       </div>
 
-      {/* ... Charts & Tables (Remaining code unchanged) ... */}
+      {/* CHARTS */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-2xl bg-white p-6 shadow-sm border border-gray-100 h-[400px] flex flex-col">
           <h3 className="mb-6 text-lg font-bold text-gray-900">Phân tích lượng khách (07 ngày qua)</h3>
@@ -496,9 +443,10 @@ const Dashboard: React.FC = () => {
                <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie data={statusData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">
-                      {statusData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                      {statusData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                     </Pie>
                     <Tooltip />
+                    <Legend />
                   </PieChart>
                </ResponsiveContainer>
              ) : (
@@ -508,16 +456,6 @@ const Dashboard: React.FC = () => {
                </div>
              )}
           </div>
-          {statusData.length > 0 && (
-            <div className="mt-4 flex flex-wrap justify-center gap-3">
-               {statusData.map((entry, index) => (
-                  <div key={index} className="flex items-center gap-1.5">
-                     <div className="h-2.5 w-2.5 rounded-full" style={{backgroundColor: COLORS[index % COLORS.length]}}></div>
-                     <span className="text-xs text-gray-600 font-medium">{entry.name} ({entry.value})</span>
-                  </div>
-               ))}
-            </div>
-          )}
         </div>
       </div>
 
@@ -529,7 +467,7 @@ const Dashboard: React.FC = () => {
                       <div className="relative">
                           <select value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)} className="appearance-none bg-gray-50 border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-medium cursor-pointer">
                               <option value="all">Tất cả Team</option>
-                              {managers.map(mgr => (<option key={mgr.id} value={mgr.id}>Team {mgr.name}</option>))}
+                              {allManagers.map(mgr => (<option key={mgr.id} value={mgr.id}>Team {mgr.name}</option>))}
                           </select>
                           <Filter size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                       </div>
@@ -569,22 +507,6 @@ const Dashboard: React.FC = () => {
                   </table>
               </div>
           </div>
-      )}
-
-      {isDiscordModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-           <div className="bg-white rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-bold text-[#5865F2] flex items-center gap-2"><Webhook size={24} /> Cấu hình Discord (Toàn hệ thống)</h3><button onClick={() => setIsDiscordModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={24} /></button></div>
-              <div className="space-y-6">
-                  <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-xs text-indigo-800">Cấu hình này sẽ được lưu chung cho toàn bộ hệ thống (app_settings). Bất kỳ ai thêm khách đều sẽ gửi về kênh này.</div>
-                  <div className="p-4 bg-gray-50 rounded-xl border border-gray-100"><label className="block text-sm font-bold text-gray-700 mb-2">Webhook 1: Báo cáo hàng ngày</label><input value={discordConfig.webhookUrl} onChange={(e) => setDiscordConfig({...discordConfig, webhookUrl: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm outline-none" placeholder="https://discord.com/api/webhooks/..." /></div>
-                  <div className="p-4 bg-gray-50 rounded-xl border border-gray-100"><label className="block text-sm font-bold text-gray-700 mb-2">Webhook 2: Thông báo Khách mới (Quan trọng)</label><input value={discordConfig.newCustomerWebhookUrl} onChange={(e) => setDiscordConfig({...discordConfig, newCustomerWebhookUrl: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm outline-none" placeholder="https://discord.com/api/webhooks/..." /></div>
-                  <div className="p-4 bg-gray-50 rounded-xl border border-gray-100"><label className="block text-sm font-bold text-gray-700 mb-2">Webhook 3: Tổng kết cuối ngày</label><input value={discordConfig.summaryWebhookUrl} onChange={(e) => setDiscordConfig({...discordConfig, summaryWebhookUrl: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm outline-none" placeholder="https://discord.com/api/webhooks/..." /></div>
-                  <div className="p-4 bg-gray-50 rounded-xl border border-gray-100"><label className="block text-sm font-bold text-gray-700 mb-2">Webhook 4: Thông báo Phân bổ</label><input value={discordConfig.assignWebhookUrl} onChange={(e) => setDiscordConfig({...discordConfig, assignWebhookUrl: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm outline-none" placeholder="https://discord.com/api/webhooks/..." /></div>
-                  <div className="pt-2 border-t border-gray-100"><button onClick={saveDiscordSettings} disabled={savingSettings} className="w-full py-3 text-white font-bold bg-[#5865F2] hover:bg-[#4752C4] rounded-xl transition-colors flex justify-center items-center gap-2">{savingSettings ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />} Lưu cấu hình toàn hệ thống</button></div>
-              </div>
-           </div>
-        </div>
       )}
 
       {isAddModalOpen && (

@@ -162,37 +162,6 @@ const AssignCustomers: React.FC = () => {
       setFormData(extractedData);
   };
 
-  const sendAssignWebhook = async (customer: Customer, repName: string, notes: string) => {
-      // FETCH GLOBAL SETTING
-      let webhookUrl = localStorage.getItem('vinfast_crm_discord_webhook_assign');
-      if (!webhookUrl) {
-          const { data } = await supabase.from('app_settings').select('value').eq('key', 'discord_webhook_assign').maybeSingle();
-          if (data) webhookUrl = data.value;
-      }
-
-      if (!webhookUrl) return;
-      try {
-          await fetch(webhookUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  username: "Hệ thống Phân Bổ",
-                  embeds: [{
-                      title: "📌 PHÂN BỔ KHÁCH HÀNG MỚI",
-                      color: 1752220,
-                      description: `**${userProfile?.full_name || 'Admin'}** vừa phân bổ một khách hàng mới.`,
-                      fields: [
-                          { name: "👤 Khách hàng", value: `${customer.name}`, inline: true },
-                          { name: "🚗 Quan tâm", value: `${customer.interest || 'Chưa rõ'}`, inline: true },
-                          { name: "📝 Nhu cầu / Ghi chú", value: notes ? notes : "Chưa có ghi chú", inline: false },
-                          { name: "👉 TVBH Tiếp nhận", value: `**${repName}**`, inline: false }
-                      ]
-                  }]
-              })
-          });
-      } catch (err) { console.error(err); }
-  };
-
   const sendEmailNotification = async (repEmail: string, repName: string, customerData: any) => {
       if (EMAILJS_SERVICE_ID === 'YOUR_SERVICE_ID') return;
       try {
@@ -259,7 +228,6 @@ const AssignCustomers: React.FC = () => {
                 content: `[Phân bổ] Khách hàng được phân bổ từ ${userProfile?.role === 'admin' ? 'Admin' : 'MOD'} ${userProfile?.full_name}. Ghi chú: ${formData.notes}`,
                 created_at: new Date().toISOString()
             }]);
-            await sendAssignWebhook(data[0] as Customer, assignedRep.full_name, formData.notes);
             if (assignedRep.email) await sendEmailNotification(assignedRep.email, assignedRep.full_name, formData);
 
             setSuccessMsg(`Đã phân bổ cho ${assignedRep.full_name}. Email thông báo đang được gửi!`);

@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { TeamFine, UserProfile, UserRole } from '../types';
@@ -29,6 +29,9 @@ const TeamFund: React.FC = () => {
   // My Fines
   const [myPendingFines, setMyPendingFines] = useState<TeamFine[]>([]);
 
+  // Team Filter State
+  const [selectedTeam, setSelectedTeam] = useState<string>('all');
+
   // Modal State
   const [showFineModal, setShowFineModal] = useState(false);
   const [fineForm, setFineForm] = useState({ userId: '', amount: '', reason: '' });
@@ -55,39 +58,67 @@ const TeamFund: React.FC = () => {
         navigate('/');
         return;
     }
-    fetchData();
+    fetchDataWithIsolation();
   }, [userProfile]);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
   const showToast = (msg: string, type: 'success' | 'error') => setToast({ msg, type });
 
-  const fetchData = async () => {
+  const fetchDataWithIsolation = async () => {
+    if (!userProfile) return;
     try {
       setLoading(true);
-      const { data: empData } = await supabase.from('profiles').select('*');
-      if (empData) setEmployees(empData as UserProfile[]);
 
-      const { data: fineData, error: fineError } = await supabase.from('team_fines').select('*').order('created_at', { ascending: false });
+      // 1. Determine Team Members (Isolation)
+      let teamIds: string[] = [];
+      let members: UserProfile[] = [];
+
+      if (isAdmin) {
+          const { data } = await supabase.from('profiles').select('*');
+          members = data as UserProfile[] || [];
+      } else {
+          if (isMod) {
+              const { data } = await supabase.from('profiles').select('*').or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
+              members = data as UserProfile[] || [];
+          } else {
+              // Sales: Fetch Self + Manager
+              if (userProfile.manager_id) {
+                   const { data } = await supabase.from('profiles').select('*').or(`id.eq.${userProfile.manager_id},manager_id.eq.${userProfile.manager_id}`);
+                   members = data as UserProfile[] || [];
+              } else {
+                   members = [userProfile];
+              }
+          }
+      }
+      teamIds = members.map(m => m.id);
+      setEmployees(members); // Update Employees List to only show Team Members
+
+      // 2. Fetch Fines (Filtered)
+      let fineQuery = supabase.from('team_fines').select('*').order('created_at', { ascending: false });
+      if (!isAdmin) fineQuery = fineQuery.in('user_id', teamIds);
+      const { data: fineData, error: fineError } = await fineQuery;
       if (fineError) throw fineError;
 
-      // Check Expenses Table exists
-      const { data: expData, error: expError } = await supabase.from('team_fund_expenses').select('*').order('created_at', { ascending: false });
+      // 3. Fetch Expenses (Filtered)
+      let expQuery = supabase.from('team_fund_expenses').select('*').order('created_at', { ascending: false });
+      if (!isAdmin) expQuery = expQuery.in('created_by', teamIds);
       
+      const { data: expData, error: expError } = await expQuery;
       if (expError) {
-          if (expError.code === '42P01') setShowSql(true); // Table missing
+          if (expError.code === '42P01') setShowSql(true); 
           else console.error("Error fetching expenses", expError);
       }
 
       // Map names
       const mappedFines = (fineData as TeamFine[]).map(f => {
-          const u = empData?.find(e => e.id === f.user_id);
+          const u = members.find(e => e.id === f.user_id);
           return { ...f, user_name: u?.full_name || 'Unknown' };
       });
       setFines(mappedFines);
 
       const mappedExpenses = (expData || []).map((e: TeamExpense) => {
-          const u = empData?.find(p => p.id === e.created_by);
+          const u = members.find(p => p.id === e.created_by);
           return { ...e, user_name: u?.full_name || 'Unknown' };
       });
       setExpenses(mappedExpenses);
@@ -97,9 +128,11 @@ const TeamFund: React.FC = () => {
           setMyPendingFines(myPending);
       }
 
-      const income = mappedFines.filter(f => f.status === 'paid').reduce((sum, f) => sum + f.amount, 0);
-      const outcome = mappedExpenses.filter(e => e.status === 'approved').reduce((sum, e) => sum + e.amount, 0);
-      setTotalFund(income - outcome);
+      // Initial Total (Before Client Filter) - Though maybe better to calculate based on view
+      // But Total Fund is tricky with filtering. Let's recalculate in render or keep global context.
+      // Usually Fund is isolated per team anyway. 
+      // If Admin selects a team, they should see THAT team's fund.
+      // If Admin sees "All", it's aggregate.
 
     } catch (err) {
       console.error(err);
@@ -125,7 +158,7 @@ const TeamFund: React.FC = () => {
           if (error) throw error;
           setShowFineModal(false);
           setFineForm({ userId: '', amount: '', reason: '' });
-          fetchData();
+          fetchDataWithIsolation();
           showToast("Đã tạo phiếu phạt thành công!", 'success');
       } catch (e) { showToast("Lỗi tạo phiếu phạt.", 'error'); } finally { setIsSubmitting(false); }
   };
@@ -146,7 +179,7 @@ const TeamFund: React.FC = () => {
           if (error) throw error;
           setShowExpenseModal(false);
           setExpenseForm({ amount: '', reason: '' });
-          fetchData();
+          fetchDataWithIsolation();
           showToast("Đã gửi yêu cầu. Vui lòng đợi duyệt.", 'success');
       } catch (e: any) { 
           if (e.code === '42P01') {
@@ -184,7 +217,7 @@ const TeamFund: React.FC = () => {
               if (error) throw error;
               showToast(status === 'approved' ? "Đã duyệt chi!" : "Đã từ chối!", status === 'approved' ? 'success' : 'error');
           }
-          fetchData();
+          fetchDataWithIsolation();
       } catch (e: any) {
           showToast("Lỗi: " + e.message, 'error');
           if (isAdmin) setShowSql(true);
@@ -193,6 +226,39 @@ const TeamFund: React.FC = () => {
           setConfirmAction(null);
       }
   };
+
+  // Filter Data based on selectedTeam
+  const filteredFines = useMemo(() => {
+      if (!isAdmin || selectedTeam === 'all') return fines;
+      return fines.filter(f => {
+          const user = employees.find(e => e.id === f.user_id);
+          return user?.manager_id === selectedTeam || user?.id === selectedTeam;
+      });
+  }, [fines, selectedTeam, employees, isAdmin]);
+
+  const filteredExpenses = useMemo(() => {
+      if (!isAdmin || selectedTeam === 'all') return expenses;
+      return expenses.filter(e => {
+          const user = employees.find(emp => emp.id === e.created_by);
+          return user?.manager_id === selectedTeam || user?.id === selectedTeam;
+      });
+  }, [expenses, selectedTeam, employees, isAdmin]);
+
+  // Recalculate Total Fund based on filtered data
+  const currentTotalFund = useMemo(() => {
+      const income = filteredFines.filter(f => f.status === 'paid').reduce((sum, f) => sum + f.amount, 0);
+      const outcome = filteredExpenses.filter(e => e.status === 'approved').reduce((sum, e) => sum + e.amount, 0);
+      return income - outcome;
+  }, [filteredFines, filteredExpenses]);
+
+  // Managers for Dropdown
+  const managers = useMemo(() => {
+      const managerIds = Array.from(new Set(employees.filter(p => p.manager_id).map(p => p.manager_id)));
+      return managerIds.map(id => {
+          const m = employees.find(p => p.id === id);
+          return { id: id as string, name: m?.full_name || 'Unknown' };
+      }).filter(m => m.name !== 'Unknown');
+  }, [employees]);
 
   const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
 
@@ -277,7 +343,22 @@ create policy "Enable all for admins/mods" on public.team_fund_expenses for all 
               <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><PiggyBank className="text-pink-500" /> Quỹ Nhóm & Tiền Phạt</h1>
               <p className="text-gray-500 text-sm">Quản lý thu chi nội bộ team.</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+              {isAdmin && (
+                  <div className="relative">
+                      <select 
+                          value={selectedTeam} 
+                          onChange={(e) => setSelectedTeam(e.target.value)}
+                          className="appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-100 text-sm font-bold shadow-sm cursor-pointer"
+                      >
+                          <option value="all">Tất cả Team</option>
+                          {managers.map(mgr => (
+                              <option key={mgr.id} value={mgr.id}>Team {mgr.name}</option>
+                          ))}
+                      </select>
+                      <Filter size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-indigo-400 pointer-events-none" />
+                  </div>
+              )}
               <button onClick={() => setShowExpenseModal(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-all shadow-sm">
                   <ArrowUpRight size={18} className="text-red-500"/> Chi tiền
               </button>
@@ -293,7 +374,7 @@ create policy "Enable all for admins/mods" on public.team_fund_expenses for all 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-gradient-to-br from-pink-50 to-rose-100 p-6 rounded-2xl border border-pink-200 shadow-sm flex flex-col justify-center items-center text-center relative overflow-hidden">
               <p className="text-pink-800 font-bold uppercase text-xs mb-1 z-10">Tổng Quỹ Nhóm (Thực Tế)</p>
-              <p className="text-3xl font-bold text-pink-900 z-10">{formatCurrency(totalFund)} VNĐ</p>
+              <p className="text-3xl font-bold text-pink-900 z-10">{formatCurrency(currentTotalFund)} VNĐ</p>
               <div className="absolute -right-4 -bottom-4 text-pink-200 opacity-50"><Wallet size={100}/></div>
           </div>
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-center">
@@ -301,14 +382,14 @@ create policy "Enable all for admins/mods" on public.team_fund_expenses for all 
                   <p className="text-gray-500 font-bold uppercase text-xs">Đang chờ thu (Phạt)</p>
                   <ArrowDownLeft size={16} className="text-green-500"/>
               </div>
-              <p className="text-2xl font-bold text-green-600">+{formatCurrency(fines.filter(f => f.status === 'pending').reduce((s, f) => s + f.amount, 0))} VNĐ</p>
+              <p className="text-2xl font-bold text-green-600">+{formatCurrency(filteredFines.filter(f => f.status === 'pending').reduce((s, f) => s + f.amount, 0))} VNĐ</p>
           </div>
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-center">
               <div className="flex justify-between items-center mb-2">
                   <p className="text-gray-500 font-bold uppercase text-xs">Đang chờ duyệt chi</p>
                   <ArrowUpRight size={16} className="text-red-500"/>
               </div>
-              <p className="text-2xl font-bold text-red-600">-{formatCurrency(expenses.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0))} VNĐ</p>
+              <p className="text-2xl font-bold text-red-600">-{formatCurrency(filteredExpenses.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0))} VNĐ</p>
           </div>
       </div>
 
@@ -329,7 +410,7 @@ create policy "Enable all for admins/mods" on public.team_fund_expenses for all 
                           </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                          {fines.map(fine => (
+                          {filteredFines.map(fine => (
                               <tr key={fine.id} className="hover:bg-gray-50">
                                   <td className="px-3 py-3 font-bold text-gray-700">{fine.user_name}</td>
                                   <td className="px-3 py-3 text-gray-500 truncate max-w-[100px]" title={fine.reason}>{fine.reason}</td>
@@ -366,7 +447,7 @@ create policy "Enable all for admins/mods" on public.team_fund_expenses for all 
                           </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                          {expenses.map(exp => (
+                          {filteredExpenses.map(exp => (
                               <tr key={exp.id} className="hover:bg-gray-50">
                                   <td className="px-3 py-3 font-bold text-gray-700">{exp.user_name}</td>
                                   <td className="px-3 py-3 text-gray-500 truncate max-w-[100px]" title={exp.reason}>{exp.reason}</td>
@@ -435,7 +516,7 @@ create policy "Enable all for admins/mods" on public.team_fund_expenses for all 
                           <label className="block text-sm font-bold text-gray-700 mb-1">Chọn nhân viên bị phạt</label>
                           <select className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-pink-500 bg-white" value={fineForm.userId} onChange={e => setFineForm({...fineForm, userId: e.target.value})}>
                               <option value="">-- Chọn nhân viên --</option>
-                              {employees.filter(e => e.role !== 'admin' && !e.is_part_time).map(e => (
+                              {employees.filter(e => e.role !== 'admin' && !e.is_part_time && e.id !== userProfile?.id).map(e => (
                                   <option key={e.id} value={e.id}>{e.full_name}</option>
                               ))}
                           </select>

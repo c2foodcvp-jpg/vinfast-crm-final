@@ -42,48 +42,6 @@ const LeadsFromForm: React.FC = () => {
     } catch (err) { console.error("Error fetching data:", err); } finally { setLoading(false); }
   };
 
-  // --- WEBHOOK LOGIC (Global via app_settings) ---
-  const sendAssignWebhook = async (customer: Customer, repName: string) => {
-      let webhookUrl = localStorage.getItem('vinfast_crm_discord_webhook_assign');
-      if (!webhookUrl) {
-          const { data } = await supabase.from('app_settings').select('value').eq('key', 'discord_webhook_assign').maybeSingle();
-          if (data) webhookUrl = data.value;
-      }
-
-      if (!webhookUrl) return;
-
-      const adminName = userProfile?.full_name || 'Admin';
-      const displayDate = new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit', hour12: true});
-
-      const payload = {
-          username: "Hệ thống Phân Bổ (Auto-Lead)",
-          avatar_url: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/VinFast_logo.svg/1200px-VinFast_logo.svg.png",
-          embeds: [
-              {
-                  title: "⚡ PHÂN BỔ KHÁCH TỪ EMAIL/FORM",
-                  color: 15158332, // Red/Orange
-                  description: `**${adminName}** vừa phân bổ một khách hàng từ nguồn Online.`,
-                  fields: [
-                      { name: "👤 Khách hàng", value: `${customer.name}`, inline: true },
-                      { name: "🚗 Quan tâm", value: `${customer.interest || 'Chưa rõ'}`, inline: true },
-                      { name: "🌐 Nguồn", value: `${customer.source || 'Email Form'}`, inline: true },
-                      { name: "📝 Ghi chú", value: customer.notes || "Không có", inline: false },
-                      { name: "👉 TVBH Tiếp nhận", value: `**${repName}**`, inline: false }
-                  ],
-                  footer: { text: `Phân bổ lúc ${displayDate}` }
-              }
-          ]
-      };
-
-      try {
-          await fetch(webhookUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-          });
-      } catch (e) { console.error(e); }
-  };
-
   const handleOpenAssign = (lead: Customer) => {
       setSelectedLead(lead);
       setSelectedRepId('');
@@ -106,8 +64,6 @@ const LeadsFromForm: React.FC = () => {
               content: `[Phân bổ từ Form] Admin đã chuyển khách này cho ${rep.full_name}.`,
               created_at: new Date().toISOString()
           }]);
-
-          await sendAssignWebhook(selectedLead, rep.full_name);
 
           setLeads(prev => prev.filter(l => l.id !== selectedLead.id));
           setIsModalOpen(false);

@@ -1,7 +1,7 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, DealStatus, UserRole } from '../types';
+import { Customer, CustomerStatus, DealStatus, UserRole, UserProfile } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -17,45 +17,83 @@ import {
   User, 
   MapPin, 
   CarFront,
-  Filter
+  Filter,
+  ChevronDown
 } from 'lucide-react';
 
 const Deals: React.FC = () => {
   const { userProfile, isAdmin, isMod } = useAuth();
   const navigate = useNavigate();
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [employees, setEmployees] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'processing' | 'completed' | 'refunded'>('processing');
   const [searchTerm, setSearchTerm] = useState('');
   
   // Filter State
   const [sourceFilter, setSourceFilter] = useState<'all' | 'mkt' | 'other'>('all');
+  const [selectedRep, setSelectedRep] = useState<string>('all');
+  const [selectedTeam, setSelectedTeam] = useState<string>('all'); // Add Team Filter
   
   // Confirmation Modal
   const [confirmAction, setConfirmAction] = useState<{id: string, type: 'completed' | 'refunded'} | null>(null);
 
   useEffect(() => {
-    fetchWonCustomers();
+    fetchDataWithIsolation();
   }, [userProfile]);
 
-  const fetchWonCustomers = async () => {
+  const fetchDataWithIsolation = async () => {
+    if (!userProfile) return;
     try {
       setLoading(true);
+      
+      // 1. Determine Team (Isolation)
+      let teamIds: string[] = [];
+      let teamMembers: UserProfile[] = [];
+
+      if (isAdmin) {
+          // Admin fetches all active profiles for filtering
+          const { data } = await supabase.from('profiles').select('id, full_name, manager_id').eq('status', 'active');
+          if (data) setEmployees(data as UserProfile[]);
+      } else {
+          // MOD or Sales
+          let profileQuery = supabase.from('profiles').select('id, full_name, manager_id');
+          if (isMod) {
+             // MOD sees self + subordinates
+             profileQuery = profileQuery.or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
+          } else {
+             // Sales sees self
+             profileQuery = profileQuery.eq('id', userProfile.id);
+          }
+          const { data: profiles } = await profileQuery;
+          if (profiles) {
+              teamMembers = profiles as UserProfile[];
+              setEmployees(teamMembers); // Dropdown only shows team
+              teamIds = teamMembers.map(p => p.id);
+          }
+      }
+
+      // 2. Fetch Customers (Deals)
       let query = supabase
         .from('customers')
         .select('*')
         .eq('status', CustomerStatus.WON)
         .order('created_at', { ascending: false });
 
-      if (!isAdmin && !isMod && userProfile?.id) {
-        query = query.eq('creator_id', userProfile.id);
+      if (!isAdmin) {
+          if (teamIds.length > 0) {
+              query = query.in('creator_id', teamIds);
+          } else {
+              query = query.eq('creator_id', userProfile.id); // Fallback
+          }
       }
 
       const { data, error } = await query;
       if (error) throw error;
       setCustomers(data as Customer[]);
+
     } catch (err) {
-      console.warn("Error fetching won customers:", err);
+      console.warn("Error fetching data:", err);
     } finally {
       setLoading(false);
     }
@@ -70,7 +108,7 @@ const Deals: React.FC = () => {
           const { error } = await supabase.from('customers').update({ deal_status: newStatus }).eq('id', id);
           if (error) throw error;
           setConfirmAction(null);
-          fetchWonCustomers(); // Refresh
+          fetchDataWithIsolation(); // Refresh
       } catch (err: any) {
           const errorMessage = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
           alert("Lỗi duyệt: " + errorMessage);
@@ -86,14 +124,41 @@ const Deals: React.FC = () => {
       if (sourceFilter === 'mkt') matchesSource = c.source === 'MKT Group';
       if (sourceFilter === 'other') matchesSource = c.source !== 'MKT Group';
 
-      if (activeTab === 'processing') {
-          return matchesSearch && matchesSource && (ds === 'processing' || ds === 'completed_pending' || ds === 'refund_pending');
-      } else if (activeTab === 'completed') {
-          return matchesSearch && matchesSource && ds === 'completed';
-      } else {
-          return matchesSearch && matchesSource && ds === 'refunded';
+      // Team Filter (Admin Only)
+      let matchesTeam = true;
+      if (isAdmin && selectedTeam !== 'all') {
+          // Check if creator belongs to the selected team
+          const creator = employees.find(e => e.id === c.creator_id);
+          matchesTeam = creator?.manager_id === selectedTeam || creator?.id === selectedTeam;
       }
+
+      // Rep Filter
+      let matchesRep = true;
+      if ((isAdmin || isMod) && selectedRep !== 'all') {
+          matchesRep = c.creator_id === selectedRep;
+      }
+
+      // Status Check (Tab)
+      let matchesStatus = false;
+      if (activeTab === 'processing') {
+          matchesStatus = ds === 'processing' || ds === 'completed_pending' || ds === 'refund_pending';
+      } else if (activeTab === 'completed') {
+          matchesStatus = ds === 'completed';
+      } else {
+          matchesStatus = ds === 'refunded';
+      }
+
+      return matchesSearch && matchesSource && matchesRep && matchesStatus && matchesTeam;
   });
+
+  // Managers for Dropdown (Admin View)
+  const managers = useMemo(() => {
+      const managerIds = Array.from(new Set(employees.filter(p => p.manager_id).map(p => p.manager_id)));
+      return managerIds.map(id => {
+          const m = employees.find(p => p.id === id);
+          return { id: id as string, name: m?.full_name || 'Unknown' };
+      }).filter(m => m.name !== 'Unknown');
+  }, [employees]);
 
   const getStatusBadge = (status?: string) => {
       switch(status) {
@@ -115,18 +180,57 @@ const Deals: React.FC = () => {
                 Quản lý Đơn hàng
             </h1>
             
-            {/* Source Filter */}
-            <div className="relative">
-                <select 
-                    value={sourceFilter} 
-                    onChange={(e) => setSourceFilter(e.target.value as any)}
-                    className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer"
-                >
-                    <option value="all">Tất cả nguồn</option>
-                    <option value="mkt">Nguồn MKT Group</option>
-                    <option value="other">Nguồn Khác</option>
-                </select>
-                <Filter size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <div className="flex gap-2 w-full md:w-auto">
+                {/* Team Filter (Admin Only) */}
+                {isAdmin && (
+                    <div className="relative">
+                        <select 
+                            value={selectedTeam} 
+                            onChange={(e) => setSelectedTeam(e.target.value)}
+                            className="appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-100 text-sm font-bold shadow-sm cursor-pointer"
+                        >
+                            <option value="all">Tất cả Team</option>
+                            {managers.map(mgr => (
+                                <option key={mgr.id} value={mgr.id}>Team {mgr.name}</option>
+                            ))}
+                        </select>
+                        <Filter size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-indigo-400 pointer-events-none" />
+                    </div>
+                )}
+
+                {/* Rep Filter (Admin/Mod Only) */}
+                {(isAdmin || isMod) && (
+                    <div className="relative">
+                        <select 
+                            value={selectedRep} 
+                            onChange={(e) => setSelectedRep(e.target.value)}
+                            className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer"
+                        >
+                            <option value="all">Tất cả nhân viên</option>
+                            {employees
+                                .filter(emp => isAdmin && selectedTeam !== 'all' ? (emp.manager_id === selectedTeam || emp.id === selectedTeam) : true)
+                                .map(emp => (
+                                    <option key={emp.id} value={emp.id}>{emp.full_name}</option>
+                                ))
+                            }
+                        </select>
+                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                )}
+
+                {/* Source Filter */}
+                <div className="relative">
+                    <select 
+                        value={sourceFilter} 
+                        onChange={(e) => setSourceFilter(e.target.value as any)}
+                        className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer"
+                    >
+                        <option value="all">Tất cả nguồn</option>
+                        <option value="mkt">Nguồn MKT Group</option>
+                        <option value="other">Nguồn Khác</option>
+                    </select>
+                    <Filter size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                </div>
             </div>
         </div>
 
