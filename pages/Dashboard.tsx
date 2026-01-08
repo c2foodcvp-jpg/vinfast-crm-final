@@ -7,7 +7,7 @@ import {
   Users, TrendingUp, CheckCircle, Plus, Loader2, AlertTriangle, Clock, Calendar, BellRing, ChevronRight, Send, X, Settings, Zap, MessageSquarePlus, BarChart3, UserPlus, Mail, Copy, Terminal, ExternalLink, ArrowRightLeft, FileCheck2, FileText, Save, Bell, Hand, Filter, Briefcase, Trophy, UserX, MapPin, CarFront, ChevronDown, BadgeDollarSign
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { CustomerStatus, Customer, UserProfile, UserRole, CAR_MODELS, CustomerClassification } from '../types';
+import { CustomerStatus, Customer, UserProfile, UserRole, CustomerClassification, CAR_MODELS as DEFAULT_CAR_MODELS } from '../types';
 
 const { useNavigate } = ReactRouterDOM as any;
 
@@ -30,6 +30,7 @@ const Dashboard: React.FC = () => {
   const [leadData, setLeadData] = useState<any[]>([]);
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
   const [teamMembers, setTeamMembers] = useState<UserProfile[]>([]);
+  const [carList, setCarList] = useState<string[]>(DEFAULT_CAR_MODELS);
 
   // Performance Filter State (For Admin to filter by specific teams)
   const [selectedTeam, setSelectedTeam] = useState<string>('all');
@@ -62,6 +63,7 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     fetchDataWithIsolation();
+    fetchCarModels();
     const handleClickOutside = (event: MouseEvent) => {
       if (notiRef.current && !notiRef.current.contains(event.target as Node)) {
         setIsNotiOpen(false);
@@ -70,6 +72,15 @@ const Dashboard: React.FC = () => {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [userProfile, selectedTeam]); 
+
+  const fetchCarModels = async () => {
+      try {
+          const { data } = await supabase.from('car_models').select('name').order('created_at', { ascending: false });
+          if (data && data.length > 0) {
+              setCarList(data.map(c => c.name));
+          }
+      } catch (e) { console.error("Error fetching car models", e); }
+  };
 
   // --- TEAM ISOLATION LOGIC ---
   const fetchDataWithIsolation = async () => {
@@ -515,7 +526,7 @@ const Dashboard: React.FC = () => {
               </div>
               <div className="flex items-center gap-2"><input type="checkbox" id="zaloOnly" checked={formData.isZaloOnly} onChange={toggleZaloOnly} className="w-4 h-4 text-primary-600 rounded" /><label htmlFor="zaloOnly" className="text-sm text-gray-700 font-medium">Khách chỉ liên hệ qua Zalo</label></div>
               <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Dòng xe quan tâm</label><div className="relative"><select name="interest" value={formData.interest} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 appearance-none"><option value="">-- Chưa xác định --</option>{CAR_MODELS.map(m => <option key={m} value={m}>{m}</option>)}</select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} /></div></div>
+                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Dòng xe quan tâm</label><div className="relative"><select name="interest" value={formData.interest} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 appearance-none"><option value="">-- Chưa xác định --</option>{carList.map(m => <option key={m} value={m}>{m}</option>)}</select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} /></div></div>
                   <div><label className="block text-sm font-bold text-gray-700 mb-1">Khu vực</label><input name="location" value={formData.location} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500" placeholder="Quận 1, TP.HCM" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">

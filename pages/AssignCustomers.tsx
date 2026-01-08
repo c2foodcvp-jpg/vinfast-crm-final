@@ -1,10 +1,10 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../supabaseClient';
-import { UserProfile, CAR_MODELS, CustomerStatus, CustomerClassification, Customer } from '../types';
+import { UserProfile, CAR_MODELS as DEFAULT_CAR_MODELS, CustomerStatus, CustomerClassification } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { UserPlus, User, MapPin, Phone, MessageSquare, ChevronDown, Save, Loader2, CheckCircle2, Calendar, Upload, ScanText, Mail, AlertOctagon, AlertTriangle, Search, XCircle } from 'lucide-react';
+import { UserPlus, User, MapPin, Phone, MessageSquare, ChevronDown, Save, Loader2, CheckCircle2, Calendar, Upload, ScanText, Search, XCircle, AlertTriangle } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
 import emailjs from '@emailjs/browser';
 
@@ -20,6 +20,9 @@ const AssignCustomers: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   
+  // Dynamic Car List
+  const [carList, setCarList] = useState<string[]>(DEFAULT_CAR_MODELS);
+
   // OCR State
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
@@ -47,6 +50,7 @@ const AssignCustomers: React.FC = () => {
   useEffect(() => {
     if (!isAdmin && !isMod) { navigate('/'); return; }
     fetchEmployees();
+    fetchCarModels();
   }, [userProfile]);
 
   const fetchEmployees = async () => {
@@ -55,6 +59,15 @@ const AssignCustomers: React.FC = () => {
       const { data } = await supabase.from('profiles').select('*').eq('status', 'active').order('full_name');
       if (data) setEmployees(data as UserProfile[]);
     } catch (err) { console.error(err); } finally { setLoading(false); }
+  };
+
+  const fetchCarModels = async () => {
+      try {
+          const { data } = await supabase.from('car_models').select('name').order('created_at', { ascending: false });
+          if (data && data.length > 0) {
+              setCarList(data.map(c => c.name));
+          }
+      } catch (e) { console.error("Error fetching car models", e); }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -136,7 +149,7 @@ const AssignCustomers: React.FC = () => {
               if (match && match[1].length > 1) rawInterest = match[1].trim();
               else if (nextLine) rawInterest = nextLine.trim();
               if (rawInterest) {
-                  const matchModel = CAR_MODELS.find(m => rawInterest.toLowerCase().includes(m.toLowerCase()));
+                  const matchModel = carList.find(m => rawInterest.toLowerCase().includes(m.toLowerCase()));
                   if (matchModel) extractedData.interest = matchModel;
                   else extractedData.interest = rawInterest;
               }
@@ -269,7 +282,7 @@ const AssignCustomers: React.FC = () => {
           <div className="p-6 border-b border-gray-100 bg-white"><h3 className="font-bold text-gray-900 text-lg">Thông tin khách hàng</h3></div>
           <div className="p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label className="block text-sm font-bold text-gray-700 mb-2">Họ và tên <span className="text-red-500">*</span></label><div className="relative"><User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input required name="name" value={formData.name} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl pl-10 pr-4 py-3 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 font-medium" placeholder="Nguyễn Văn A" /></div></div><div><label className="block text-sm font-bold text-gray-700 mb-2">Số điện thoại <span className="text-red-500">*</span></label><div className="flex gap-2"><div className="relative flex-1"><Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input required name="phone" value={formData.phone} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl pl-10 pr-4 py-3 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 font-medium disabled:bg-gray-50" placeholder="09..." disabled={formData.isZaloOnly} /></div>{!formData.isZaloOnly && (<button type="button" onClick={handleCheckPhone} disabled={isCheckingPhone || !formData.phone} className="px-4 py-2 bg-gray-100 border border-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-colors flex items-center gap-2 disabled:opacity-50 whitespace-nowrap">{isCheckingPhone ? <Loader2 className="animate-spin" size={18}/> : <Search size={18}/>} Kiểm tra</button>)}</div>{phoneCheckResult && (<div className={`mt-3 p-3 rounded-lg border flex items-start gap-3 animate-fade-in ${phoneCheckResult.exists ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'}`}>{phoneCheckResult.exists ? <XCircle size={20} className="shrink-0 mt-0.5"/> : <CheckCircle2 size={20} className="shrink-0 mt-0.5"/>}<div>{phoneCheckResult.exists ? (<><p className="font-bold">SĐT này đã tồn tại trên hệ thống!</p><p className="text-sm mt-1">Khách hàng: <strong>{phoneCheckResult.name}</strong></p><p className="text-sm">Đang được chăm sóc bởi: <strong className="uppercase">{phoneCheckResult.rep}</strong></p></>) : (<p className="font-medium text-sm">SĐT chưa tồn tại. Có thể thêm mới.</p>)}</div></div>)}<div className="flex items-center gap-2 mt-2"><input type="checkbox" id="zaloOnly" checked={formData.isZaloOnly} onChange={toggleZaloOnly} className="w-4 h-4 text-primary-600 rounded border-gray-300" /><label htmlFor="zaloOnly" className="text-sm text-gray-600 font-medium cursor-pointer">Khách chỉ liên hệ qua Zalo</label></div></div></div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label className="block text-sm font-bold text-gray-700 mb-2">Khu vực / Địa chỉ</label><div className="relative"><MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input name="location" value={formData.location} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl pl-10 pr-4 py-3 outline-none focus:border-primary-500" placeholder="VD: Quận 1, TP.HCM" /></div></div><div><label className="block text-sm font-bold text-gray-700 mb-2">Dòng xe quan tâm</label><div className="relative"><select name="interest" value={formData.interest} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-4 py-3 outline-none focus:border-primary-500 appearance-none cursor-pointer"><option value="">-- Chưa xác định --</option>{CAR_MODELS.map(model => (<option key={model} value={model}>{model}</option>))}</select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} /></div></div></div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label className="block text-sm font-bold text-gray-700 mb-2">Khu vực / Địa chỉ</label><div className="relative"><MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input name="location" value={formData.location} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl pl-10 pr-4 py-3 outline-none focus:border-primary-500" placeholder="VD: Quận 1, TP.HCM" /></div></div><div><label className="block text-sm font-bold text-gray-700 mb-2">Dòng xe quan tâm</label><div className="relative"><select name="interest" value={formData.interest} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-4 py-3 outline-none focus:border-primary-500 appearance-none cursor-pointer"><option value="">-- Chưa xác định --</option>{carList.map(model => (<option key={model} value={model}>{model}</option>))}</select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} /></div></div></div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label className="block text-sm font-bold text-gray-700 mb-2">Nguồn khách</label><div className="relative"><select name="source" value={formData.source} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-4 py-3 outline-none focus:border-primary-500 appearance-none cursor-pointer"><option value="MKT Group">MKT Group</option><option value="Hotline">Hotline</option><option value="Showroom">Showroom</option><option value="Sự kiện">Sự kiện</option><option value="Giới Thiệu">Giới Thiệu</option><option value="Khác">Khác</option></select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} /></div></div><div><label className="block text-sm font-bold text-gray-700 mb-2">Phân loại khách</label><div className="relative"><select name="classification" value={formData.classification} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-4 py-3 outline-none focus:border-primary-500 appearance-none cursor-pointer"><option value="Hot">Hot (Tiềm năng cao)</option><option value="Warm">Warm (Quan tâm)</option><option value="Cool">Cool (Tham khảo)</option></select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} /></div></div></div>
               <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm"><h4 className="text-gray-900 font-bold mb-4 flex items-center gap-2"><UserPlus size={20} className="text-blue-600"/> Chỉ định người phụ trách</h4><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label className="block text-sm font-bold text-gray-700 mb-2">Chọn nhân viên (TVBH) <span className="text-red-500">*</span></label><div className="relative"><select name="assignedRepId" value={formData.assignedRepId} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-4 py-3 outline-none focus:border-primary-500 appearance-none cursor-pointer font-bold shadow-sm"><option value="">-- Chọn nhân viên --</option>{employees.map(emp => (<option key={emp.id} value={emp.id}>{emp.full_name} ({emp.role})</option>))}</select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} /></div></div><div><label className="block text-sm font-bold text-gray-700 mb-2">Ngày chăm sóc tiếp theo</label><div className="relative"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} /><input type="date" name="recare_date" min={todayStr} value={formData.recare_date} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl pl-10 pr-4 py-3 outline-none focus:border-primary-500" /></div></div></div></div>
               <div><label className="block text-sm font-bold text-gray-700 mb-2">Ghi chú phân bổ / Nhu cầu</label><div className="relative"><MessageSquare className="absolute left-3 top-3 text-gray-400" size={18} /><textarea name="notes" value={formData.notes} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl pl-10 pr-4 py-3 outline-none focus:border-primary-500 h-24 resize-none" placeholder="Nhập ghi chú..." /></div></div>

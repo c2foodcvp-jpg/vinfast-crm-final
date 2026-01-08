@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Customer, UserProfile } from '../types';
+import { Customer, UserProfile, CAR_MODELS as DEFAULT_CAR_MODELS } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -16,6 +16,9 @@ const LeadsFromForm: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
+  // Dynamic Car List (Used for matching logic if needed later, currently leads come with interest text)
+  const [carList, setCarList] = useState<string[]>(DEFAULT_CAR_MODELS);
+
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Customer | null>(null);
@@ -28,6 +31,7 @@ const LeadsFromForm: React.FC = () => {
         return;
     }
     fetchData();
+    fetchCarModels();
   }, [userProfile]);
 
   const fetchData = async () => {
@@ -40,6 +44,15 @@ const LeadsFromForm: React.FC = () => {
       const { data: emps } = await supabase.from('profiles').select('id, full_name, role').eq('status', 'active');
       if (emps) setEmployees(emps as UserProfile[]);
     } catch (err) { console.error("Error fetching data:", err); } finally { setLoading(false); }
+  };
+
+  const fetchCarModels = async () => {
+      try {
+          const { data } = await supabase.from('car_models').select('name').order('created_at', { ascending: false });
+          if (data && data.length > 0) {
+              setCarList(data.map(c => c.name));
+          }
+      } catch (e) { console.error("Error fetching car models", e); }
   };
 
   const handleOpenAssign = (lead: Customer) => {

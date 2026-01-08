@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  User, Phone, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Database, Copy, Zap, Globe, Layout, ArrowUp, ArrowDown, RotateCcw
+  User, Phone, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Database, Copy, Zap, Globe, Layout, ArrowUp, ArrowDown, RotateCcw, FileText, X
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -24,6 +24,11 @@ const Profile: React.FC = () => {
   const [menuOrder, setMenuOrder] = useState<string[]>([]);
   const [menuLabels, setMenuLabels] = useState<Record<string, string>>({});
 
+  // Quick Edit Text (Car Prices, Bank Rates)
+  const [quickEditType, setQuickEditType] = useState<'car_prices' | 'bank_rates' | null>(null);
+  const [quickEditContent, setQuickEditContent] = useState('');
+  const [loadingContent, setLoadingContent] = useState(false);
+
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -36,12 +41,13 @@ const Profile: React.FC = () => {
       { key: 'finance', label: 'Tài chính & Quỹ' },
       { key: 'car_prices', label: 'Bảng giá Xe' },
       { key: 'bank_rates', label: 'Lãi suất Bank' },
+      { key: 'inventory', label: 'Kho xe (Tồn)' },
       { key: 'promotions', label: 'Chính sách Team' },
       { key: 'assign', label: 'Phân bổ Leads' },
       { key: 'employees', label: 'Nhân sự' },
       { key: 'team_fund', label: 'Quỹ Nhóm' },
-      { key: 'distributors', label: 'Đại lý' },
-      { key: 'profile', label: 'Cấu hình' }
+      { key: 'configuration', label: 'Cấu hình' },
+      { key: 'profile', label: 'Cá nhân' }
   ];
 
   useEffect(() => {
@@ -74,8 +80,10 @@ const Profile: React.FC = () => {
               setMenuOrder(allDefaultKeys);
           } else {
               // Ensure no missing keys if new features added
-              const missing = allDefaultKeys.filter(k => !fetchedOrder.includes(k));
-              setMenuOrder([...fetchedOrder, ...missing]);
+              // Also map old 'distributors' to 'configuration' if it exists in DB
+              const mappedOrder = fetchedOrder.map(k => k === 'distributors' ? 'configuration' : k);
+              const missing = allDefaultKeys.filter(k => !mappedOrder.includes(k));
+              setMenuOrder([...mappedOrder, ...missing]);
           }
           
           // Map labels
@@ -116,14 +124,33 @@ const Profile: React.FC = () => {
     setLoading(true);
     setMessage(null);
     try {
-      const { error } = await supabase.from('profiles').update({ full_name: fullName, phone: phone, avatar_url: avatarUrl, updated_at: new Date().toISOString() }).eq('id', userProfile?.id);
+      // Removing updated_at to prevent errors if column missing
+      const updateData: any = { full_name: fullName, phone: phone, avatar_url: avatarUrl };
+      
+      const { error } = await supabase.from('profiles').update(updateData).eq('id', userProfile?.id);
+      
       if (error) throw error;
+      
+      // Update Auth Metadata as well
       await supabase.auth.updateUser({ data: { full_name: fullName, phone: phone } });
-      setMessage({ type: 'success', content: 'Cập nhật thông tin thành công!' });
-      setTimeout(() => setMessage(null), 3000);
+      
+      setMessage({ type: 'success', content: 'Cập nhật thông tin thành công! Đang tải lại...' });
+      
+      // Reload to ensure Sidebar/Header updates (Context might not refresh immediately)
+      setTimeout(() => {
+          window.location.reload();
+      }, 1000);
+
     } catch (err: any) {
-      setMessage({ type: 'error', content: err.message || 'Lỗi cập nhật hồ sơ.' });
-    } finally {
+      console.error(err);
+      if (err.message?.includes('violates row-level security')) {
+          setMessage({ type: 'error', content: 'Lỗi Quyền: Bạn chưa được cấp quyền sửa hồ sơ. Vui lòng báo Admin.' });
+      } else if (err.code === 'PGRST204') {
+          // Columns missing
+          setMessage({ type: 'error', content: 'Lỗi Database: Thiếu cột dữ liệu. Hãy chạy mã SQL sửa lỗi trong phần Cấu hình.' });
+      } else {
+          setMessage({ type: 'error', content: err.message || 'Lỗi cập nhật hồ sơ.' });
+      }
       setLoading(false);
     }
   };
@@ -163,6 +190,30 @@ const Profile: React.FC = () => {
       setMenuOrder(newOrder);
   };
 
+  // --- QUICK EDIT LOGIC ---
+  const openQuickEdit = async (type: 'car_prices' | 'bank_rates') => {
+      setQuickEditType(type);
+      setLoadingContent(true);
+      const key = type === 'car_prices' ? 'car_prices_html' : 'bank_rates_html';
+      try {
+          const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
+          setQuickEditContent(data?.value || '');
+      } catch (e) {} finally { setLoadingContent(false); }
+  };
+
+  const saveQuickEdit = async () => {
+      if (!quickEditType) return;
+      setLoadingContent(true);
+      const key = quickEditType === 'car_prices' ? 'car_prices_html' : 'bank_rates_html';
+      try {
+          await supabase.from('app_settings').upsert({ key, value: quickEditContent });
+          setMessage({ type: 'success', content: 'Đã cập nhật nội dung thành công!' });
+          setQuickEditType(null);
+      } catch (e) {
+          setMessage({ type: 'error', content: 'Lỗi lưu nội dung.' });
+      } finally { setLoadingContent(false); }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-10">
       <div><h1 className="text-2xl font-bold text-gray-900">Tài khoản cá nhân</h1><p className="text-gray-500">Quản lý thông tin hồ sơ và bảo mật tài khoản.</p></div>
@@ -194,6 +245,27 @@ const Profile: React.FC = () => {
                          <div className="flex gap-2"><input type="text" value={appIconUrl} onChange={e => setAppIconUrl(e.target.value)} className="w-full border border-gray-200 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 text-gray-900 font-medium" placeholder="https://..." /></div>
                      </div>
                      
+                     {/* CONTENT MANAGEMENT */}
+                     <div>
+                         <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><FileText size={16}/> Quản lý Nội dung Chung</label>
+                         <div className="flex gap-3">
+                             <button onClick={() => openQuickEdit('car_prices')} className="px-4 py-2 bg-white border border-gray-300 rounded-xl text-sm font-bold hover:bg-gray-50 flex items-center gap-2 shadow-sm"><FileText size={14}/> Sửa Bảng giá Xe</button>
+                             <button onClick={() => openQuickEdit('bank_rates')} className="px-4 py-2 bg-white border border-gray-300 rounded-xl text-sm font-bold hover:bg-gray-50 flex items-center gap-2 shadow-sm"><FileText size={14}/> Sửa Lãi suất Bank</button>
+                         </div>
+                         {quickEditType && (
+                             <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200 animate-fade-in">
+                                 <div className="flex justify-between items-center mb-2">
+                                     <h4 className="font-bold text-sm text-gray-800">Đang sửa: {quickEditType === 'car_prices' ? 'Bảng giá Xe' : 'Lãi suất Ngân hàng'}</h4>
+                                     <button onClick={() => setQuickEditType(null)} className="text-gray-400 hover:text-gray-600"><X size={16}/></button>
+                                 </div>
+                                 <textarea className="w-full h-48 border border-gray-300 rounded-lg p-3 text-xs font-mono focus:border-indigo-500 outline-none" value={quickEditContent} onChange={e => setQuickEditContent(e.target.value)} disabled={loadingContent}></textarea>
+                                 <div className="mt-2 flex justify-end">
+                                     <button onClick={saveQuickEdit} className="px-4 py-2 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 flex items-center gap-1">{loadingContent ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} Lưu Nội dung</button>
+                                 </div>
+                             </div>
+                         )}
+                     </div>
+
                      {/* MENU SORTING */}
                      <div>
                          <div className="flex justify-between items-center mb-2">

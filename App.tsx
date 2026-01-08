@@ -1,3 +1,4 @@
+
 import React from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -10,7 +11,7 @@ import CustomerList from './pages/CustomerList';
 import CustomerDetail from './pages/CustomerDetail';
 import EmployeeList from './pages/EmployeeList';
 import EmployeeDetail from './pages/EmployeeDetail';
-import DistributorList from './pages/DistributorList';
+import Configuration from './pages/Configuration';
 import Profile from './pages/Profile';
 import Deals from './pages/Deals';
 import AssignCustomers from './pages/AssignCustomers';
@@ -20,6 +21,7 @@ import Finance from './pages/Finance';
 import TeamFund from './pages/TeamFund';
 import CarPrices from './pages/CarPrices';
 import BankRates from './pages/BankRates';
+import Inventory from './pages/Inventory';
 
 const { HashRouter, Routes, Route, Navigate } = ReactRouterDOM as any;
 
@@ -57,7 +59,10 @@ const App: React.FC = () => {
           <Route path="/deals" element={<ProtectedRoute><Deals /></ProtectedRoute>} />
           <Route path="/employees" element={<ProtectedRoute><EmployeeList /></ProtectedRoute>} />
           <Route path="/employees/:id" element={<ProtectedRoute><EmployeeDetail /></ProtectedRoute>} />
-          <Route path="/distributors" element={<ProtectedRoute><DistributorList /></ProtectedRoute>} />
+          {/* Changed route to Configuration */}
+          <Route path="/configuration" element={<ProtectedRoute><Configuration /></ProtectedRoute>} />
+          <Route path="/distributors" element={<Navigate to="/configuration" replace />} /> 
+          
           <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
           <Route path="/leads-form" element={<ProtectedRoute><LeadsFromForm /></ProtectedRoute>} />
           <Route path="/promotions" element={<ProtectedRoute><Promotions /></ProtectedRoute>} />
@@ -65,6 +70,7 @@ const App: React.FC = () => {
           <Route path="/team-fund" element={<ProtectedRoute><TeamFund /></ProtectedRoute>} />
           <Route path="/car-prices" element={<ProtectedRoute><CarPrices /></ProtectedRoute>} />
           <Route path="/bank-rates" element={<ProtectedRoute><BankRates /></ProtectedRoute>} />
+          <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

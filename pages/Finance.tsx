@@ -285,6 +285,10 @@ const Finance: React.FC = () => {
               if (c.status !== CustomerStatus.WON) return false;
               if (!c.updated_at || !isInMonthYear(c.updated_at)) return false;
           }
+          
+          // Exclude Suspended Deals from Finance
+          if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
+
           if (!isMKT(c.source)) return false;
           const creator = allProfiles.find(p => p.id === c.creator_id);
           if (isAdmin) {
@@ -312,8 +316,8 @@ const Finance: React.FC = () => {
           // 2. Status WON
           if (c.status !== CustomerStatus.WON) return false;
           
-          // 3. Not Refunded
-          if (c.deal_status === 'refunded' || c.deal_status === 'refund_pending') return false;
+          // 3. Not Refunded / Suspended
+          if (c.deal_status === 'refunded' || c.deal_status === 'refund_pending' || c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
           
           // 4. Timeframe (Current Month)
           const dStr = c.updated_at || c.created_at;
@@ -395,6 +399,7 @@ const Finance: React.FC = () => {
           const kpiTarget = emp.kpi_target || 0;
           const kpiActual = allCustomers.filter(c => {
               if (c.creator_id !== emp.id || c.status !== CustomerStatus.WON) return false;
+              if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false; // Exclude suspended
               if (!isMKT(c.source)) return false;
               const d = new Date(c.updated_at || c.created_at);
               return d.getMonth() + 1 === selectedMonth && d.getFullYear() === selectedYear;
@@ -494,7 +499,7 @@ const Finance: React.FC = () => {
   const availableCustomersForDeposit = useMemo(() => {
       return allCustomers.filter(c => {
           const isWon = c.status === CustomerStatus.WON;
-          const isNotFinished = c.deal_status !== 'completed' && c.deal_status !== 'refunded';
+          const isNotFinished = c.deal_status !== 'completed' && c.deal_status !== 'refunded' && c.deal_status !== 'suspended' && c.deal_status !== 'suspended_pending'; // Exclude Suspended
           const isMKTSource = c.source === 'MKT Group' || (c.source || '').includes('MKT');
           if (!isWon || !isNotFinished || !isMKTSource) return false;
           if (isAdmin) {

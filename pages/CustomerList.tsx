@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient';
 import { Customer, CustomerStatus, CustomerClassification, UserProfile, AccessDelegation } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import * as ReactRouterDOM from 'react-router-dom';
-import { Search, Plus, X, User, CarFront, Calendar, AlertCircle, Clock, CheckCircle2, MessageSquare, ShieldAlert, Upload, FileSpreadsheet, Download, AlertTriangle, Flame, History, RotateCcw, HardDrive, MapPin, Loader2, ChevronDown, List, Filter, Webhook, UserX, ScanSearch, Phone, Trash2, Eye } from 'lucide-react';
+import { Search, Plus, X, User, CarFront, Calendar, AlertCircle, Clock, CheckCircle2, MessageSquare, ShieldAlert, Upload, FileSpreadsheet, Download, AlertTriangle, Flame, History, RotateCcw, HardDrive, MapPin, Loader2, ChevronDown, List, Filter, Webhook, UserX, ScanSearch, Phone, Trash2, Eye, Share2, Star, Activity, PauseCircle, Ban, EyeOff } from 'lucide-react';
 import { CAR_MODELS } from '../types';
 
 const { useNavigate, useLocation } = ReactRouterDOM as any;
@@ -129,7 +129,7 @@ const CustomerList: React.FC = () => {
           }
       }
 
-      // 1.5 CHECK DELEGATIONS (New Logic)
+      // 1.5 CHECK DELEGATIONS (Global Delegation - Deprecated concept but kept for compatibility)
       let delegatedTargetIds: string[] = [];
       if (!isAdmin) {
           try {
@@ -141,10 +141,10 @@ const CustomerList: React.FC = () => {
               if (delegations && delegations.length > 0) {
                   delegatedTargetIds = delegations.map((d: any) => d.target_user_id);
               }
-          } catch (e) { console.log('Delegation table might not exist yet'); }
+          } catch (e) { console.log('Delegation table check failed'); }
       }
 
-      // 2. Fetch Customers
+      // 2. Fetch Customers (OWNED + TEAM + GLOBAL DELEGATION)
       let query = supabase
         .from('customers')
         .select('*')
@@ -152,8 +152,6 @@ const CustomerList: React.FC = () => {
 
       if (!isAdmin) {
           // Combine Team IDs and Delegated IDs
-          // For Sales: teamIds = [self]. delegatedTargetIds = [userB, userC...]
-          // For Mod: teamIds = [self, sub1, sub2]. delegatedTargetIds = [modB...]
           const viewableIds = [...new Set([...teamIds, ...delegatedTargetIds])];
           
           if (viewableIds.length > 0) {
@@ -168,13 +166,85 @@ const CustomerList: React.FC = () => {
       
       let fetchedCustomers = data as Customer[] || [];
       
-      // Mark delegated customers for UI
+      // Mark delegated customers for UI (Old delegation)
       if (delegatedTargetIds.length > 0) {
           fetchedCustomers = fetchedCustomers.map(c => ({
               ...c,
               _is_delegated: c.creator_id ? delegatedTargetIds.includes(c.creator_id) : false
           }));
       }
+
+      // 3. FETCH INDIVIDUALLY SHARED CUSTOMERS (Shared With Me & Shared By Me)
+      try {
+          // A. Shared WITH me (Incoming)
+          const { data: sharesIn } = await supabase
+              .from('customer_shares')
+              .select('customer_id, permission')
+              .eq('shared_with', userProfile.id);
+          
+          // B. Shared BY me (Outgoing)
+          const { data: sharesOut } = await supabase
+              .from('customer_shares')
+              .select('customer_id')
+              .eq('shared_by', userProfile.id);
+
+          const sharedInIds = sharesIn ? sharesIn.map(s => s.customer_id) : [];
+          const sharedOutIds = sharesOut ? sharesOut.map(s => s.customer_id) : [];
+
+          // Fetch incoming shared customers if any
+          if (sharedInIds.length > 0) {
+              const { data: sharedCustomerData } = await supabase
+                  .from('customers')
+                  .select('*')
+                  .in('id', sharedInIds);
+              
+              if (sharedCustomerData) {
+                  const sharedCustomersWithFlag = sharedCustomerData.map((c: any) => {
+                      const shareInfo = sharesIn?.find(s => s.customer_id === c.id);
+                      return {
+                          ...c,
+                          _is_delegated: true,
+                          _shared_permission: shareInfo?.permission // 'view' or 'edit'
+                      };
+                  });
+                  
+                  // Merge avoiding duplicates
+                  const existingIds = new Set(fetchedCustomers.map(c => c.id));
+                  sharedCustomersWithFlag.forEach((sc: Customer) => {
+                      if (!existingIds.has(sc.id)) {
+                          fetchedCustomers.push(sc);
+                      }
+                  });
+              }
+          }
+
+          // Mark Outgoing Shares (I shared these)
+          if (sharedOutIds.length > 0) {
+              fetchedCustomers = fetchedCustomers.map(c => {
+                  if (sharedOutIds.includes(c.id)) {
+                      return { ...c, _is_shared_by_me: true }; // Custom flag for UI
+                  }
+                  return c;
+              });
+          }
+
+          // Mark Incoming Shares that were already in the list (e.g. Mod viewing sub's shared data)
+          if (sharedInIds.length > 0) {
+              fetchedCustomers = fetchedCustomers.map(c => {
+                  if (sharedInIds.includes(c.id)) {
+                      const shareInfo = sharesIn?.find(s => s.customer_id === c.id);
+                      return { ...c, _shared_permission: shareInfo?.permission };
+                  }
+                  return c;
+              });
+          }
+
+      } catch (e) {
+          console.error("Error fetching shares", e);
+      }
+
+      // Re-sort by created_at after merge
+      fetchedCustomers.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       setCustomers(fetchedCustomers);
     } catch (err) {
@@ -344,6 +414,7 @@ const CustomerList: React.FC = () => {
       try {
           await supabase.from('interactions').delete().eq('customer_id', customerId);
           await supabase.from('transactions').delete().eq('customer_id', customerId);
+          await supabase.from('customer_shares').delete().eq('customer_id', customerId); // Delete shares too
           const { error } = await supabase.from('customers').delete().eq('id', customerId);
           if (error) throw error;
           setCustomers(prev => prev.filter(c => c.id !== customerId));
@@ -455,6 +526,39 @@ const CustomerList: React.FC = () => {
       return { text: statusText, color: statusColor };
   };
 
+  const getCustomerStatusDisplay = (customer: Customer) => {
+      // 1. Chăm sóc dài hạn -> Theo dõi thêm
+      if (customer.is_long_term) {
+          return <span className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full font-bold text-xs shadow-sm flex items-center gap-1 border border-blue-100"><Calendar size={12}/> Theo dõi thêm</span>;
+      }
+
+      // 2. Đã hủy -> Đã hủy (Hiển thị rõ ràng cho trạng thái Lost)
+      if (customer.status === CustomerStatus.LOST || customer.status === CustomerStatus.LOST_PENDING) {
+          return <span className="bg-gray-100 text-gray-500 px-3 py-1 rounded-full font-bold text-xs shadow-sm flex items-center gap-1 border border-gray-200"><Ban size={12}/> Đã hủy</span>;
+      }
+
+      // 3. Check Special Care -> Potential
+      if (customer.is_special_care) {
+          return <span className="bg-gradient-to-r from-red-500 to-orange-500 text-white px-3 py-1 rounded-full font-bold text-xs shadow-md animate-pulse flex items-center gap-1 border border-white/20"><Star size={12} fill="white"/> TIỀM NĂNG</span>;
+      }
+
+      // 4. Logic for "New" customers older than 48 hours
+      const created = new Date(customer.created_at);
+      const now = new Date();
+      const diffHours = (now.getTime() - created.getTime()) / (1000 * 60 * 60);
+      
+      if (customer.status === CustomerStatus.NEW) {
+          if (diffHours > 48) {
+              return <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-md font-bold text-xs flex items-center gap-1 border border-gray-200"><Activity size={12}/> Đang theo dõi</span>;
+          } else {
+              return <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-md font-bold text-xs border border-blue-200 flex items-center gap-1"><Flame size={12}/> Mới</span>;
+          }
+      }
+      
+      // Default
+      return <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-md font-medium">{customer.status}</span>;
+  };
+
   return (
     <div className="space-y-6 pb-20 relative">
       {/* ... (Header and Search section kept same as before) ... */}
@@ -526,6 +630,14 @@ const CustomerList: React.FC = () => {
           filteredList.map((customer) => {
             const recareStatus = getRecareStatus(customer);
             const isFinishedStatus = [CustomerStatus.WON, CustomerStatus.LOST, CustomerStatus.WON_PENDING, CustomerStatus.LOST_PENDING].includes(customer.status);
+            // Visual check if explicitly shared via 'customer_shares' table
+            const isShared = customer._shared_permission !== undefined || (customer as any)._is_shared_by_me;
+            
+            // --- Phone Masking Logic ---
+            // If New and Not Acknowledged, mask phone.
+            const isPhoneHidden = customer.status === CustomerStatus.NEW && !customer.is_acknowledged;
+            const displayPhone = isPhoneHidden ? (customer.phone.length > 3 ? customer.phone.substring(0, 4) + '*******' : '*******') : customer.phone;
+
             return (
               <div 
                 key={customer.id} 
@@ -534,14 +646,20 @@ const CustomerList: React.FC = () => {
                         customerIds: filteredList.map(c => c.id) // Pass current list context
                     } 
                 })} 
-                className={`group bg-white rounded-2xl p-4 shadow-sm border hover:shadow-md transition-all cursor-pointer relative overflow-hidden ${customer._is_delegated ? 'border-indigo-200 bg-indigo-50/30' : 'border-gray-100 hover:border-primary-200'}`}
+                className={`group bg-white rounded-2xl p-4 shadow-sm border hover:shadow-md transition-all cursor-pointer relative overflow-hidden 
+                    ${isShared ? 'border-purple-400 border-2 bg-purple-50/60 ring-2 ring-purple-100 shadow-purple-100' : 
+                      customer._is_delegated ? 'border-indigo-200 bg-indigo-50/30' : 'border-gray-100 hover:border-primary-200'}`}
               >
                 <div className="absolute top-0 right-0 p-2 flex flex-col gap-1 items-end">
-                    {customer._is_delegated && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1"><Eye size={10}/> Được chia sẻ</span>}
+                    {/* Badge for Shared Customer - Distinct Style */}
+                    {isShared && <span className="bg-gradient-to-r from-purple-600 to-pink-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1"><Share2 size={10}/> {(customer as any)._is_shared_by_me ? 'Đã Chia Sẻ' : (customer._shared_permission === 'edit' ? 'Được Sửa' : 'Được Xem')}</span>}
+                    {customer._is_delegated && !isShared && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1"><Eye size={10}/> Ủy quyền</span>}
                     {customer.is_special_care && <Flame size={18} className="text-red-500 animate-pulse" />}
                     {customer.is_long_term && <Calendar size={18} className="text-blue-500" />}
                     {customer.deal_status === 'completed_pending' && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">Chờ duyệt Hoàn thành</span>}
                     {customer.deal_status === 'refund_pending' && <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-200">Chờ duyệt Trả cọc</span>}
+                    {customer.deal_status === 'suspended_pending' && <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-200">Chờ duyệt Treo</span>}
+                    {customer.deal_status === 'suspended' && <span className="bg-gray-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">Hồ sơ Treo</span>}
                     {customer.pending_transfer_to && <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-200">Chờ chuyển Sale</span>}
                     {customer.status === CustomerStatus.NEW && !customer.is_acknowledged && customer.sales_rep && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-purple-200 animate-pulse">Chờ tiếp nhận</span>}
                 </div>
@@ -553,18 +671,27 @@ const CustomerList: React.FC = () => {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className={`h-10 w-10 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-sm ${customer.classification === 'Hot' ? 'bg-gradient-to-br from-red-500 to-orange-500' : customer.classification === 'Cool' ? 'bg-gradient-to-br from-blue-400 to-cyan-400' : 'bg-gradient-to-br from-orange-400 to-yellow-400'}`}>{customer.name.charAt(0).toUpperCase()}</div>
-                    <div><h3 className="font-bold text-gray-900 group-hover:text-primary-700 transition-colors line-clamp-1">{customer.name}</h3><p className="text-xs text-gray-500 font-medium">{customer.phone}</p></div>
+                    <div>
+                        <h3 className="font-bold text-gray-900 group-hover:text-primary-700 transition-colors line-clamp-1">{customer.name}</h3>
+                        <p className={`text-xs font-medium flex items-center gap-1 ${isPhoneHidden ? 'text-gray-400 italic' : 'text-gray-500'}`}>
+                            {isPhoneHidden && <EyeOff size={10} />}
+                            {displayPhone}
+                        </p>
+                    </div>
                   </div>
                 </div>
                 <div className="space-y-2 text-sm text-gray-600 mb-3">
                    <div className="flex items-center gap-2"><CarFront size={14} className="text-gray-400" /><span className="font-medium">{customer.interest ? customer.interest.toUpperCase() : 'CHƯA RÕ'}</span></div>
                    {!(customer.is_special_care || customer.is_long_term || isFinishedStatus) && (<div className="flex items-center gap-2"><Clock size={14} className="text-gray-400" /><span className={`${recareStatus.color}`}>{recareStatus.text}</span></div>)}
                    {customer.location && (<div className="flex items-center gap-2"><MapPin size={14} className="text-gray-400" /><span className="truncate">{customer.location}</span></div>)}
-                   {/* Show owner if delegated */}
-                   {customer._is_delegated && customer.sales_rep && (<div className="flex items-center gap-2 mt-1 pt-1 border-t border-indigo-100"><User size={12} className="text-indigo-500" /><span className="text-xs text-indigo-600 font-bold">{customer.sales_rep}</span></div>)}
-                   {(isAdmin || isMod) && !customer._is_delegated && customer.sales_rep && (<div className="flex items-center gap-2 mt-1 pt-1 border-t border-gray-100"><User size={12} className="text-blue-500" /><span className="text-xs text-blue-600 font-bold">{customer.sales_rep}</span></div>)}
+                   {/* Show owner if delegated or shared */}
+                   {(isShared || customer._is_delegated) && customer.sales_rep && (<div className="flex items-center gap-2 mt-1 pt-1 border-t border-indigo-100"><User size={12} className="text-indigo-500" /><span className="text-xs text-indigo-600 font-bold">{customer.sales_rep}</span></div>)}
+                   {(isAdmin || isMod) && !customer._is_delegated && !isShared && customer.sales_rep && (<div className="flex items-center gap-2 mt-1 pt-1 border-t border-gray-100"><User size={12} className="text-blue-500" /><span className="text-xs text-blue-600 font-bold">{customer.sales_rep}</span></div>)}
                 </div>
-                <div className="flex items-center justify-between pt-3 border-t border-gray-50 text-xs"><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-md font-medium">{customer.status}</span><span className="text-gray-400">{new Date(customer.created_at).toLocaleDateString('vi-VN')}</span></div>
+                <div className="flex items-center justify-between pt-3 border-t border-gray-50 text-xs">
+                    {getCustomerStatusDisplay(customer)}
+                    <span className="text-gray-400">{new Date(customer.created_at).toLocaleDateString('vi-VN')}</span>
+                </div>
               </div>
             );
           })

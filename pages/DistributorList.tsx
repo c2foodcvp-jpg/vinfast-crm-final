@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { Distributor, UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Trash2, Edit2, Save, X, MapPin, Building2, Loader2, Copy, Terminal, Database, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, MapPin, Building2, Loader2, Copy, Terminal, Database, AlertCircle, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const DistributorList: React.FC = () => {
@@ -139,8 +139,8 @@ NOTIFY pgrst, 'reload schema';
     <div className="space-y-6">
        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
-            <h1 className="text-2xl font-bold text-gray-900">Quản lý Đại lý phân phối</h1>
-            <p className="text-gray-500">Danh sách các Showroom/Đại lý VinFast.</p>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Settings className="text-primary-600"/> Cấu hình Hệ thống</h1>
+            <p className="text-gray-500">Quản lý Đại lý phân phối và các cài đặt khác.</p>
         </div>
         <button 
             onClick={() => handleOpenModal()}

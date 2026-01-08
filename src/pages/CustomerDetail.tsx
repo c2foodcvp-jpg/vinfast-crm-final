@@ -1,13 +1,14 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Customer, CustomerStatus, Interaction, CustomerClassification, DealDetails, UserProfile, UserRole, Distributor, DealStatus, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye, Share2, Lock, Users, Archive, EyeOff
+  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye, Share2, Lock, Users, Archive
 } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
+
+const { useParams, useNavigate, useLocation } = ReactRouterDOM as any;
 
 const CustomerDetail: React.FC = () => {
   const { id } = useParams();
@@ -830,11 +831,6 @@ const CustomerDetail: React.FC = () => {
   const isSuspended = customer.deal_status === 'suspended';
   const hideCarePanel = isWon || isLost;
   
-  // MASKING LOGIC
-  const isPhoneHidden = customer.status === CustomerStatus.NEW && !customer.is_acknowledged;
-  const displayPhone = isPhoneHidden ? (customer.phone.length > 3 ? customer.phone.substring(0, 4) + '*******' : '*******') : customer.phone;
-  const secondaryPhoneDisplay = customer.secondary_phone ? (isPhoneHidden ? '*******' : customer.secondary_phone) : null;
-
   // Updated showFinance Logic: Must be Won AND not finished AND MKT Source
   const showFinance = isWon && !isCompleted && !isRefunded && !isSuspended && isMKTSource;
 
@@ -943,20 +939,15 @@ const CustomerDetail: React.FC = () => {
           {/* ... Customer Info & Finance Panels ... */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 relative">
             <h3 className="font-bold text-gray-900 mb-4 border-b pb-2 flex justify-between items-center">Thông tin khách hàng{!isEditingInfo && !isWon && !isLost && !isDelegatedViewOnly && (<button onClick={() => setIsEditingInfo(true)} className="text-primary-600 hover:text-primary-700 text-xs flex items-center gap-1 font-bold"><Edit size={14} /> Sửa</button>)}</h3>
-            {isEditingInfo && !isWon && !isLost ? (<div className="space-y-3 animate-fade-in"><input value={editForm.phone} disabled className="w-full border rounded px-2 py-1 text-sm font-bold bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" /><input value={editForm.secondary_phone} onChange={e => setEditForm({...editForm, secondary_phone: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập thêm số..." /><select value={editForm.interest} onChange={e => setEditForm({...editForm, interest: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none"><option value="">-- Chọn dòng xe --</option>{carList.map(m => <option key={m} value={m}>{m}</option>)}</select><input value={editForm.source} onChange={e => setEditForm({...editForm, source: e.target.value})} disabled={editForm.source.includes('MKT Group') && !isAdmin && !isMod} className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold outline-none ${(editForm.source.includes('MKT Group') && !isAdmin && !isMod) ? 'bg-gray-100' : 'bg-white'}`} /><input value={editForm.location} onChange={e => setEditForm({...editForm, location: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập địa chỉ..." /><div className="flex gap-2 pt-2"><button type="button" onClick={() => setIsEditingInfo(false)} className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded">Hủy</button><button onClick={handleSaveInfo} className="flex-1 py-1.5 bg-primary-600 text-white text-xs font-bold rounded flex items-center justify-center gap-1"><Save size={14}/> Lưu</button></div></div>) : (<div className="space-y-4 text-sm"><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Điện thoại</span><span className="font-bold text-gray-900 flex items-center gap-1">{isPhoneHidden ? <><EyeOff size={12} className="text-gray-400"/> {displayPhone}</> : customer.phone}</span></div>{secondaryPhoneDisplay && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">SĐT Phụ</span><span className="font-bold text-gray-900">{secondaryPhoneDisplay}</span></div>}
+            {isEditingInfo && !isWon && !isLost ? (<div className="space-y-3 animate-fade-in"><input value={editForm.phone} disabled className="w-full border rounded px-2 py-1 text-sm font-bold bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" /><input value={editForm.secondary_phone} onChange={e => setEditForm({...editForm, secondary_phone: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập thêm số..." /><select value={editForm.interest} onChange={e => setEditForm({...editForm, interest: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none"><option value="">-- Chọn dòng xe --</option>{carList.map(m => <option key={m} value={m}>{m}</option>)}</select><input value={editForm.source} onChange={e => setEditForm({...editForm, source: e.target.value})} disabled={editForm.source.includes('MKT Group') && !isAdmin && !isMod} className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold outline-none ${(editForm.source.includes('MKT Group') && !isAdmin && !isMod) ? 'bg-gray-100' : 'bg-white'}`} /><input value={editForm.location} onChange={e => setEditForm({...editForm, location: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập địa chỉ..." /><div className="flex gap-2 pt-2"><button type="button" onClick={() => setIsEditingInfo(false)} className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded">Hủy</button><button onClick={handleSaveInfo} className="flex-1 py-1.5 bg-primary-600 text-white text-xs font-bold rounded flex items-center justify-center gap-1"><Save size={14}/> Lưu</button></div></div>) : (<div className="space-y-4 text-sm"><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Điện thoại</span><span className="font-bold text-gray-900">{customer.phone}</span></div>{customer.secondary_phone && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">SĐT Phụ</span><span className="font-bold text-gray-900">{customer.secondary_phone}</span></div>}
             <div className="flex gap-2 mb-2">
-                <button onClick={() => !isPhoneHidden && (window.location.href = `tel:${customer.phone}`)} disabled={isPhoneHidden} className={`flex-1 py-2 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors ${isPhoneHidden ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}>
+                <a href={`tel:${customer.phone}`} onClick={() => handleTrackAction('call', 'Đã thực hiện cuộc gọi đi.')} className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors cursor-pointer">
                     <Phone size={14} /> Gọi điện
-                </button>
-                <button onClick={() => !isPhoneHidden && window.open(`https://zalo.me/${customer.phone.replace(/\D/g, '')}`, '_blank')} disabled={isPhoneHidden} className={`flex-1 py-2 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors ${isPhoneHidden ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                </a>
+                <a href={`https://zalo.me/${customer.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" onClick={() => handleTrackAction('zalo', 'Đã mở hội thoại Zalo.')} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors cursor-pointer">
                     <MessageCircle size={14} /> Chat Zalo
-                </button>
+                </a>
             </div>
-            {isPhoneHidden && (
-                <div className="bg-yellow-50 p-2 rounded-lg border border-yellow-200 text-xs text-yellow-800 text-center animate-pulse">
-                    Vui lòng bấm <strong>Tiếp nhận khách</strong> để xem SĐT
-                </div>
-            )}
             <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Dòng xe</span><span className="font-bold text-primary-700">{customer.interest?.toUpperCase() || '---'}</span></div><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Nguồn</span><span className="font-medium text-gray-900">{customer.source}</span></div><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Phụ trách</span><span className="font-medium text-gray-900">{customer.sales_rep}</span></div><div><span className="text-gray-500 block mb-1">Địa chỉ</span><span className="font-medium text-gray-900">{customer.location || '---'}</span></div></div>)}
           </div>
           {showFinance && (
@@ -1078,31 +1069,6 @@ const CustomerDetail: React.FC = () => {
       )}
 
       {showChangeSalesModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 max-h-[80vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Chuyển quyền chăm sóc</h3><button onClick={() => setShowChangeSalesModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="space-y-2">{availableUsersToChange.map(emp => (<button key={emp.id} onClick={() => prepareChangeSales(emp)} className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors text-left group"><div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center font-bold text-gray-600 group-hover:bg-primary-100 group-hover:text-primary-700">{emp.full_name.charAt(0)}</div><div><p className="font-bold text-gray-900">{emp.full_name}</p><p className="text-xs text-gray-500 capitalize">{emp.role}</p></div></button>))}</div></div></div>)}
-      
-      {/* CONFIRMATION MODAL FOR CHANGE SALES */}
-      {showChangeSalesConfirm && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                  <div className="flex flex-col items-center text-center">
-                      <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4"><ArrowRightLeft size={24} /></div>
-                      <h3 className="text-xl font-bold text-gray-900 mb-2">
-                          {showChangeSalesConfirm.type === 'direct' ? 'Xác nhận chuyển Sales?' : 'Gửi yêu cầu chuyển?'}
-                      </h3>
-                      <p className="text-gray-500 text-sm mb-6">
-                          {showChangeSalesConfirm.type === 'direct' 
-                              ? <>Chuyển khách hàng cho <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</>
-                              : <>Gửi yêu cầu chuyển cho <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</>
-                          }
-                      </p>
-                      <div className="flex gap-3 w-full">
-                          <button onClick={() => setShowChangeSalesConfirm(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy</button>
-                          <button onClick={executeChangeSales} className="flex-1 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-colors">Xác nhận</button>
-                      </div>
-                  </div>
-              </div>
-          </div>
-      )}
-
       {showDeleteConfirm && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl"><div className="flex flex-col items-center text-center"><div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4"><Trash2 size={24} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xóa khách hàng?</h3><p className="text-gray-500 text-sm mb-6">Hành động này không thể hoàn tác. Toàn bộ dữ liệu tương tác và giao dịch sẽ bị xóa.</p><div className="flex gap-3 w-full"><button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDeleteCustomer} className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Xóa vĩnh viễn</button></div></div></div></div>)}
       
       {/* ... SHARE MODAL ... */}

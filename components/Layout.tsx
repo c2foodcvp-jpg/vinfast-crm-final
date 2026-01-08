@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../supabaseClient';
 import { 
   LayoutDashboard, Users, LogOut, Menu, X, UserCircle, Briefcase, UserCog, Building2,
-  FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, PiggyBank, CarFront, Landmark, AlertCircle
+  FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, PiggyBank, CarFront, Landmark, AlertCircle, Box, Settings, User
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -38,6 +39,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     { key: 'finance', icon: BadgeDollarSign, label: 'Tài chính & Quỹ', path: '/finance' },
     { key: 'car_prices', icon: CarFront, label: 'Bảng giá Xe', path: '/car-prices' },
     { key: 'bank_rates', icon: Landmark, label: 'Lãi suất Bank', path: '/bank-rates' },
+    { key: 'inventory', icon: Box, label: 'Kho xe (Tồn)', path: '/inventory' },
     { key: 'promotions', icon: Gift, label: 'Chính sách Team', path: '/promotions' },
     { key: 'assign', icon: UserPlus, label: 'Phân bổ Leads', path: '/assign', roleReq: [UserRole.ADMIN, UserRole.MOD] },
     { key: 'employees', icon: Briefcase, label: 'Nhân sự', path: '/employees', roleReq: [UserRole.ADMIN, UserRole.MOD], countFetcher: async () => {
@@ -50,8 +52,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         const { count } = await supabase.from('team_fines').select('*', { count: 'exact', head: true }).eq('user_id', userProfile.id).eq('status', 'pending');
         return count || 0;
     }},
-    { key: 'distributors', icon: Building2, label: 'Đại lý', path: '/distributors', roleReq: [UserRole.ADMIN] },
-    { key: 'profile', icon: UserCog, label: 'Cấu hình', path: '/profile' },
+    { key: 'configuration', icon: Settings, label: 'Cấu hình', path: '/configuration', roleReq: [UserRole.ADMIN] },
+    { key: 'profile', icon: User, label: 'Cá nhân', path: '/profile' },
   ], [userProfile]);
 
   useEffect(() => {
@@ -95,8 +97,11 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               setMenuOrder(allKeys);
           } else {
               // Ensure any new keys in definitions that aren't in saved order are appended
-              const missingKeys = allKeys.filter(k => !order.includes(k));
-              setMenuOrder([...order, ...missingKeys]);
+              // Map old key 'distributors' to 'configuration' if present
+              const mappedOrder = order.map(k => k === 'distributors' ? 'configuration' : k);
+              
+              const missingKeys = allKeys.filter(k => !mappedOrder.includes(k));
+              setMenuOrder([...mappedOrder, ...missingKeys]);
           }
       } catch (e) {
           console.error("Menu config error", e);

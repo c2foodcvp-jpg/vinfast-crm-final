@@ -15,10 +15,11 @@ import {
   Ban, 
   X, 
   User, 
-  MapPin, 
   CarFront,
   Filter,
-  ChevronDown
+  ChevronDown,
+  Archive,
+  PauseCircle
 } from 'lucide-react';
 
 const Deals: React.FC = () => {
@@ -27,7 +28,7 @@ const Deals: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [employees, setEmployees] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'processing' | 'completed' | 'refunded'>('processing');
+  const [activeTab, setActiveTab] = useState<'processing' | 'completed' | 'refunded' | 'suspended'>('processing');
   const [searchTerm, setSearchTerm] = useState('');
   
   // Filter State
@@ -36,7 +37,7 @@ const Deals: React.FC = () => {
   const [selectedTeam, setSelectedTeam] = useState<string>('all'); // Add Team Filter
   
   // Confirmation Modal
-  const [confirmAction, setConfirmAction] = useState<{id: string, type: 'completed' | 'refunded'} | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{id: string, type: 'completed' | 'refunded' | 'suspended'} | null>(null);
 
   useEffect(() => {
     fetchDataWithIsolation();
@@ -141,11 +142,13 @@ const Deals: React.FC = () => {
       // Status Check (Tab)
       let matchesStatus = false;
       if (activeTab === 'processing') {
-          matchesStatus = ds === 'processing' || ds === 'completed_pending' || ds === 'refund_pending';
+          matchesStatus = ds === 'processing' || ds === 'completed_pending' || ds === 'refund_pending' || ds === 'suspended_pending';
       } else if (activeTab === 'completed') {
           matchesStatus = ds === 'completed';
-      } else {
+      } else if (activeTab === 'refunded') {
           matchesStatus = ds === 'refunded';
+      } else if (activeTab === 'suspended') {
+          matchesStatus = ds === 'suspended' || ds === 'suspended_pending';
       }
 
       return matchesSearch && matchesSource && matchesRep && matchesStatus && matchesTeam;
@@ -164,8 +167,10 @@ const Deals: React.FC = () => {
       switch(status) {
           case 'completed_pending': return <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-md text-xs font-bold border border-blue-200">Chờ duyệt Hoàn thành</span>;
           case 'refund_pending': return <span className="bg-red-100 text-red-800 px-2 py-1 rounded-md text-xs font-bold border border-red-200">Chờ duyệt Trả cọc</span>;
+          case 'suspended_pending': return <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded-md text-xs font-bold border border-orange-200 animate-pulse">Chờ duyệt Treo</span>;
           case 'completed': return <span className="bg-green-100 text-green-800 px-2 py-1 rounded-md text-xs font-bold border border-green-200">Đã hoàn thành</span>;
           case 'refunded': return <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded-md text-xs font-bold border border-gray-200">Đã trả cọc</span>;
+          case 'suspended': return <span className="bg-gray-600 text-white px-2 py-1 rounded-md text-xs font-bold">Hồ sơ Treo</span>;
           default: return <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-md text-xs font-bold border border-yellow-200">Đang xử lý</span>;
       }
   };
@@ -249,10 +254,10 @@ const Deals: React.FC = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200">
+        <div className="flex overflow-x-auto pb-2 border-b border-gray-200 hide-scrollbar gap-2">
             <button
                 onClick={() => setActiveTab('processing')}
-                className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                className={`px-6 py-3 text-sm font-bold whitespace-nowrap border-b-2 transition-colors flex items-center gap-2 ${
                     activeTab === 'processing' ? 'border-yellow-500 text-yellow-600' : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
             >
@@ -260,7 +265,7 @@ const Deals: React.FC = () => {
             </button>
             <button
                 onClick={() => setActiveTab('completed')}
-                className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                className={`px-6 py-3 text-sm font-bold whitespace-nowrap border-b-2 transition-colors flex items-center gap-2 ${
                     activeTab === 'completed' ? 'border-green-600 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
             >
@@ -268,11 +273,19 @@ const Deals: React.FC = () => {
             </button>
             <button
                 onClick={() => setActiveTab('refunded')}
-                className={`px-6 py-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                className={`px-6 py-3 text-sm font-bold whitespace-nowrap border-b-2 transition-colors flex items-center gap-2 ${
                     activeTab === 'refunded' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
             >
                 <RotateCcw size={16} /> Trả cọc
+            </button>
+            <button
+                onClick={() => setActiveTab('suspended')}
+                className={`px-6 py-3 text-sm font-bold whitespace-nowrap border-b-2 transition-colors flex items-center gap-2 ${
+                    activeTab === 'suspended' ? 'border-gray-600 text-gray-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+            >
+                <Archive size={16} /> Hồ sơ Treo
             </button>
         </div>
 
@@ -280,7 +293,7 @@ const Deals: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredCustomers.length === 0 ? (
                 <div className="col-span-full py-12 text-center text-gray-500 bg-white rounded-2xl border border-gray-100 border-dashed">
-                    Chưa có đơn hàng nào.
+                    Không có hồ sơ nào.
                 </div>
             ) : (
                 filteredCustomers.map(c => (
@@ -288,11 +301,12 @@ const Deals: React.FC = () => {
                         key={c.id} 
                         className={`bg-white rounded-2xl p-5 shadow-sm border hover:shadow-md transition-all relative cursor-pointer
                             ${c.deal_status?.includes('pending') ? 'border-blue-200 ring-2 ring-blue-100' : 'border-gray-100'}
+                            ${c.deal_status === 'suspended' ? 'bg-gray-50 opacity-80' : ''}
                         `}
                         onClick={() => navigate(`/customers/${c.id}`)}
                     >
                         {/* Approval Actions for Admin/Mod */}
-                        {(isAdmin || isMod) && (c.deal_status === 'completed_pending' || c.deal_status === 'refund_pending') && (
+                        {(isAdmin || isMod) && (c.deal_status === 'completed_pending' || c.deal_status === 'refund_pending' || c.deal_status === 'suspended_pending') && (
                             <div className="absolute top-4 right-4 flex gap-1 z-20">
                                 {c.deal_status === 'completed_pending' && (
                                     <button 
@@ -310,6 +324,15 @@ const Deals: React.FC = () => {
                                         title="Duyệt trả cọc"
                                     >
                                         <Ban size={16} />
+                                    </button>
+                                )}
+                                {c.deal_status === 'suspended_pending' && (
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); setConfirmAction({id: c.id, type: 'suspended'}); }}
+                                        className="p-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 shadow-md tooltip transition-transform active:scale-95"
+                                        title="Duyệt treo hồ sơ"
+                                    >
+                                        <PauseCircle size={16} />
                                     </button>
                                 )}
                             </div>
@@ -368,13 +391,15 @@ const Deals: React.FC = () => {
                         <button onClick={() => setConfirmAction(null)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
                     </div>
                     <p className="text-gray-600 text-sm">
-                        Bạn có chắc chắn muốn duyệt yêu cầu <strong className="text-gray-900">{confirmAction.type === 'completed' ? 'Hoàn thành' : 'Trả cọc'}</strong> này không?
+                        Bạn có chắc chắn muốn duyệt yêu cầu <strong className="text-gray-900">
+                            {confirmAction.type === 'completed' ? 'Hoàn thành' : confirmAction.type === 'suspended' ? 'Treo hồ sơ' : 'Trả cọc'}
+                        </strong> này không?
                     </p>
                     <div className="flex gap-2 pt-2">
                         <button onClick={() => setConfirmAction(null)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Hủy</button>
                         <button 
                             onClick={executeApprove}
-                            className={`flex-1 py-2 font-bold rounded-xl text-white shadow-lg ${confirmAction.type === 'completed' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
+                            className={`flex-1 py-2 font-bold rounded-xl text-white shadow-lg ${confirmAction.type === 'completed' ? 'bg-green-600 hover:bg-green-700' : confirmAction.type === 'suspended' ? 'bg-orange-600 hover:bg-orange-700' : 'bg-red-600 hover:bg-red-700'}`}
                         >
                             Duyệt
                         </button>

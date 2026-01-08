@@ -18,14 +18,21 @@ export enum CustomerStatus {
   AFTER_SALES = 'Chăm sóc sau bán'
 }
 
-export type DealStatus = 'processing' | 'completed_pending' | 'completed' | 'refund_pending' | 'refunded';
+export type DealStatus = 'processing' | 'completed_pending' | 'completed' | 'refund_pending' | 'refunded' | 'suspended_pending' | 'suspended';
 
 export type CustomerClassification = 'Hot' | 'Warm' | 'Cool';
 
+// Fallback constant if DB is empty
 export const CAR_MODELS = [
   'VF 3', 'VF 5 Plus', 'VF 6', 'VF 7', 'VF 8', 'VF 9', 'VF e34',
   'Minio Green', 'Herio Green', 'Limo Green', 'Ec Van', 'Lạc Hồng'
 ];
+
+export interface CarModel {
+  id: string;
+  name: string;
+  created_at?: string;
+}
 
 export interface Distributor {
   id: string;
@@ -94,6 +101,7 @@ export interface Customer {
   
   // Virtual field for UI
   _is_delegated?: boolean;
+  _shared_permission?: 'view' | 'edit'; // New field for per-customer share
 }
 
 export interface Interaction {
@@ -150,6 +158,13 @@ export interface TeamPolicy {
   updated_at: string;
 }
 
+export interface TeamInventory {
+  id: string;
+  manager_id: string;
+  content: string; // HTML content
+  updated_at: string;
+}
+
 export interface AppSettings {
   id: string;
   key: string;
@@ -182,4 +197,14 @@ export interface ProfitExclusion {
   user_id: string; // User bị loại trừ doanh thu từ khách này
   customer_id: string;
   created_at?: string;
+}
+
+// NEW: Customer Specific Share
+export interface CustomerShare {
+  id: string;
+  customer_id: string;
+  shared_by: string;
+  shared_with: string; // User ID nhận share
+  permission: 'view' | 'edit';
+  created_at: string;
 }
