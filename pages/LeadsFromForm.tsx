@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Customer, UserProfile, CAR_MODELS as DEFAULT_CAR_MODELS } from '../types';
+import { Customer, UserProfile, CAR_MODELS as DEFAULT_CAR_MODELS, UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -26,10 +26,8 @@ const LeadsFromForm: React.FC = () => {
   const [isAssigning, setIsAssigning] = useState(false);
 
   useEffect(() => {
-    if (!isAdmin && !isMod) {
-        navigate('/');
-        return;
-    }
+    if (!userProfile) return;
+    // Allow Admins, Mods, and Employees to access this page to claim leads
     fetchData();
     fetchCarModels();
   }, [userProfile]);
@@ -41,8 +39,34 @@ const LeadsFromForm: React.FC = () => {
       if (error) throw error;
       setLeads(customers as Customer[]);
 
-      const { data: emps } = await supabase.from('profiles').select('id, full_name, role').eq('status', 'active');
-      if (emps) setEmployees(emps as UserProfile[]);
+      // FETCH EMPLOYEES: Get all active, then filter in JS to ensure strict logic
+      const { data: allProfiles } = await supabase.from('profiles').select('id, full_name, role, manager_id, status').eq('status', 'active');
+      
+      let filtered: any[] = [];
+      
+      if (allProfiles) {
+          if (isAdmin) {
+              // Admin sees all
+              filtered = allProfiles;
+          } else if (isMod && userProfile) {
+              // MOD: See Self + Subordinates (manager_id = me)
+              filtered = allProfiles.filter(p => p.id === userProfile.id || p.manager_id === userProfile.id);
+          } else if (userProfile) {
+              // SALES (Employee): See Self + Peers (Same Manager, Same Role)
+              // Strict Logic: Must have same manager_id AND be an employee role.
+              if (userProfile.manager_id) {
+                  filtered = allProfiles.filter(p => 
+                      p.id === userProfile.id || 
+                      (p.manager_id === userProfile.manager_id && p.role === UserRole.EMPLOYEE)
+                  );
+              } else {
+                  // Fallback: If no manager assigned, only see self
+                  filtered = allProfiles.filter(p => p.id === userProfile.id);
+              }
+          }
+      }
+      
+      setEmployees(filtered as UserProfile[]);
     } catch (err) { console.error("Error fetching data:", err); } finally { setLoading(false); }
   };
 
@@ -74,7 +98,7 @@ const LeadsFromForm: React.FC = () => {
 
           await supabase.from('interactions').insert([{
               customer_id: selectedLead.id, user_id: userProfile?.id, type: 'note',
-              content: `[Phân bổ từ Form] Admin đã chuyển khách này cho ${rep.full_name}.`,
+              content: `[Phân bổ từ Form] ${userProfile?.full_name} đã chuyển khách này cho ${rep.full_name}.`,
               created_at: new Date().toISOString()
           }]);
 

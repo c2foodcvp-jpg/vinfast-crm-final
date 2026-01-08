@@ -1,13 +1,14 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Customer, CustomerStatus, Interaction, CustomerClassification, DealDetails, UserProfile, UserRole, Distributor, DealStatus, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye, Share2, Lock, Users, Archive, EyeOff
+  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye, Share2, Lock, Users, Archive
 } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
+
+const { useParams, useNavigate, useLocation } = ReactRouterDOM as any;
 
 const CustomerDetail: React.FC = () => {
   const { id } = useParams();
@@ -111,6 +112,10 @@ const CustomerDetail: React.FC = () => {
     fetchEmployees(); 
     fetchCarModels();
     setIsEditingInfo(false);
+    
+    return () => {
+        if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
+    };
   }, [id, userProfile]); 
 
   useEffect(() => { 
@@ -336,6 +341,12 @@ const CustomerDetail: React.FC = () => {
       }
       setRecareDate(date);
       await updateCustomerField({ recare_date: date });
+      
+      if (longTermTimeoutRef.current) {
+          clearTimeout(longTermTimeoutRef.current);
+          longTermTimeoutRef.current = null;
+      }
+      
       showToast("Đã cập nhật ngày chăm sóc");
   };
 
@@ -344,6 +355,8 @@ const CustomerDetail: React.FC = () => {
       setIsSpecialCare(newVal);
       if (newVal) {
           setIsLongTerm(false); 
+          if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
+          
           await updateCustomerField({ is_special_care: true, is_long_term: false, special_care_start_date: new Date().toISOString() });
           handleAddNote('note', "Đã đánh dấu: Chăm sóc đặc biệt (Hot)");
       } else {
@@ -357,19 +370,32 @@ const CustomerDetail: React.FC = () => {
       if (newVal) {
           setIsSpecialCare(false);
           setRecareDate(''); 
-          // Cập nhật: Tự động chuyển phân loại về 'Cool' khi bật CS Dài hạn
           setClassification('Cool');
           await updateCustomerField({ is_long_term: true, is_special_care: false, recare_date: null, classification: 'Cool' });
           handleAddNote('note', "Đã chuyển sang: Chăm sóc dài hạn (Phân loại: Cool)");
+          showToast("Đã bật CS Dài hạn. Vui lòng chọn ngày trong 10s!");
+
+          if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
+          longTermTimeoutRef.current = setTimeout(() => {
+              setRecareDate((currentDate) => {
+                  if (!currentDate) {
+                      setIsLongTerm(false);
+                      updateCustomerField({ is_long_term: false });
+                      showToast("Đã tự động tắt CS Dài hạn do không chọn ngày!", 'error');
+                      handleAddNote('note', "Hệ thống: Tự động tắt CS Dài hạn do quá hạn chọn ngày.");
+                  }
+                  return currentDate;
+              });
+          }, 10000); 
+
       } else {
+          if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
           await updateCustomerField({ is_long_term: false });
       }
   };
 
   const handleStopCare = async () => {
       if (!stopReason) { showToast("Vui lòng nhập lý do.", 'error'); return; }
-      // Cập nhật: Trạng thái đổi thành LOST (Đã hủy) nếu là Admin/Mod, hoặc LOST_PENDING nếu là Sales
-      // ĐỒNG THỜI: Chuyển classification về 'Cool'
       const newStatus = (isAdmin || isMod) ? CustomerStatus.LOST : CustomerStatus.LOST_PENDING;
       setClassification('Cool');
       await updateCustomerField({ status: newStatus, stop_reason: stopReason, classification: 'Cool' });
@@ -522,9 +548,15 @@ const CustomerDetail: React.FC = () => {
           return targets.filter(e => e.manager_id === userProfile.id);
       }
 
-      // Sales cannot change sales directly usually, but if enabled request, limit to teammates?
-      // Requirement: "Đổi sale chỉ đổi được trong team (Cùng cấp bậc hoặc thấp hơn)"
-      // Assuming Sales can't change to anyone, returning empty or just Admin/Mod for request
+      // Sales: Can request transfer to Teammates (same manager) ONLY.
+      // Strictly peers only (same manager_id, role=employee). Exclude Manager.
+      if (userProfile.manager_id) {
+          return targets.filter(e => 
+              e.manager_id === userProfile.manager_id && 
+              e.role === UserRole.EMPLOYEE
+          );
+      }
+
       return []; 
   }, [employees, userProfile, isAdmin, isMod]);
 
@@ -830,11 +862,6 @@ const CustomerDetail: React.FC = () => {
   const isSuspended = customer.deal_status === 'suspended';
   const hideCarePanel = isWon || isLost;
   
-  // MASKING LOGIC
-  const isPhoneHidden = customer.status === CustomerStatus.NEW && !customer.is_acknowledged;
-  const displayPhone = isPhoneHidden ? (customer.phone.length > 3 ? customer.phone.substring(0, 4) + '*******' : '*******') : customer.phone;
-  const secondaryPhoneDisplay = customer.secondary_phone ? (isPhoneHidden ? '*******' : customer.secondary_phone) : null;
-
   // Updated showFinance Logic: Must be Won AND not finished AND MKT Source
   const showFinance = isWon && !isCompleted && !isRefunded && !isSuspended && isMKTSource;
 
@@ -880,9 +907,11 @@ const CustomerDetail: React.FC = () => {
                 {isPending && (isAdmin || isMod) && !isDelegatedViewOnly && (
                     <button onClick={handleApproveRequest} className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 flex items-center gap-2"><CheckCircle2 size={18}/> Duyệt Yêu Cầu</button>
                 )}
-                {!isWon && !isLost && !isDelegatedViewOnly && (isAdmin || isMod) && (
+                {!isDelegatedViewOnly && (
                     <>
-                        <button onClick={() => setShowChangeSalesModal(true)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><ArrowRightLeft size={16}/> Đổi Sales</button>
+                        {!isWon && !isLost && (isAdmin || isMod || customer.creator_id === userProfile?.id) && (
+                            <button onClick={() => setShowChangeSalesModal(true)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><ArrowRightLeft size={16}/> Đổi Sales</button>
+                        )}
                         {canShare && (
                             <button onClick={handleOpenShareModal} className="px-3 py-2 bg-teal-50 border border-teal-200 text-teal-700 font-bold rounded-lg hover:bg-teal-100 flex items-center gap-2" title="Chia sẻ khách hàng"><Share2 size={16}/></button>
                         )}
@@ -943,20 +972,15 @@ const CustomerDetail: React.FC = () => {
           {/* ... Customer Info & Finance Panels ... */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 relative">
             <h3 className="font-bold text-gray-900 mb-4 border-b pb-2 flex justify-between items-center">Thông tin khách hàng{!isEditingInfo && !isWon && !isLost && !isDelegatedViewOnly && (<button onClick={() => setIsEditingInfo(true)} className="text-primary-600 hover:text-primary-700 text-xs flex items-center gap-1 font-bold"><Edit size={14} /> Sửa</button>)}</h3>
-            {isEditingInfo && !isWon && !isLost ? (<div className="space-y-3 animate-fade-in"><input value={editForm.phone} disabled className="w-full border rounded px-2 py-1 text-sm font-bold bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" /><input value={editForm.secondary_phone} onChange={e => setEditForm({...editForm, secondary_phone: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập thêm số..." /><select value={editForm.interest} onChange={e => setEditForm({...editForm, interest: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none"><option value="">-- Chọn dòng xe --</option>{carList.map(m => <option key={m} value={m}>{m}</option>)}</select><input value={editForm.source} onChange={e => setEditForm({...editForm, source: e.target.value})} disabled={editForm.source.includes('MKT Group') && !isAdmin && !isMod} className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold outline-none ${(editForm.source.includes('MKT Group') && !isAdmin && !isMod) ? 'bg-gray-100' : 'bg-white'}`} /><input value={editForm.location} onChange={e => setEditForm({...editForm, location: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập địa chỉ..." /><div className="flex gap-2 pt-2"><button type="button" onClick={() => setIsEditingInfo(false)} className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded">Hủy</button><button onClick={handleSaveInfo} className="flex-1 py-1.5 bg-primary-600 text-white text-xs font-bold rounded flex items-center justify-center gap-1"><Save size={14}/> Lưu</button></div></div>) : (<div className="space-y-4 text-sm"><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Điện thoại</span><span className="font-bold text-gray-900 flex items-center gap-1">{isPhoneHidden ? <><EyeOff size={12} className="text-gray-400"/> {displayPhone}</> : customer.phone}</span></div>{secondaryPhoneDisplay && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">SĐT Phụ</span><span className="font-bold text-gray-900">{secondaryPhoneDisplay}</span></div>}
+            {isEditingInfo && !isWon && !isLost ? (<div className="space-y-3 animate-fade-in"><input value={editForm.phone} disabled className="w-full border rounded px-2 py-1 text-sm font-bold bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" /><input value={editForm.secondary_phone} onChange={e => setEditForm({...editForm, secondary_phone: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập thêm số..." /><select value={editForm.interest} onChange={e => setEditForm({...editForm, interest: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none"><option value="">-- Chọn dòng xe --</option>{carList.map(m => <option key={m} value={m}>{m}</option>)}</select><input value={editForm.source} onChange={e => setEditForm({...editForm, source: e.target.value})} disabled={editForm.source.includes('MKT Group') && !isAdmin && !isMod} className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold outline-none ${(editForm.source.includes('MKT Group') && !isAdmin && !isMod) ? 'bg-gray-100' : 'bg-white'}`} /><input value={editForm.location} onChange={e => setEditForm({...editForm, location: e.target.value})} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập địa chỉ..." /><div className="flex gap-2 pt-2"><button type="button" onClick={() => setIsEditingInfo(false)} className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded">Hủy</button><button onClick={handleSaveInfo} className="flex-1 py-1.5 bg-primary-600 text-white text-xs font-bold rounded flex items-center justify-center gap-1"><Save size={14}/> Lưu</button></div></div>) : (<div className="space-y-4 text-sm"><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Điện thoại</span><span className="font-bold text-gray-900">{customer.phone}</span></div>{customer.secondary_phone && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">SĐT Phụ</span><span className="font-bold text-gray-900">{customer.secondary_phone}</span></div>}
             <div className="flex gap-2 mb-2">
-                <button onClick={() => !isPhoneHidden && (window.location.href = `tel:${customer.phone}`)} disabled={isPhoneHidden} className={`flex-1 py-2 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors ${isPhoneHidden ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}>
+                <a href={`tel:${customer.phone}`} onClick={() => handleTrackAction('call', 'Đã thực hiện cuộc gọi đi.')} className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors cursor-pointer">
                     <Phone size={14} /> Gọi điện
-                </button>
-                <button onClick={() => !isPhoneHidden && window.open(`https://zalo.me/${customer.phone.replace(/\D/g, '')}`, '_blank')} disabled={isPhoneHidden} className={`flex-1 py-2 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors ${isPhoneHidden ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                </a>
+                <a href={`https://zalo.me/${customer.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" onClick={() => handleTrackAction('zalo', 'Đã mở hội thoại Zalo.')} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors cursor-pointer">
                     <MessageCircle size={14} /> Chat Zalo
-                </button>
+                </a>
             </div>
-            {isPhoneHidden && (
-                <div className="bg-yellow-50 p-2 rounded-lg border border-yellow-200 text-xs text-yellow-800 text-center animate-pulse">
-                    Vui lòng bấm <strong>Tiếp nhận khách</strong> để xem SĐT
-                </div>
-            )}
             <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Dòng xe</span><span className="font-bold text-primary-700">{customer.interest?.toUpperCase() || '---'}</span></div><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Nguồn</span><span className="font-medium text-gray-900">{customer.source}</span></div><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Phụ trách</span><span className="font-medium text-gray-900">{customer.sales_rep}</span></div><div><span className="text-gray-500 block mb-1">Địa chỉ</span><span className="font-medium text-gray-900">{customer.location || '---'}</span></div></div>)}
           </div>
           {showFinance && (

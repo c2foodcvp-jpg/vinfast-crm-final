@@ -48,6 +48,7 @@ const AssignCustomers: React.FC = () => {
   const [formData, setFormData] = useState(initialFormState);
 
   useEffect(() => {
+    // Allow Admin & Mod access.
     if (!isAdmin && !isMod) { navigate('/'); return; }
     fetchEmployees();
     fetchCarModels();
@@ -56,8 +57,25 @@ const AssignCustomers: React.FC = () => {
   const fetchEmployees = async () => {
     setLoading(true);
     try {
-      const { data } = await supabase.from('profiles').select('*').eq('status', 'active').order('full_name');
-      if (data) setEmployees(data as UserProfile[]);
+      // Fetch all active employees first
+      const { data: allProfiles } = await supabase.from('profiles').select('*').eq('status', 'active').order('full_name');
+      
+      let filtered: UserProfile[] = [];
+      
+      if (allProfiles) {
+          const profiles = allProfiles as UserProfile[];
+          if (isAdmin) {
+              // Admin sees everyone
+              filtered = profiles;
+          } else if (isMod && userProfile) {
+              // MOD sees ONLY self and Subordinates
+              filtered = profiles.filter(p => p.id === userProfile.id || p.manager_id === userProfile.id);
+          } else {
+              // Fallback (e.g. Sales) - sees only self
+              filtered = profiles.filter(p => p.id === userProfile?.id);
+          }
+      }
+      setEmployees(filtered);
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
