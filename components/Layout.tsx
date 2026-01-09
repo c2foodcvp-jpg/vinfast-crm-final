@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../supabaseClient';
 import { 
   LayoutDashboard, Users, LogOut, Menu, X, UserCircle, Briefcase, UserCog, Building2,
-  FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, PiggyBank, CarFront, Landmark, AlertCircle, Box, Settings, User
+  FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, PiggyBank, CarFront, Landmark, AlertCircle, Box, Settings, User, FileInput, BarChart2, Calendar
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -34,9 +34,22 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Definition of all possible menu items
   const MENU_DEFINITIONS: NavItemDef[] = useMemo(() => [
     { key: 'dashboard', icon: LayoutDashboard, label: 'Tổng quan', path: '/' },
+    { key: 'calendar', icon: Calendar, label: 'Lịch làm việc', path: '/calendar' },
+    { key: 'analytics', icon: BarChart2, label: 'Phân tích (BI)', path: '/analytics', roleReq: [UserRole.ADMIN, UserRole.MOD] },
     { key: 'customers', icon: Users, label: 'Khách hàng', path: '/customers' },
     { key: 'deals', icon: FileCheck2, label: 'Đơn hàng', path: '/deals' },
     { key: 'finance', icon: BadgeDollarSign, label: 'Tài chính & Quỹ', path: '/finance' },
+    { key: 'proposals', icon: FileInput, label: 'Đề Xuất (Mới)', path: '/proposals', countFetcher: async () => {
+        // Admin/Mod sees all pending, Employee sees own pending? Or just generic alert
+        if (!userProfile) return 0;
+        let q = supabase.from('proposals').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+        if (userProfile.role === 'employee') {
+            q = q.eq('user_id', userProfile.id); // Sales sees their own pending
+        }
+        // Mod/Admin sees all pending
+        const { count } = await q;
+        return count || 0;
+    }},
     { key: 'car_prices', icon: CarFront, label: 'Bảng giá Xe', path: '/car-prices' },
     { key: 'bank_rates', icon: Landmark, label: 'Lãi suất Bank', path: '/bank-rates' },
     { key: 'inventory', icon: Box, label: 'Kho xe (Tồn)', path: '/inventory' },
@@ -198,7 +211,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                                 <span>{item.label}</span>
                             </div>
                             {badgeCount ? (
-                                <span className={`text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm ${item.key === 'team_fund' ? 'bg-red-600 animate-pulse' : 'bg-red-500'}`}>
+                                <span className={`text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm ${item.key === 'team_fund' ? 'bg-red-600 animate-pulse' : item.key === 'proposals' ? 'bg-orange-500' : 'bg-red-500'}`}>
                                     {badgeCount}
                                 </span>
                             ) : isActive && (

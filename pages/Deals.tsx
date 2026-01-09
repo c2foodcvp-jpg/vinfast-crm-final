@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient';
 import { Customer, CustomerStatus, DealStatus, UserRole, UserProfile } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { exportToExcel } from '../utils/excelExport';
 import { 
   CheckCircle2, 
   Clock, 
@@ -19,7 +20,11 @@ import {
   Filter,
   ChevronDown,
   Archive,
-  PauseCircle
+  PauseCircle,
+  Calendar,
+  ArrowRight,
+  Edit,
+  Download
 } from 'lucide-react';
 
 const Deals: React.FC = () => {
@@ -36,8 +41,16 @@ const Deals: React.FC = () => {
   const [selectedRep, setSelectedRep] = useState<string>('all');
   const [selectedTeam, setSelectedTeam] = useState<string>('all'); // Add Team Filter
   
+  // Date Filter State - Default to 'all' to show everything initially
+  const [filterMonth, setFilterMonth] = useState<string>('all');
+  const [filterYear, setFilterYear] = useState<number | 'all'>('all');
+  
   // Confirmation Modal
   const [confirmAction, setConfirmAction] = useState<{id: string, type: 'completed' | 'refunded' | 'suspended'} | null>(null);
+
+  // --- NEW: Manual Date Edit Modal State ---
+  const [showDateModal, setShowDateModal] = useState(false);
+  const [dateForm, setDateForm] = useState<{id: string, date: string, name: string}>({ id: '', date: '', name: '' });
 
   useEffect(() => {
     fetchDataWithIsolation();
@@ -78,8 +91,11 @@ const Deals: React.FC = () => {
       let query = supabase
         .from('customers')
         .select('*')
-        .eq('status', CustomerStatus.WON)
-        .order('created_at', { ascending: false });
+        .eq('status', CustomerStatus.WON);
+      
+      // Remove specific order by updated_at from DB query to ensure we get all data first, we will sort in client
+      // or keep it but handle nulls. Supabase puts nulls last/first depending on config.
+      // We will sort client-side to be safe with mixed updated_at/created_at
 
       if (!isAdmin) {
           if (teamIds.length > 0) {
@@ -91,7 +107,15 @@ const Deals: React.FC = () => {
 
       const { data, error } = await query;
       if (error) throw error;
-      setCustomers(data as Customer[]);
+      
+      // Sort client side to handle the fallback logic (updated_at OR created_at)
+      const sortedData = (data as Customer[]).sort((a, b) => {
+          const dateA = new Date(a.updated_at || a.created_at).getTime();
+          const dateB = new Date(b.updated_at || b.created_at).getTime();
+          return dateB - dateA; // Descending
+      });
+
+      setCustomers(sortedData);
 
     } catch (err) {
       console.warn("Error fetching data:", err);
@@ -106,13 +130,40 @@ const Deals: React.FC = () => {
       const newStatus = type;
       
       try {
-          const { error } = await supabase.from('customers').update({ deal_status: newStatus }).eq('id', id);
+          // Update status and updated_at to now
+          const { error } = await supabase.from('customers').update({ 
+              deal_status: newStatus,
+              updated_at: new Date().toISOString()
+          }).eq('id', id);
+          
           if (error) throw error;
           setConfirmAction(null);
           fetchDataWithIsolation(); // Refresh
       } catch (err: any) {
           const errorMessage = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
           alert("Lỗi duyệt: " + errorMessage);
+      }
+  };
+
+  // --- NEW: Manual Date Update Handler ---
+  const handleUpdateDate = async () => {
+      if (!dateForm.id || !dateForm.date) return;
+      try {
+          // Add current time to the date to make it ISO (or just use date part if using T00:00:00)
+          // We'll append current time to keep it roughly correct, or just use mid-day
+          const newDateISO = new Date(dateForm.date + 'T12:00:00').toISOString();
+
+          const { error } = await supabase.from('customers').update({
+              updated_at: newDateISO
+          }).eq('id', dateForm.id);
+
+          if (error) throw error;
+          
+          alert("Đã cập nhật ngày chốt đơn!");
+          setShowDateModal(false);
+          fetchDataWithIsolation();
+      } catch (e: any) {
+          alert("Lỗi cập nhật: " + e.message);
       }
   };
 
@@ -151,8 +202,44 @@ const Deals: React.FC = () => {
           matchesStatus = ds === 'suspended' || ds === 'suspended_pending';
       }
 
-      return matchesSearch && matchesSource && matchesRep && matchesStatus && matchesTeam;
+      // Date Filter (Month/Year) - Based on Updated At (Closing Date)
+      let matchesDate = true;
+      
+      // Only filter date if Year is NOT 'all'
+      if (filterYear !== 'all') {
+          const dateToUse = c.updated_at || c.created_at;
+          const d = new Date(dateToUse);
+          const yearMatch = d.getFullYear() === filterYear;
+          
+          if (filterMonth !== 'all') {
+              const monthMatch = (d.getMonth() + 1) === parseInt(filterMonth);
+              matchesDate = yearMatch && monthMatch;
+          } else {
+              matchesDate = yearMatch;
+          }
+      } 
+      // If filterYear is 'all', we don't care about the date, show everything (matchesDate = true)
+
+      return matchesSearch && matchesSource && matchesRep && matchesStatus && matchesTeam && matchesDate;
   });
+
+  // Export Function
+  const handleExport = () => {
+      const dataToExport = filteredCustomers.map(c => ({
+          "Khách hàng": c.name,
+          "Số điện thoại": c.phone,
+          "Dòng xe": c.interest || '',
+          "Doanh thu (DK)": c.deal_details?.revenue || 0,
+          "Doanh thu (Thực)": c.deal_details?.actual_revenue || 0,
+          "Nguồn": c.source || '',
+          "TVBH": c.sales_rep || '',
+          "Trạng thái": c.deal_status === 'completed' ? 'Hoàn thành' : c.deal_status === 'refunded' ? 'Đã trả cọc' : 'Đang xử lý',
+          "Ngày chốt/CN": new Date(c.updated_at || c.created_at).toLocaleDateString('vi-VN')
+      }));
+      
+      const fileName = `Danh_sach_don_hang_${filterMonth}_${filterYear}_${new Date().getTime()}`;
+      exportToExcel(dataToExport, fileName);
+  };
 
   // Managers for Dropdown (Admin View)
   const managers = useMemo(() => {
@@ -179,20 +266,45 @@ const Deals: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-20 relative">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                 <FileCheck2 className="text-green-600" />
                 Quản lý Đơn hàng
             </h1>
             
-            <div className="flex gap-2 w-full md:w-auto">
+            <div className="flex flex-col md:flex-row gap-2 w-full xl:w-auto items-center flex-wrap">
+                {/* Time Filter */}
+                <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-2 py-1 shadow-sm h-10">
+                    <Calendar size={16} className="text-gray-500 ml-1" />
+                    {/* Disable Month Select if Year is 'All' */}
+                    <select 
+                        value={filterMonth} 
+                        onChange={(e) => setFilterMonth(e.target.value)}
+                        disabled={filterYear === 'all'}
+                        className={`bg-transparent text-sm font-bold text-gray-700 outline-none cursor-pointer border-r border-gray-200 pr-2 mr-2 ${filterYear === 'all' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        <option value="all">Tất cả tháng</option>
+                        {Array.from({length: 12}, (_, i) => i + 1).map(m => (
+                            <option key={m} value={m}>Tháng {m}</option>
+                        ))}
+                    </select>
+                    <select 
+                        value={filterYear} 
+                        onChange={(e) => setFilterYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                        className="bg-transparent text-sm font-bold text-gray-700 outline-none cursor-pointer"
+                    >
+                        <option value="all">Tất cả năm</option>
+                        {[2023, 2024, 2025, 2026].map(y => (<option key={y} value={y}>{y}</option>))}
+                    </select>
+                </div>
+
                 {/* Team Filter (Admin Only) */}
                 {isAdmin && (
-                    <div className="relative">
+                    <div className="relative h-10">
                         <select 
                             value={selectedTeam} 
                             onChange={(e) => setSelectedTeam(e.target.value)}
-                            className="appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-100 text-sm font-bold shadow-sm cursor-pointer"
+                            className="appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-100 text-sm font-bold shadow-sm cursor-pointer h-full flex items-center"
                         >
                             <option value="all">Tất cả Team</option>
                             {managers.map(mgr => (
@@ -205,11 +317,11 @@ const Deals: React.FC = () => {
 
                 {/* Rep Filter (Admin/Mod Only) */}
                 {(isAdmin || isMod) && (
-                    <div className="relative">
+                    <div className="relative h-10">
                         <select 
                             value={selectedRep} 
                             onChange={(e) => setSelectedRep(e.target.value)}
-                            className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer"
+                            className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer h-full"
                         >
                             <option value="all">Tất cả nhân viên</option>
                             {employees
@@ -224,11 +336,11 @@ const Deals: React.FC = () => {
                 )}
 
                 {/* Source Filter */}
-                <div className="relative">
+                <div className="relative h-10">
                     <select 
                         value={sourceFilter} 
                         onChange={(e) => setSourceFilter(e.target.value as any)}
-                        className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer"
+                        className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer h-full"
                     >
                         <option value="all">Tất cả nguồn</option>
                         <option value="mkt">Nguồn MKT Group</option>
@@ -236,6 +348,17 @@ const Deals: React.FC = () => {
                     </select>
                     <Filter size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 </div>
+
+                {/* EXPORT BUTTON - Only for Admin/Mod */}
+                {(isAdmin || isMod) && (
+                    <button 
+                        onClick={handleExport}
+                        className="flex items-center gap-2 h-10 px-4 bg-green-600 text-white rounded-xl font-bold shadow-md hover:bg-green-700 transition-colors"
+                        title="Xuất danh sách ra Excel"
+                    >
+                        <Download size={18}/> <span className="hidden sm:inline">Xuất Excel</span>
+                    </button>
+                )}
             </div>
         </div>
 
@@ -293,90 +416,121 @@ const Deals: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredCustomers.length === 0 ? (
                 <div className="col-span-full py-12 text-center text-gray-500 bg-white rounded-2xl border border-gray-100 border-dashed">
-                    Không có hồ sơ nào.
+                    {filterYear === 'all' 
+                        ? 'Không có hồ sơ nào trong toàn bộ lịch sử.'
+                        : `Không có hồ sơ nào ${filterMonth !== 'all' ? `trong tháng ${filterMonth}/${filterYear}` : `trong năm ${filterYear}`}.`
+                    }
                 </div>
             ) : (
-                filteredCustomers.map(c => (
-                    <div 
-                        key={c.id} 
-                        className={`bg-white rounded-2xl p-5 shadow-sm border hover:shadow-md transition-all relative cursor-pointer
-                            ${c.deal_status?.includes('pending') ? 'border-blue-200 ring-2 ring-blue-100' : 'border-gray-100'}
-                            ${c.deal_status === 'suspended' ? 'bg-gray-50 opacity-80' : ''}
-                        `}
-                        onClick={() => navigate(`/customers/${c.id}`)}
-                    >
-                        {/* Approval Actions for Admin/Mod */}
-                        {(isAdmin || isMod) && (c.deal_status === 'completed_pending' || c.deal_status === 'refund_pending' || c.deal_status === 'suspended_pending') && (
-                            <div className="absolute top-4 right-4 flex gap-1 z-20">
-                                {c.deal_status === 'completed_pending' && (
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); setConfirmAction({id: c.id, type: 'completed'}); }}
-                                        className="p-2 bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-md tooltip transition-transform active:scale-95"
-                                        title="Duyệt hoàn thành"
-                                    >
-                                        <ShieldCheck size={16} />
-                                    </button>
-                                )}
-                                {c.deal_status === 'refund_pending' && (
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); setConfirmAction({id: c.id, type: 'refunded'}); }}
-                                        className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 shadow-md tooltip transition-transform active:scale-95"
-                                        title="Duyệt trả cọc"
-                                    >
-                                        <Ban size={16} />
-                                    </button>
-                                )}
-                                {c.deal_status === 'suspended_pending' && (
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); setConfirmAction({id: c.id, type: 'suspended'}); }}
-                                        className="p-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 shadow-md tooltip transition-transform active:scale-95"
-                                        title="Duyệt treo hồ sơ"
-                                    >
-                                        <PauseCircle size={16} />
-                                    </button>
-                                )}
-                            </div>
-                        )}
+                filteredCustomers.map(c => {
+                    const dateToUse = c.updated_at || c.created_at;
+                    const displayDate = new Date(dateToUse).toLocaleDateString('vi-VN');
+                    const isoDate = new Date(dateToUse).toISOString().split('T')[0];
 
-                        <div>
-                            <div className="flex items-center gap-3 mb-3">
-                                <div className="h-10 w-10 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">
-                                    {c.name.charAt(0).toUpperCase()}
+                    return (
+                        <div 
+                            key={c.id} 
+                            className={`bg-white rounded-2xl p-5 shadow-sm border hover:shadow-md transition-all relative cursor-pointer flex flex-col justify-between
+                                ${c.deal_status?.includes('pending') ? 'border-blue-200 ring-2 ring-blue-100' : 'border-gray-100'}
+                                ${c.deal_status === 'suspended' ? 'bg-gray-50 opacity-80' : ''}
+                            `}
+                            // Pass IDs to enable navigation context
+                            onClick={() => navigate(`/customers/${c.id}`, { state: { customerIds: filteredCustomers.map(cust => cust.id) } })}
+                        >
+                            {/* Approval Actions for Admin/Mod */}
+                            {(isAdmin || isMod) && (c.deal_status === 'completed_pending' || c.deal_status === 'refund_pending' || c.deal_status === 'suspended_pending') && (
+                                <div className="absolute top-4 right-4 flex gap-1 z-20">
+                                    {c.deal_status === 'completed_pending' && (
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); setConfirmAction({id: c.id, type: 'completed'}); }}
+                                            className="p-2 bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-md tooltip transition-transform active:scale-95"
+                                            title="Duyệt hoàn thành"
+                                        >
+                                            <ShieldCheck size={16} />
+                                        </button>
+                                    )}
+                                    {c.deal_status === 'refund_pending' && (
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); setConfirmAction({id: c.id, type: 'refunded'}); }}
+                                            className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 shadow-md tooltip transition-transform active:scale-95"
+                                            title="Duyệt trả cọc"
+                                        >
+                                            <Ban size={16} />
+                                        </button>
+                                    )}
+                                    {c.deal_status === 'suspended_pending' && (
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); setConfirmAction({id: c.id, type: 'suspended'}); }}
+                                            className="p-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 shadow-md tooltip transition-transform active:scale-95"
+                                            title="Duyệt treo hồ sơ"
+                                        >
+                                            <PauseCircle size={16} />
+                                        </button>
+                                    )}
                                 </div>
-                                <div>
-                                    <h3 className="font-bold text-gray-900 group-hover:text-primary-600">{c.name}</h3>
-                                    <p className="text-xs text-gray-500">{c.phone}</p>
+                            )}
+
+                            <div>
+                                <div className="flex items-center gap-3 mb-3">
+                                    <div className="h-10 w-10 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">
+                                        {c.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-gray-900 group-hover:text-primary-600">{c.name}</h3>
+                                        <p className="text-xs text-gray-500">{c.phone}</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="space-y-2 text-sm text-gray-700 mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <CarFront size={14} className="text-gray-400" />
+                                        <span className="font-bold">{c.interest?.toUpperCase() || 'CHƯA RÕ'}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500 text-xs">Doanh thu:</span>
+                                        <span className="font-bold text-green-600">
+                                            {c.deal_details?.revenue ? c.deal_details.revenue.toLocaleString('vi-VN') : 0} VNĐ
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500 text-xs">Nguồn:</span>
+                                        <span className="font-bold text-gray-700">{c.source || 'N/A'}</span>
+                                    </div>
+                                    {(isAdmin || isMod) && c.sales_rep && (
+                                        <div className="flex items-center gap-2 mt-1 pt-1 border-t border-gray-50">
+                                            <User size={12} className="text-blue-500" />
+                                            <span className="text-xs text-blue-600 font-bold">{c.sales_rep}</span>
+                                        </div>
+                                    )}
+                                    <div className="mt-2">
+                                        {getStatusBadge(c.deal_status)}
+                                    </div>
                                 </div>
                             </div>
                             
-                            <div className="space-y-2 text-sm text-gray-700 mb-3">
-                                <div className="flex items-center gap-2">
-                                    <CarFront size={14} className="text-gray-400" />
-                                    <span className="font-bold">{c.interest?.toUpperCase() || 'CHƯA RÕ'}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-gray-500 text-xs">Doanh thu:</span>
-                                    <span className="font-bold text-green-600">
-                                        {c.deal_details?.revenue ? c.deal_details.revenue.toLocaleString('vi-VN') : 0} VNĐ
-                                    </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-gray-500 text-xs">Nguồn:</span>
-                                    <span className="font-bold text-gray-700">{c.source || 'N/A'}</span>
-                                </div>
-                                {(isAdmin || isMod) && c.sales_rep && (
-                                    <div className="flex items-center gap-2 mt-1 pt-1 border-t border-gray-50">
-                                        <User size={12} className="text-blue-500" />
-                                        <span className="text-xs text-blue-600 font-bold">{c.sales_rep}</span>
-                                    </div>
+                            {/* Display Closing/Update Date & Edit Button */}
+                            <div className="mt-3 pt-2 border-t border-gray-50 flex justify-between items-center text-xs text-gray-400">
+                                <span className="flex items-center gap-1">
+                                    <Calendar size={12}/> {c.deal_status === 'processing' ? 'Bắt đầu:' : 'Ngày chốt:'} {displayDate}
+                                </span>
+                                
+                                {isAdmin && (
+                                    <button 
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            setDateForm({ id: c.id, date: isoDate, name: c.name }); 
+                                            setShowDateModal(true); 
+                                        }}
+                                        className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-blue-600 transition-colors"
+                                        title="Sửa ngày chốt"
+                                    >
+                                        <Edit size={12}/>
+                                    </button>
                                 )}
-                                <div className="mt-2">
-                                    {getStatusBadge(c.deal_status)}
-                                </div>
                             </div>
                         </div>
-                    </div>
-                ))
+                    );
+                })
             )}
         </div>
 
@@ -403,6 +557,35 @@ const Deals: React.FC = () => {
                         >
                             Duyệt
                         </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Modal Manual Date Edit (Admin Only) */}
+        {showDateModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                <div className="bg-white rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl">
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-gray-900">Sửa ngày chốt đơn</h3>
+                        <button onClick={() => setShowDateModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+                    </div>
+                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                        <p className="text-xs text-blue-800">Đang sửa cho khách hàng: <strong>{dateForm.name}</strong></p>
+                        <p className="text-xs text-blue-600 mt-1">Việc thay đổi ngày sẽ ảnh hưởng đến báo cáo doanh số tháng.</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Chọn ngày mới</label>
+                        <input 
+                            type="date" 
+                            className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-blue-500"
+                            value={dateForm.date}
+                            onChange={(e) => setDateForm({...dateForm, date: e.target.value})}
+                        />
+                    </div>
+                    <div className="flex gap-2 pt-2">
+                        <button onClick={() => setShowDateModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Hủy</button>
+                        <button onClick={handleUpdateDate} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg">Lưu thay đổi</button>
                     </div>
                 </div>
             </div>

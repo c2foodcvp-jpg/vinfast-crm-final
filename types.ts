@@ -31,6 +31,7 @@ export const CAR_MODELS = [
 export interface CarModel {
   id: string;
   name: string;
+  manager_id?: string; // Team isolation
   created_at?: string;
 }
 
@@ -38,6 +39,7 @@ export interface Distributor {
   id: string;
   name: string;
   address?: string;
+  manager_id?: string; // Team isolation
   created_at?: string;
 }
 
@@ -64,6 +66,11 @@ export interface UserProfile {
   kpi_target?: number; // Target number of cars per month
   is_part_time?: boolean; // New Flag for Part-time
   profit_share_ratio?: number; // Custom profit share ratio (optional)
+  
+  // Restricted Permissions
+  is_locked_add?: boolean; // Block adding new customers
+  is_locked_view?: boolean; // Block viewing/editing existing customers
+
   created_at?: string;
   discord_config?: any;
 }
@@ -131,7 +138,8 @@ export interface SystemBackup {
 
 // --- NEW TYPES FOR FINANCE & PROMOTIONS ---
 
-export type TransactionType = 'revenue' | 'deposit' | 'advance' | 'expense' | 'adjustment' | 'dealer_debt' | 'repayment' | 'incurred_expense';
+// Added 'personal_bonus' to types
+export type TransactionType = 'revenue' | 'deposit' | 'advance' | 'expense' | 'adjustment' | 'dealer_debt' | 'repayment' | 'incurred_expense' | 'personal_bonus';
 export type TransactionStatus = 'pending' | 'approved' | 'rejected';
 
 export interface Transaction {
@@ -149,6 +157,7 @@ export interface Transaction {
   proof_url?: string; // For images/receipts
   approved_by?: string;
   created_at: string;
+  _is_part_time_creator?: boolean; // Helper for finance calc
 }
 
 export interface TeamPolicy {
@@ -206,5 +215,31 @@ export interface CustomerShare {
   shared_by: string;
   shared_with: string; // User ID nhận share
   permission: 'view' | 'edit';
+  created_at: string;
+}
+
+// --- NEW FOR PROPOSALS ---
+export interface DemoCar {
+  id: string;
+  name: string; // Tên xe (VD: VF8 - Trắng)
+  price: number; // Giá tiền mượn (trừ vào quỹ)
+  owner_id: string; // TVBH sở hữu xe (được cộng tiền)
+  manager_id?: string; // Team isolation
+  created_at: string;
+}
+
+export type ProposalType = 'demo_car' | 'salary_advance';
+export type ProposalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface Proposal {
+  id: string;
+  type: ProposalType;
+  user_id: string;
+  user_name?: string; // Cache
+  data: any; // JSONB: { car_id, car_name, price } or { max_allowance, reason }
+  amount: number;
+  reason: string;
+  status: ProposalStatus;
+  approved_by?: string;
   created_at: string;
 }

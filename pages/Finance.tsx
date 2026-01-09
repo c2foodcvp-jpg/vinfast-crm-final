@@ -1,6 +1,4 @@
 
-// pages/Finance.tsx
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,13 +25,15 @@ interface ProfitShareRow {
     kpiTarget: number;
     kpiActual: number;
     missedKpi: number;
-    penaltyPercent: number; // e.g., 0.03 for 3%
-    baseShareRatio: number; // e.g., 25%
-    finalShareRatio: number; // e.g., 25% * (1 - penalty)
-    personalNetPool: number; // Team Net - Excluded Deals
+    penaltyPercent: number; 
+    baseShareRatio: number; 
+    finalShareRatio: number; 
+    personalNetPool: number; 
     estimatedIncome: number;
     excludedCustomerIds: string[];
-    redistributedIncome: number; // Bonus from others' exclusions
+    redistributedIncome: number;
+    personalAdvanceDeduction: number; 
+    personalBonus: number; 
 }
 
 const Finance: React.FC = () => {
@@ -61,6 +61,10 @@ const Finance: React.FC = () => {
   
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
   const [adjustmentForm, setAdjustmentForm] = useState({ amount: '', reason: '' });
+
+  // Missing Expense Modal State
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [expenseForm, setExpenseForm] = useState({ amount: '', reason: '' });
   
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState('');
@@ -80,6 +84,12 @@ const Finance: React.FC = () => {
 
   const [transactionToDelete, setTransactionToDelete] = useState<ExtendedTransaction | null>(null);
   const [advanceToRepay, setAdvanceToRepay] = useState<ExtendedTransaction | null>(null);
+  const [dealerDebtToConfirm, setDealerDebtToConfirm] = useState<Transaction | null>(null);
+
+  // Added missing states
+  const [showDealerDebtModal, setShowDealerDebtModal] = useState(false);
+  const [dealerDebtForm, setDealerDebtForm] = useState({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền' });
+  const todayStr = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   const [showSql, setShowSql] = useState(false);
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -115,7 +125,6 @@ const Finance: React.FC = () => {
           const { data: trans } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
           let transList = (trans as Transaction[]) || [];
 
-          // Fetch Exclusions
           const { data: exclusions } = await supabase.from('profit_exclusions').select('*');
           if (exclusions) setProfitExclusions(exclusions as ProfitExclusion[]);
 
@@ -139,7 +148,7 @@ const Finance: React.FC = () => {
       }
   };
 
-  // ... (Keep existing submission handlers: Deposit, Adjustment, QR, Advance, Repay, Delete, Reset ...)
+  // ... (Keep submission handlers: Deposit, Adjustment, QR, Advance, Repay, Delete, Reset ...)
   const handleSubmitDeposit = async () => {
       const amount = Number(depositForm.amount.replace(/\./g, ''));
       if (!amount || amount <= 0 || !depositForm.customerId) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; }
@@ -200,10 +209,34 @@ const Finance: React.FC = () => {
       const status = (isAdmin || isMod) ? 'approved' : 'pending';
       try {
           const { error } = await supabase.from('transactions').insert([{
-              user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'expense', amount: amount, reason: `Xuất tiền: ${advanceForm.reason}`, status: status, approved_by: status === 'approved' ? userProfile?.id : null
+              user_id: userProfile?.id, user_name: userProfile?.full_name, 
+              type: 'advance',
+              amount: amount, 
+              reason: `Ứng tiền: ${advanceForm.reason}`, 
+              status: status, 
+              approved_by: status === 'approved' ? userProfile?.id : null
           }]);
           if (error) throw error;
-          setShowAdvanceModal(false); setAdvanceForm({ amount: '', reason: '' }); fetchDataWithIsolation(); showToast(status === 'approved' ? "Đã duyệt Xuất tiền (Trừ quỹ)" : "Đã gửi yêu cầu Xuất tiền!", 'success');
+          setShowAdvanceModal(false); setAdvanceForm({ amount: '', reason: '' }); fetchDataWithIsolation(); showToast(status === 'approved' ? "Đã duyệt Ứng tiền" : "Đã gửi yêu cầu Ứng tiền!", 'success');
+      } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); }
+  };
+
+  // NEW: Handle Expense (Chi tiền không hoàn lại)
+  const handleSubmitExpense = async () => {
+      const amount = Number(expenseForm.amount.replace(/\./g, ''));
+      if (!amount || amount <= 0 || !expenseForm.reason.trim()) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; }
+      const status = (isAdmin || isMod) ? 'approved' : 'pending';
+      try {
+          const { error } = await supabase.from('transactions').insert([{
+              user_id: userProfile?.id, user_name: userProfile?.full_name, 
+              type: 'expense',
+              amount: amount, 
+              reason: `Chi quỹ: ${expenseForm.reason}`, 
+              status: status, 
+              approved_by: status === 'approved' ? userProfile?.id : null
+          }]);
+          if (error) throw error;
+          setShowExpenseModal(false); setExpenseForm({ amount: '', reason: '' }); fetchDataWithIsolation(); showToast(status === 'approved' ? "Đã duyệt Chi tiền" : "Đã gửi yêu cầu Chi!", 'success');
       } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); }
   };
 
@@ -219,7 +252,37 @@ const Finance: React.FC = () => {
       } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); }
   };
 
-  // --- NEW HANDLERS FOR PROFIT SHARING ---
+  const handleSubmitDealerDebt = async () => {
+      const amount = Number(dealerDebtForm.amount.replace(/\./g, ''));
+      if (!amount || amount <= 0 || !dealerDebtForm.targetDate) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; }
+      try {
+          const { data, error } = await supabase.from('transactions').insert([{
+              customer_id: null, customer_name: null, user_id: userProfile?.id, user_name: userProfile?.full_name,
+              type: 'dealer_debt', target_date: dealerDebtForm.targetDate, amount: amount, reason: dealerDebtForm.reason, status: 'approved'
+          }]).select().single();
+          if (error) throw error;
+          setTransactions(prev => [data as Transaction, ...prev]);
+          setShowDealerDebtModal(false);
+          setDealerDebtForm({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền' });
+          showToast("Đã tạo khoản nợ!");
+      } catch (e) { showToast("Lỗi tạo khoản nợ", 'error'); }
+  };
+
+  const executeDealerDebtPaid = async () => {
+      if (!dealerDebtToConfirm) return;
+      try {
+          const { data, error } = await supabase.from('transactions').insert([{
+              customer_id: null, customer_name: null, user_id: userProfile?.id, user_name: userProfile?.full_name,
+              type: 'deposit', amount: dealerDebtToConfirm.amount, reason: `Thu nợ đại lý: ${dealerDebtToConfirm.reason}`, status: 'approved', approved_by: userProfile?.id
+          }]).select().single();
+          if (error) throw error;
+          await supabase.from('transactions').update({ reason: `${dealerDebtToConfirm.reason} (Đã thu)` }).eq('id', dealerDebtToConfirm.id);
+          setTransactions(prev => [data as Transaction, ...prev.map(t => t.id === dealerDebtToConfirm.id ? {...t, reason: `${t.reason} (Đã thu)`} : t)]);
+          showToast("Đã thu nợ thành công!");
+      } catch (e: any) { showToast("Lỗi: " + (e.message || "Unknown"), 'error'); } finally { setDealerDebtToConfirm(null); }
+  };
+
+  // --- PROFIT SHARING HANDLERS ---
   const handleUpdateRatio = async (userId: string) => {
       const ratio = parseFloat(tempRatio);
       if (isNaN(ratio) || ratio < 0 || ratio > 100) { showToast("Tỉ lệ không hợp lệ", 'error'); return; }
@@ -234,18 +297,17 @@ const Finance: React.FC = () => {
   const handleToggleExclusion = async (customerId: string) => {
       if (!targetUserForExclusion) return;
       try {
-          const exists = profitExclusions.find(e => e.user_id === targetUserForExclusion.id && e.customer_id === customerId);
+          const exists = profitExclusions.find(ex => ex.user_id === targetUserForExclusion.id && ex.customer_id === customerId);
           if (exists) {
               await supabase.from('profit_exclusions').delete().eq('id', exists.id);
           } else {
               await supabase.from('profit_exclusions').insert([{ user_id: targetUserForExclusion.id, customer_id: customerId }]);
           }
-          fetchDataWithIsolation(); // Refresh exclusions
+          fetchDataWithIsolation(); 
       } catch (e) { console.error(e); }
   };
 
   // --- LOGIC ---
-  // STRICT MKT CHECK
   const isMKT = (src?: string) => src === 'MKT Group';
   
   const isInMonthYear = (dateStr: string) => {
@@ -257,7 +319,6 @@ const Finance: React.FC = () => {
   const filteredTransactions = useMemo(() => {
       return transactions.filter(t => {
           if (!isInMonthYear(t.created_at)) return false;
-          // 1. Permission / Hierarchy Filter
           if (isAdmin) {
               if (selectedTeam !== 'all') {
                   const transUser = allProfiles.find(p => p.id === t.user_id);
@@ -271,8 +332,13 @@ const Finance: React.FC = () => {
           } else {
               if (t.user_id !== userProfile?.id) return false;
           }
-          // 2. Source Filter (MKT only for customer transactions)
-          if (t.customer_id) return isMKT(t._source);
+          // Include if:
+          // 1. Has customer_id AND is MKT
+          // 2. OR is 'personal_bonus' (demo car fees) - these often have user_id but no customer_id
+          // 3. OR is 'advance'/'expense'/'adjustment' (no customer_id required)
+          if (t.customer_id) {
+              return isMKT(t._source);
+          }
           return true; 
       });
   }, [transactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, allProfiles, userProfile]);
@@ -285,10 +351,7 @@ const Finance: React.FC = () => {
               if (c.status !== CustomerStatus.WON) return false;
               if (!c.updated_at || !isInMonthYear(c.updated_at)) return false;
           }
-          
-          // Exclude Suspended Deals from Finance
           if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
-
           if (!isMKT(c.source)) return false;
           const creator = allProfiles.find(p => p.id === c.creator_id);
           if (isAdmin) {
@@ -306,42 +369,27 @@ const Finance: React.FC = () => {
       });
   }, [allCustomers, filterMode, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, allProfiles, userProfile]);
 
-  // SPECIFIC LIST FOR EXCLUSION MODAL (Strict Criteria: MKT Only + Won + No Refund + Current Month + HIERARCHY FILTER)
   const exclusionCandidates = useMemo(() => {
       if (!targetUserForExclusion) return [];
       return allCustomers.filter(c => {
-          // 1. MUST BE MKT SOURCE
           if (!isMKT(c.source)) return false; 
-          
-          // 2. Status WON
           if (c.status !== CustomerStatus.WON) return false;
-          
-          // 3. Not Refunded / Suspended
           if (c.deal_status === 'refunded' || c.deal_status === 'refund_pending' || c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
-          
-          // 4. Timeframe (Current Month)
           const dStr = c.updated_at || c.created_at;
           if (!isInMonthYear(dStr)) return false;
-
-          // 5. HIERARCHY FILTER (Exclude customers from OTHER teams based on current filter)
           const creator = allProfiles.find(p => p.id === c.creator_id);
           if (!creator) return false;
-
           if (isAdmin) {
               if (selectedTeam !== 'all') {
-                  // Only show customers belonging to the SELECTED team
                   if (creator.manager_id !== selectedTeam && creator.id !== selectedTeam) return false;
               }
           } else if (isMod) {
-              // Mod only sees own team's customers
               const isSelf = creator.id === userProfile?.id;
               const isSubordinate = creator.manager_id === userProfile?.id;
               if (!isSelf && !isSubordinate) return false;
           } else {
-              // Employee only sees self (rare case for this modal)
               if (creator.id !== userProfile?.id) return false;
           }
-
           return true;
       });
   }, [allCustomers, allProfiles, targetUserForExclusion, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile]);
@@ -354,18 +402,37 @@ const Finance: React.FC = () => {
       }).filter(m => m.name !== 'Unknown');
   }, [allProfiles]);
 
+  const availableCustomersForDeposit = useMemo(() => {
+      return allCustomers.filter(c => {
+          const isWon = c.status === CustomerStatus.WON;
+          const isNotFinished = c.deal_status !== 'completed' && c.deal_status !== 'refunded' && c.deal_status !== 'suspended' && c.deal_status !== 'suspended_pending'; 
+          const isMKTSource = c.source === 'MKT Group' || (c.source || '').includes('MKT');
+          if (!isWon || !isNotFinished || !isMKTSource) return false;
+          if (isAdmin) {
+              if (selectedTeam !== 'all') {
+                  const creator = allProfiles.find(p => p.id === c.creator_id);
+                  return creator?.manager_id === selectedTeam || creator?.id === selectedTeam;
+              }
+              return true;
+          } 
+          if (isMod) {
+              const creator = allProfiles.find(p => p.id === c.creator_id);
+              const isSelf = c.creator_id === userProfile?.id;
+              const isSubordinate = creator?.manager_id === userProfile?.id;
+              return isSelf || isSubordinate;
+          }
+          return c.creator_id === userProfile?.id;
+      });
+  }, [allCustomers, allProfiles, isAdmin, isMod, selectedTeam, userProfile]);
+
   // --- Calculations ---
   
   const pnlRevenue = filteredTransactions.filter(t => t.status === 'approved' && ['deposit', 'adjustment'].includes(t.type) && t.amount > 0).reduce((sum, t) => sum + t.amount, 0);
   const realExpenses = filteredTransactions.filter(t => t.status === 'approved' && (t.type === 'expense' || (t.type === 'adjustment' && t.amount < 0))).reduce((sum, t) => sum + Math.abs(t.amount), 0);
   const partTimeSalaryLiability = filteredTransactions.filter(t => t._is_part_time_creator && ['deposit'].includes(t.type) && t.status === 'approved').reduce((sum, t) => sum + (t.amount * 0.3), 0);
-  const totalAdvances = filteredTransactions.filter(t => t.type === 'advance' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
-  const totalRepaid = filteredTransactions.filter(t => t.type === 'repayment' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
-  const netOutstandingAdvances = Math.max(0, totalAdvances - totalRepaid);
-  const pnlIncurredExpenses = filteredTransactions.filter(t => t.type === 'incurred_expense' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
   
-  const displayTotalExpense = realExpenses + partTimeSalaryLiability + netOutstandingAdvances;
-  const pnlNet = pnlRevenue - displayTotalExpense; // This is the Pool for Full-Time employees
+  const displayTotalExpense = realExpenses + partTimeSalaryLiability;
+  const pnlNet = pnlRevenue - displayTotalExpense; 
 
   const totalIn = filteredTransactions.filter(t => ['deposit', 'adjustment', 'repayment'].includes(t.type) && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
   const totalOut = filteredTransactions.filter(t => t.status === 'approved' && (['expense', 'advance'].includes(t.type) || (t.type === 'adjustment' && t.amount < 0))).reduce((sum, t) => sum + Math.abs(t.amount), 0);
@@ -373,9 +440,7 @@ const Finance: React.FC = () => {
 
   // --- PROFIT SHARING CALCULATION (WITH REDISTRIBUTION) ---
   const profitSharingData: ProfitShareRow[] = useMemo(() => {
-      // 1. Get Eligible Employees
       let eligibleProfiles = allProfiles.filter(p => !p.is_part_time && p.status === 'active' && p.role !== 'admin');
-      
       if (isAdmin && selectedTeam !== 'all') {
           eligibleProfiles = eligibleProfiles.filter(p => p.manager_id === selectedTeam || p.id === selectedTeam);
       } else if (isMod) {
@@ -384,22 +449,20 @@ const Finance: React.FC = () => {
           eligibleProfiles = eligibleProfiles.filter(p => p.id === userProfile?.id);
       }
 
-      const count = eligibleProfiles.length;
-      if (count === 0) return [];
+      if (eligibleProfiles.length === 0) return [];
 
       const totalCustomRatio = eligibleProfiles.reduce((sum, p) => sum + (p.profit_share_ratio || 0), 0);
       const profilesWithoutCustom = eligibleProfiles.filter(p => p.profit_share_ratio === null || p.profit_share_ratio === undefined);
       const remainingPercent = Math.max(0, 100 - totalCustomRatio);
       const defaultShare = profilesWithoutCustom.length > 0 ? remainingPercent / profilesWithoutCustom.length : 0;
 
-      // STEP 1: Basic Calculation (Initial Pools)
       const rows = eligibleProfiles.map(emp => {
           const baseRatio = emp.profit_share_ratio !== null && emp.profit_share_ratio !== undefined ? emp.profit_share_ratio : defaultShare;
           
           const kpiTarget = emp.kpi_target || 0;
           const kpiActual = allCustomers.filter(c => {
               if (c.creator_id !== emp.id || c.status !== CustomerStatus.WON) return false;
-              if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false; // Exclude suspended
+              if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false; 
               if (!isMKT(c.source)) return false;
               const d = new Date(c.updated_at || c.created_at);
               return d.getMonth() + 1 === selectedMonth && d.getFullYear() === selectedYear;
@@ -420,7 +483,20 @@ const Finance: React.FC = () => {
               }, 0);
 
           const personalNetPool = pnlNet - excludedProfit;
-          const estimatedIncome = personalNetPool * (finalShareRatio / 100);
+          
+          // Deduct Salary Advances specific to THIS user (Strictly "Ứng lương")
+          const personalSalaryAdvances = filteredTransactions
+              .filter(t => t.user_id === emp.id && t.type === 'advance' && t.status === 'approved' && t.reason.toLowerCase().includes('ứng lương'))
+              .reduce((sum, t) => sum + t.amount, 0);
+          
+          const netPersonalAdvance = personalSalaryAdvances; 
+
+          // Calculate Personal Bonuses (e.g. Demo Car Owner)
+          const personalBonus = filteredTransactions
+              .filter(t => t.user_id === emp.id && t.type === 'personal_bonus' && t.status === 'approved')
+              .reduce((sum, t) => sum + t.amount, 0);
+
+          const estimatedIncome = (personalNetPool * (finalShareRatio / 100)) - netPersonalAdvance + personalBonus;
 
           return {
               user: emp,
@@ -433,17 +509,15 @@ const Finance: React.FC = () => {
               personalNetPool,
               estimatedIncome,
               excludedCustomerIds: userExclusions,
-              redistributedIncome: 0
+              redistributedIncome: 0,
+              personalAdvanceDeduction: netPersonalAdvance,
+              personalBonus: personalBonus
           };
       });
 
-      // STEP 2: Redistribution Logic
-      // Iterate through each user to find who has exclusions, calculate what they 'lost', and distribute to others.
       rows.forEach(sourceRow => {
           if (sourceRow.excludedCustomerIds.length === 0) return;
-
           sourceRow.excludedCustomerIds.forEach(custId => {
-              // Calculate Profit of this excluded customer
               const custProfit = filteredTransactions
                   .filter(t => t.customer_id === custId && t.status === 'approved')
                   .reduce((sum, t) => {
@@ -451,15 +525,8 @@ const Finance: React.FC = () => {
                        if (['incurred_expense'].includes(t.type)) return sum - t.amount;
                        return sum;
                   }, 0);
-              
               if (custProfit <= 0) return;
-
-              // Amount that the source user "lost" or "gave up"
-              // Only redistribute strictly MKT customers (though filter ensures this, double check)
-              // NOTE: We assume excludedCustomerIds are strictly MKT due to UI filter.
               const lostAmount = custProfit * (sourceRow.finalShareRatio / 100);
-
-              // Distribute equally to all OTHER active users in this list
               const beneficiaries = rows.filter(r => r.user.id !== sourceRow.user.id);
               if (beneficiaries.length > 0) {
                   const bonusPerPerson = lostAmount / beneficiaries.length;
@@ -476,10 +543,15 @@ const Finance: React.FC = () => {
 
 
   const expenses = filteredTransactions.filter(t => t.type === 'expense' || t.type === 'advance');
-  const deposits = filteredTransactions.filter(t => ['deposit', 'revenue', 'adjustment', 'repayment'].includes(t.type));
-  const refundableAdvancesList = filteredTransactions.filter(t => t.type === 'advance');
+  const deposits = filteredTransactions.filter(t => ['deposit', 'revenue', 'adjustment', 'repayment', 'personal_bonus'].includes(t.type));
+  const refundableAdvancesList = filteredTransactions.filter(t => t.type === 'advance' && !t.reason.toLowerCase().includes('ứng lương'));
+  
   const allRepayments = transactions.filter(t => t.type === 'repayment');
   const pendingDealerDebts = filteredTransactions.filter(t => t.type === 'dealer_debt' && !t.reason.includes('(Đã thu)'));
+  
+  const totalAdvances = filteredTransactions.filter(t => t.type === 'advance' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+  const totalRepaid = filteredTransactions.filter(t => t.type === 'repayment' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+  const netOutstandingAdvances = Math.max(0, totalAdvances - totalRepaid);
   const outstandingAdvances = netOutstandingAdvances; 
 
   const pieData1 = [
@@ -496,75 +568,14 @@ const Finance: React.FC = () => {
   
   const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
 
-  const availableCustomersForDeposit = useMemo(() => {
-      return allCustomers.filter(c => {
-          const isWon = c.status === CustomerStatus.WON;
-          const isNotFinished = c.deal_status !== 'completed' && c.deal_status !== 'refunded' && c.deal_status !== 'suspended' && c.deal_status !== 'suspended_pending'; // Exclude Suspended
-          const isMKTSource = c.source === 'MKT Group' || (c.source || '').includes('MKT');
-          if (!isWon || !isNotFinished || !isMKTSource) return false;
-          if (isAdmin) {
-              if (selectedTeam !== 'all') {
-                  const creator = allProfiles.find(p => p.id === c.creator_id);
-                  return creator?.manager_id === selectedTeam || creator?.id === selectedTeam;
-              }
-              return true;
-          } 
-          if (isMod) {
-              const creator = allProfiles.find(p => p.id === c.creator_id);
-              const isSelf = c.creator_id === userProfile?.id;
-              const isSubordinate = creator?.manager_id === userProfile?.id;
-              return isSelf || isSubordinate;
-          }
-          return c.creator_id === userProfile?.id;
-      });
-  }, [allCustomers, allProfiles, isAdmin, isMod, selectedTeam, userProfile]);
-
-  const sqlFixCode = `
--- 1. Thêm cột tỉ lệ chia sẻ vào profile
-alter table public.profiles add column if not exists profit_share_ratio numeric default null;
-
--- 2. Tạo bảng loại trừ lợi nhuận
-create table if not exists public.profit_exclusions (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.profiles(id),
-  customer_id uuid references public.customers(id),
-  created_at timestamptz default now()
-);
-
--- 3. RLS cho bảng mới
-alter table public.profit_exclusions enable row level security;
-create policy "Allow read for all" on public.profit_exclusions for select using (true);
-create policy "Allow write for admins/mods" on public.profit_exclusions for all using (
-  exists (select 1 from profiles where id = auth.uid() and role in ('admin', 'mod'))
-);
-
--- Fix previous RLS if needed
-alter table public.transactions add column if not exists subtype text;
-`;
-
   return (
     <div className="max-w-[1600px] mx-auto space-y-6 pb-20 relative">
+      {/* ... Header and Cards (unchanged) ... */}
       
       {toast && (
           <div className={`fixed top-4 right-4 z-[100] px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 animate-fade-in ${toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
               {toast.type === 'success' ? <CheckCircle2 size={18}/> : <AlertTriangle size={18}/>}
               <span className="font-bold text-sm">{toast.msg}</span>
-          </div>
-      )}
-
-      {isAdmin && (
-          <div className="flex justify-end">
-              <button onClick={() => setShowSql(!showSql)} className="text-xs text-blue-600 font-bold hover:underline flex items-center gap-1">
-                  <Database size={12}/> {showSql ? 'Ẩn mã sửa lỗi DB' : 'Sửa lỗi Database (RLS)'}
-              </button>
-          </div>
-      )}
-      
-      {showSql && (
-          <div className="bg-slate-900 text-slate-300 p-4 rounded-xl text-xs font-mono relative border border-slate-700 shadow-xl mb-4">
-              <p className="text-green-400 mb-2 font-bold">// Copy đoạn này vào Supabase SQL Editor:</p>
-              <pre className="overflow-x-auto pb-4 max-h-60 custom-scrollbar">{sqlFixCode}</pre>
-              <button onClick={() => { navigator.clipboard.writeText(sqlFixCode); alert("Đã copy SQL!"); }} className="absolute top-4 right-4 p-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-bold flex items-center gap-2"><Copy size={14}/> Copy SQL</button>
           </div>
       )}
 
@@ -641,7 +652,7 @@ alter table public.transactions add column if not exists subtype text;
               <div className="text-center w-full">
                   <p className="text-gray-500 font-bold uppercase text-xs">CHI QUỸ & LƯƠNG CTV</p>
                   <p className="text-xl font-bold text-red-600">-{formatCurrency(displayTotalExpense)}</p>
-                  <p className="text-[10px] text-gray-400 mt-1 italic">(*Đã bao gồm tiền ứng chưa trả)</p>
+                  <p className="text-[10px] text-gray-400 mt-1 italic">(*Chỉ tính chi phí chung, KHÔNG bao gồm tạm ứng)</p>
               </div>
               <div className="w-full h-px bg-gray-100"></div>
               <div className="text-center bg-blue-50 w-full py-2 rounded-xl border border-blue-100"><p className="text-blue-800 font-bold uppercase text-xs">LỢI NHUẬN RÒNG (NET)</p><p className="text-xl font-bold text-blue-900">{formatCurrency(pnlNet)} VNĐ</p></div>
@@ -666,13 +677,14 @@ alter table public.transactions add column if not exists subtype text;
                           <th className="px-4 py-3 text-center">Phạt KPI</th>
                           <th className="px-4 py-3 text-center">Tỉ lệ cuối</th>
                           <th className="px-4 py-3 text-right">Pool Cá nhân</th>
+                          <th className="px-4 py-3 text-right">Trừ Ứng / Cộng Thêm</th>
                           <th className="px-4 py-3 text-right">Thực nhận (Dự kiến)</th>
                           {(isAdmin || isMod) && <th className="px-4 py-3 text-center">Hành động</th>}
                       </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                       {profitSharingData.length === 0 ? (
-                          <tr><td colSpan={8} className="p-4 text-center text-gray-400">Không có nhân viên Full-time nào trong danh sách.</td></tr>
+                          <tr><td colSpan={9} className="p-4 text-center text-gray-400">Không có nhân viên Full-time nào trong danh sách.</td></tr>
                       ) : profitSharingData.map(row => (
                           <tr key={row.user.id} className="hover:bg-indigo-50/30 transition-colors">
                               <td className="px-4 py-3 font-bold text-gray-800">
@@ -716,6 +728,13 @@ alter table public.transactions add column if not exists subtype text;
                               <td className="px-4 py-3 text-right text-gray-500 text-xs">
                                   {formatCurrency(row.personalNetPool)}
                               </td>
+                              <td className="px-4 py-3 text-right text-xs">
+                                  <div className="flex flex-col items-end gap-1">
+                                      {row.personalAdvanceDeduction > 0 && <span className="text-red-500 font-semibold">-{formatCurrency(row.personalAdvanceDeduction)} (Ứng)</span>}
+                                      {row.personalBonus > 0 && <span className="text-green-500 font-semibold">+{formatCurrency(row.personalBonus)} (Thêm)</span>}
+                                      {row.personalAdvanceDeduction === 0 && row.personalBonus === 0 && <span className="text-gray-400">-</span>}
+                                  </div>
+                              </td>
                               <td className="px-4 py-3 text-right font-bold text-green-600 text-lg">
                                   {formatCurrency(row.estimatedIncome)}
                               </td>
@@ -733,10 +752,11 @@ alter table public.transactions add column if not exists subtype text;
           </div>
       </div>
 
+      {/* DASHBOARD HISTORY TABLES */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="p-4 bg-red-50 border-b border-red-100 flex justify-between items-center"><h3 className="font-bold text-red-800 flex items-center gap-2"><ArrowUpRight/> Lịch sử Chi/Tạm Ứng</h3>
-              <button onClick={() => setShowAdvanceModal(true)} className="px-3 py-1 bg-red-600 text-white text-xs font-bold rounded-lg shadow hover:bg-red-700 flex items-center gap-1"><ArrowUpRight size={14}/> Xuất tiền</button>
+              <button onClick={() => setShowExpenseModal(true)} className="px-3 py-1 bg-red-600 text-white text-xs font-bold rounded-lg shadow hover:bg-red-700 flex items-center gap-1"><ArrowUpRight size={14}/> Xuất tiền (Chi)</button>
               </div>
               <div className="p-4 max-h-[600px] overflow-y-auto space-y-3">{expenses.map(t => (<div key={t.id} className="p-3 border border-gray-100 rounded-xl hover:shadow-sm transition-all"><div className="flex justify-between items-start"><div><p className="font-bold text-gray-900">{t.reason}</p><p className="text-xs text-gray-500">{t.user_name} • {new Date(t.created_at).toLocaleDateString()}</p>{t.customer_name && <p className="text-xs text-blue-600 mt-1">Khách: {t.customer_name}</p>}</div><span className="font-bold text-red-600">-{formatCurrency(t.amount)}</span></div><div className="flex justify-between items-center mt-3 pt-2 border-t border-gray-50"><span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${t.status === 'approved' ? 'bg-green-100 text-green-700' : t.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{t.status}</span><div className="flex gap-2">{t.status === 'pending' && (isAdmin || isMod) && (<><button onClick={() => handleApprove(t, true)} className="p-1 bg-green-100 text-green-600 rounded hover:bg-green-200"><CheckCircle2 size={16}/></button><button onClick={() => handleApprove(t, false)} className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"><XCircle size={16}/></button></>)}{(isAdmin || isMod) && (<button onClick={() => setTransactionToDelete(t)} className="p-1 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600"><Trash2 size={16}/></button>)}</div></div></div>))}</div>
           </div>
@@ -792,72 +812,51 @@ alter table public.transactions add column if not exists subtype text;
           </div>
       </div>
 
+      {/* ... (Keep existing modals unchanged) ... */}
       {showDepositModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Nộp quỹ / Doanh thu</h3><button onClick={() => setShowDepositModal(false)}><X size={24} className="text-gray-400"/></button></div>{qrCodeUrl && (<div className="flex flex-col items-center mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100"><img src={qrCodeUrl} alt="QR Code" className="w-48 h-48 object-contain mb-2 mix-blend-multiply" /><p className="text-xs text-gray-500 text-center">Quét mã để chuyển khoản, sau đó nhập thông tin bên dưới.</p></div>)}<div className="space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Chọn Khách hàng (Đã chốt)</label><select className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.customerId} onChange={e => setDepositForm({...depositForm, customerId: e.target.value})}><option value="">-- Chọn khách hàng --</option>{availableCustomersForDeposit.map(c => <option key={c.id} value={c.id}>{c.name} - {c.phone}</option>)}</select>{availableCustomersForDeposit.length === 0 && <p className="text-xs text-red-500 mt-1">Không có khách hàng khả dụng</p>}</div><div><label className="block text-sm font-bold text-gray-700 mb-1">Số tiền</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900 font-bold" value={depositForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDepositForm({...depositForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} /></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Nội dung</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.reason} onChange={e => setDepositForm({...depositForm, reason: e.target.value})} /></div><button onClick={handleSubmitDeposit} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận đã nộp</button></div></div></div>)}
       {showAdjustmentModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Điều chỉnh Quỹ (Admin)</h3><button onClick={() => setShowAdjustmentModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền (+/-)</label><input type="text" value={adjustmentForm.amount} onChange={e => setAdjustmentForm({...adjustmentForm, amount: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" placeholder="-500000 hoặc 1000000" /></div><div><label className="text-sm font-bold text-gray-600">Lý do</label><input type="text" value={adjustmentForm.reason} onChange={e => setAdjustmentForm({...adjustmentForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><button onClick={handleSubmitAdjustment} className="w-full py-3 bg-gray-800 text-white font-bold rounded-xl hover:bg-gray-900">Xác nhận điều chỉnh</button></div></div></div>)}
       
-      {showAdvanceModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-red-700">Xuất tiền (Chi quỹ)</h3><button onClick={() => setShowAdvanceModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền cần ứng</label><input type="text" value={advanceForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setAdvanceForm({...advanceForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do ứng</label><input type="text" value={advanceForm.reason} onChange={e => setAdvanceForm({...advanceForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder="VD: Đi tiếp khách..." /></div><div className="text-xs text-gray-500 italic bg-gray-50 p-2 rounded">Lưu ý: Khoản này sẽ được trừ thẳng vào quỹ.</div><button onClick={handleSubmitAdvance} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Gửi yêu cầu</button></div></div></div>)}
+      {showAdvanceModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-red-700">Tạm Ứng (Cần hoàn lại)</h3><button onClick={() => setShowAdvanceModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền cần ứng</label><input type="text" value={advanceForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setAdvanceForm({...advanceForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do ứng</label><input type="text" value={advanceForm.reason} onChange={e => setAdvanceForm({...advanceForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder="VD: Đi tiếp khách..." /></div><div className="text-xs text-gray-500 italic bg-gray-50 p-2 rounded">Khoản này sẽ tạo thành <strong>Nợ tạm ứng</strong> cần phải hoàn trả sau này.</div><button onClick={handleSubmitAdvance} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Gửi yêu cầu Ứng</button></div></div></div>)}
+      
+      {/* NEW EXPENSE MODAL */}
+      {showExpenseModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-red-700">Chi Tiền (Trừ thẳng quỹ)</h3><button onClick={() => setShowExpenseModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền chi</label><input type="text" value={expenseForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do chi</label><input type="text" value={expenseForm.reason} onChange={e => setExpenseForm({...expenseForm, reason: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder="VD: Mua nước, liên hoan..." /></div><div className="text-xs text-gray-500 italic bg-gray-50 p-2 rounded">Lưu ý: Khoản này là <strong>Chi phí</strong> chung, sẽ trừ thẳng vào quỹ và KHÔNG tạo nợ cá nhân.</div><button onClick={handleSubmitExpense} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Gửi yêu cầu Chi</button></div></div></div>)}
 
       {showConfigModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><h3 className="text-lg font-bold text-gray-900 mb-4">Cấu hình QR Code</h3><div className="mb-4"><label className="block text-sm font-bold text-gray-700 mb-1">Link ảnh QR</label><input type="text" placeholder="Dán link ảnh QR Code..." className="w-full border p-2 rounded-xl text-gray-900 outline-none focus:border-primary-500" value={newQrUrl} onChange={e => setNewQrUrl(e.target.value)} /></div>{newQrUrl && (<div className="mb-4 p-2 bg-gray-50 border rounded-xl flex justify-center"><img src={newQrUrl} alt="Preview" className="h-32 object-contain" /></div>)}<div className="flex justify-end gap-2"><button onClick={() => setShowConfigModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg font-bold">Hủy</button><button onClick={handleSaveQr} disabled={isSavingQr} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold flex items-center gap-2">{isSavingQr && <Loader2 className="animate-spin" size={16} />} Lưu</button></div></div></div>)}
+      {showExclusionModal && targetUserForExclusion && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[80vh] flex flex-col"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Loại trừ khách hàng</h3><button onClick={() => setShowExclusionModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="bg-yellow-50 p-3 rounded-xl mb-4 border border-yellow-100"><p className="text-sm text-yellow-800">Đang chọn loại trừ cho: <strong>{targetUserForExclusion.full_name}</strong></p><p className="text-xs text-yellow-700 mt-1">Danh sách hiển thị: Khách <strong>MKT Group</strong>, Đã chốt, Chưa hoàn tiền (Thuộc Team đang chọn).</p></div><div className="overflow-y-auto flex-1 space-y-2 border-t border-gray-100 pt-2">{exclusionCandidates.length === 0 ? <p className="text-center text-gray-400 py-4">Không có khách hàng MKT nào phù hợp.</p> : exclusionCandidates.map(c => { const isExcluded = profitExclusions.some(ex => ex.user_id === targetUserForExclusion.id && ex.customer_id === c.id); return (<div key={c.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 cursor-pointer" onClick={() => handleToggleExclusion(c.id)}><div><p className="font-bold text-sm text-gray-900">{c.name} <span className="font-normal text-gray-500">({c.sales_rep})</span></p><p className="text-xs text-gray-500">{formatCurrency(c.deal_details?.revenue || 0)} VNĐ • {c.source}</p></div><div className={`w-5 h-5 rounded border flex items-center justify-center ${isExcluded ? 'bg-red-500 border-red-500 text-white' : 'border-gray-300'}`}>{isExcluded && <Check size={14}/>}</div></div>); })}</div><div className="mt-4 pt-2 border-t flex justify-end"><button onClick={() => setShowExclusionModal(false)} className="px-4 py-2 bg-gray-100 font-bold rounded-xl text-gray-700 hover:bg-gray-200">Đóng</button></div></div></div>)}
+      {transactionToDelete && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-red-100"><div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-600"><Trash2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận xóa giao dịch?</h3><p className="text-sm text-gray-500 mb-4">Bạn có chắc chắn muốn xóa giao dịch này khỏi hệ thống?</p><div className="flex gap-3 w-full"><button onClick={() => setTransactionToDelete(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={confirmDeleteTransaction} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Xóa ngay</button></div></div></div></div>)}
+      {advanceToRepay && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-purple-100"><div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4 text-purple-600"><Undo2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận Hoàn ứng?</h3><div className="bg-purple-50 p-4 rounded-xl text-left w-full mb-4 border border-purple-100 space-y-2"><div><p className="text-xs text-gray-500">Nội dung ứng</p><p className="font-bold text-gray-900">{advanceToRepay.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền hoàn trả</p><p className="font-bold text-purple-600 text-lg">{formatCurrency(advanceToRepay.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ gửi yêu cầu hoàn trả. Vui lòng chờ Admin/Mod duyệt để cập nhật quỹ.</p><div className="flex gap-3 w-full"><button onClick={() => setAdvanceToRepay(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={handleManualRepay} className="flex-1 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors">Xác nhận Thu</button></div></div></div></div>)}
+      {showResetConfirm && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl border-2 border-red-200"><div className="flex flex-col items-center text-center"><div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-600 animate-pulse"><AlertTriangle size={40} /></div><h3 className="text-2xl font-bold text-gray-900 mb-2">CẢNH BÁO NGUY HIỂM!</h3><div className="bg-red-50 p-4 rounded-xl text-left w-full mb-6 border border-red-100"><p className="text-red-800 font-bold text-sm mb-2">Hành động này sẽ XÓA SẠCH:</p><ul className="list-disc list-inside text-red-700 text-sm space-y-1"><li>Toàn bộ lịch sử Thu/Chi/Nộp tiền.</li><li>Toàn bộ Tiền phạt và Quỹ nhóm.</li><li>Reset "Doanh thu thực tế" của tất cả khách hàng về 0.</li></ul><p className="text-red-600 text-xs italic mt-3 font-semibold text-center">Dữ liệu sẽ KHÔNG THỂ khôi phục được.</p></div><div className="flex gap-3 w-full"><button onClick={() => setShowResetConfirm(false)} className="flex-1 py-3.5 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition-colors">Hủy bỏ</button><button onClick={executeResetFinance} disabled={isResetting} className="flex-1 py-3.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors flex items-center justify-center gap-2">{isResetting && <Loader2 className="animate-spin" size={20} />} Xác nhận RESET</button></div></div></div></div>)}
       
-      {/* EXCLUSION MODAL */}
-      {showExclusionModal && targetUserForExclusion && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[80vh] flex flex-col">
+      {dealerDebtToConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-green-100">
+                  <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600"><CheckCircle2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Đại lý đã trả nợ?</h3><div className="bg-green-50 p-4 rounded-xl text-left w-full mb-4 border border-green-100 space-y-2"><div><p className="text-xs text-gray-500">Khoản nợ</p><p className="font-bold text-gray-900">{dealerDebtToConfirm.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền</p><p className="font-bold text-green-600 text-lg">{formatCurrency(dealerDebtToConfirm.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ ghi nhận <strong>Doanh thu/Nộp tiền</strong> vào hệ thống.</p><div className="flex gap-3 w-full"><button onClick={() => setDealerDebtToConfirm(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDealerDebtPaid} className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">Xác nhận</button></div></div>
+              </div>
+          </div>
+      )}
+
+      {showDealerDebtModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-bold text-gray-900">Loại trừ khách hàng</h3>
-                      <button onClick={() => setShowExclusionModal(false)}><X size={24} className="text-gray-400"/></button>
+                      <h3 className="text-lg font-bold text-gray-900">Đại lý Nợ</h3>
+                      <button onClick={() => setShowDealerDebtModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                   </div>
-                  <div className="bg-yellow-50 p-3 rounded-xl mb-4 border border-yellow-100">
-                      <p className="text-sm text-yellow-800">
-                          Đang chọn loại trừ cho: <strong>{targetUserForExclusion.full_name}</strong>
-                      </p>
-                      <p className="text-xs text-yellow-700 mt-1">
-                          Danh sách hiển thị: Khách <strong>MKT Group</strong>, Đã chốt, Chưa hoàn tiền (Thuộc Team đang chọn).
-                      </p>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
+                          <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={dealerDebtForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealerDebtForm({...dealerDebtForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-1">Hạn thanh toán</label>
+                          <input type="date" min={todayStr} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.targetDate} onChange={e => setDealerDebtForm({...dealerDebtForm, targetDate: e.target.value})} />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú</label>
+                          <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.reason} onChange={e => setDealerDebtForm({...dealerDebtForm, reason: e.target.value})} />
+                      </div>
+                      <button onClick={handleSubmitDealerDebt} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận</button>
                   </div>
-                  <div className="overflow-y-auto flex-1 space-y-2 border-t border-gray-100 pt-2">
-                      {exclusionCandidates.length === 0 ? <p className="text-center text-gray-400 py-4">Không có khách hàng MKT nào phù hợp.</p> : exclusionCandidates.map(c => {
-                          const isExcluded = profitExclusions.some(e => e.user_id === targetUserForExclusion.id && e.customer_id === c.id);
-                          return (
-                              <div key={c.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 cursor-pointer" onClick={() => handleToggleExclusion(c.id)}>
-                                  <div>
-                                      <p className="font-bold text-sm text-gray-900">{c.name} <span className="font-normal text-gray-500">({c.sales_rep})</span></p>
-                                      <p className="text-xs text-gray-500">{formatCurrency(c.deal_details?.revenue || 0)} VNĐ • {c.source}</p>
-                                  </div>
-                                  <div className={`w-5 h-5 rounded border flex items-center justify-center ${isExcluded ? 'bg-red-500 border-red-500 text-white' : 'border-gray-300'}`}>
-                                      {isExcluded && <Check size={14}/>}
-                                  </div>
-                              </div>
-                          );
-                      })}
-                  </div>
-                  <div className="mt-4 pt-2 border-t flex justify-end">
-                      <button onClick={() => setShowExclusionModal(false)} className="px-4 py-2 bg-gray-100 font-bold rounded-xl text-gray-700 hover:bg-gray-200">Đóng</button>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {transactionToDelete && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-red-100">
-                  <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-600"><Trash2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận xóa giao dịch?</h3><p className="text-sm text-gray-500 mb-4">Bạn có chắc chắn muốn xóa giao dịch này khỏi hệ thống?</p><div className="flex gap-3 w-full"><button onClick={() => setTransactionToDelete(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={confirmDeleteTransaction} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Xóa ngay</button></div></div>
-              </div>
-          </div>
-      )}
-
-      {advanceToRepay && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-purple-100">
-                  <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4 text-purple-600"><Undo2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận Hoàn ứng?</h3><div className="bg-purple-50 p-4 rounded-xl text-left w-full mb-4 border border-purple-100 space-y-2"><div><p className="text-xs text-gray-500">Nội dung ứng</p><p className="font-bold text-gray-900">{advanceToRepay.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền hoàn trả</p><p className="font-bold text-purple-600 text-lg">{formatCurrency(advanceToRepay.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ gửi yêu cầu hoàn trả. Vui lòng chờ Admin/Mod duyệt để cập nhật quỹ.</p><div className="flex gap-3 w-full"><button onClick={() => setAdvanceToRepay(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={handleManualRepay} className="flex-1 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors">Xác nhận Thu</button></div></div>
-              </div>
-          </div>
-      )}
-
-      {showResetConfirm && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl border-2 border-red-200">
-                  <div className="flex flex-col items-center text-center"><div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-600 animate-pulse"><AlertTriangle size={40} /></div><h3 className="text-2xl font-bold text-gray-900 mb-2">CẢNH BÁO NGUY HIỂM!</h3><div className="bg-red-50 p-4 rounded-xl text-left w-full mb-6 border border-red-100"><p className="text-red-800 font-bold text-sm mb-2">Hành động này sẽ XÓA SẠCH:</p><ul className="list-disc list-inside text-red-700 text-sm space-y-1"><li>Toàn bộ lịch sử Thu/Chi/Nộp tiền.</li><li>Toàn bộ Tiền phạt và Quỹ nhóm.</li><li>Reset "Doanh thu thực tế" của tất cả khách hàng về 0.</li></ul><p className="text-red-600 text-xs italic mt-3 font-semibold text-center">Dữ liệu sẽ KHÔNG THỂ khôi phục được.</p></div><div className="flex gap-3 w-full"><button onClick={() => setShowResetConfirm(false)} className="flex-1 py-3.5 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition-colors">Hủy bỏ</button><button onClick={executeResetFinance} disabled={isResetting} className="flex-1 py-3.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors flex items-center justify-center gap-2">{isResetting && <Loader2 className="animate-spin" size={20} />} Xác nhận RESET</button></div></div>
               </div>
           </div>
       )}

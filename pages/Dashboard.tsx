@@ -298,6 +298,12 @@ const Dashboard: React.FC = () => {
 
   const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
+    // PERMISSION CHECK
+    if (userProfile?.is_locked_add) {
+        alert("Bạn đã bị khóa quyền thêm khách mới.");
+        return;
+    }
+
     setIsSubmitting(true);
     if (!formData.name.trim()) { alert("Vui lòng nhập tên khách hàng"); setIsSubmitting(false); return; }
     if (!formData.isZaloOnly && !formData.phone.trim()) { alert("Vui lòng nhập số điện thoại"); setIsSubmitting(false); return; }
@@ -404,7 +410,7 @@ const Dashboard: React.FC = () => {
                   </div>
               )}
           </div>
-          <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary-200 transition-colors hover:bg-primary-700"><Plus size={18} /> Thêm khách</button>
+          <button onClick={() => userProfile?.is_locked_add ? alert("Bạn đã bị khóa quyền thêm khách mới.") : setIsAddModalOpen(true)} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition-colors ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}><Plus size={18} /> Thêm khách</button>
         </div>
       </div>
 

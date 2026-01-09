@@ -5,7 +5,7 @@ import { supabase } from '../supabaseClient';
 import { Customer, CustomerStatus, Interaction, CustomerClassification, DealDetails, UserProfile, UserRole, Distributor, DealStatus, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye, Share2, Lock, Users, Archive
+  ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye, Share2, Lock, Users, Archive, EyeOff, Bug
 } from 'lucide-react';
 
 const { useParams, useNavigate, useLocation } = ReactRouterDOM as any;
@@ -38,13 +38,14 @@ const CustomerDetail: React.FC = () => {
   const [isSpecialCare, setIsSpecialCare] = useState(false);
   const [isLongTerm, setIsLongTerm] = useState(false);
   
-  // Delegation State
-  const [isDelegatedViewOnly, setIsDelegatedViewOnly] = useState(false);
+  // Delegation State (Renamed to avoid conflict)
+  const [dbViewPermission, setDbViewPermission] = useState(false);
   
   // Navigation
   const [nextCustomerId, setNextCustomerId] = useState<string | null>(null);
   const [prevCustomerId, setPrevCustomerId] = useState<string | null>(null);
-  const [customerListContext, setCustomerListContext] = useState<string[]>([]);
+  // Initialize from location state if available to ensure context persists on first render
+  const [customerListContext, setCustomerListContext] = useState<string[]>(location.state?.customerIds || []);
 
   // Modals
   const [showStopModal, setShowStopModal] = useState(false);
@@ -65,7 +66,7 @@ const CustomerDetail: React.FC = () => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareForm, setShareForm] = useState({ recipientId: '', permission: 'view' as 'view' | 'edit' });
   const [existingShares, setExistingShares] = useState<any[]>([]);
-  const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null); // Replacement for window.confirm
+  const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
 
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [expenseForm, setExpenseForm] = useState({ type: 'expense' as TransactionType, amount: '', reason: '' });
@@ -100,26 +101,43 @@ const CustomerDetail: React.FC = () => {
   };
 
   const getMaxDate = () => {
-      if (isLongTerm) return undefined;
+      if (isLongTerm) {
+          const d = new Date();
+          d.setMonth(d.getMonth() + 3);
+          return new Date(d.getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
+      }
       const d = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
       d.setDate(d.getDate() + 4);
       return d.toISOString().split('T')[0];
   };
 
+  // --- HELPER FOR NAME MATCHING ---
+  const normalizeString = (str: string | undefined | null) => {
+      if (!str) return '';
+      return str.toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/đ/g, "d")
+          .replace(/[^a-z0-9\s]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+  };
+
   useEffect(() => {
+    if (userProfile?.is_locked_view) {
+        navigate('/customers');
+        return;
+    }
     fetchCustomerData();
     fetchDistributors();
     fetchEmployees(); 
     fetchCarModels();
     setIsEditingInfo(false);
-    
-    return () => {
-        if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
-    };
+    return () => { if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current); };
   }, [id, userProfile]); 
 
   useEffect(() => { 
-      if (location.state?.customerIds) {
+      if (location.state?.customerIds && location.state.customerIds.length > 0) {
           const ids = location.state.customerIds;
           setCustomerListContext(ids);
           const currentIndex = ids.indexOf(id || '');
@@ -128,31 +146,23 @@ const CustomerDetail: React.FC = () => {
               setNextCustomerId(currentIndex < ids.length - 1 ? ids[currentIndex + 1] : null);
           }
       } else if (id) {
-          fetchSiblingCustomers();
+          // If we have existing context in state and the current ID is in it, reuse it (prevents loss on refresh if state persists or weird nav)
+          if (customerListContext.length > 0 && customerListContext.includes(id)) {
+              const currentIndex = customerListContext.indexOf(id);
+              setPrevCustomerId(currentIndex > 0 ? customerListContext[currentIndex - 1] : null);
+              setNextCustomerId(currentIndex < customerListContext.length - 1 ? customerListContext[currentIndex + 1] : null);
+          } else {
+              fetchSiblingCustomers();
+          }
       }
   }, [id, location.state]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-            return;
-        }
-        if (e.key === 'ArrowLeft' && prevCustomerId) {
-            navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext } });
-        } else if (e.key === 'ArrowRight' && nextCustomerId) {
-            navigate(`/customers/${nextCustomerId}`, { state: { customerIds: customerListContext } });
-        } else if (e.key === 'Home' && customerListContext.length > 0) {
-            const firstId = customerListContext[0];
-            if (firstId !== id) {
-                navigate(`/customers/${firstId}`, { state: { customerIds: customerListContext } });
-            }
-        } else if (e.key === 'End' && customerListContext.length > 0) {
-            const lastId = customerListContext[customerListContext.length - 1];
-            if (lastId !== id) {
-                navigate(`/customers/${lastId}`, { state: { customerIds: customerListContext } });
-            }
-        }
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+        if (e.key === 'ArrowLeft' && prevCustomerId) navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext } });
+        else if (e.key === 'ArrowRight' && nextCustomerId) navigate(`/customers/${nextCustomerId}`, { state: { customerIds: customerListContext } });
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => { window.removeEventListener('keydown', handleKeyDown); };
@@ -167,7 +177,7 @@ const CustomerDetail: React.FC = () => {
   
   const fetchEmployees = async () => { 
       try { 
-          // Fetch active employees
+          // Fetch ALL active employees to populate dropdowns regardless of user role
           let query = supabase.from('profiles').select('*').eq('status', 'active');
           const { data } = await query;
           if (data) { setEmployees(data as UserProfile[]); }
@@ -189,62 +199,46 @@ const CustomerDetail: React.FC = () => {
       if (!id) return;
       const { data, error } = await supabase.from('customers').select('*').eq('id', id).single();
       if (error) throw error;
-      setCustomer(data as Customer);
+      
+      const custData = data as Customer;
+      
+      // Determine Access based on initial DB data
+      let isViewOnly = true;
+      if (isAdmin || isMod || custData.creator_id === userProfile?.id) {
+          isViewOnly = false;
+      } 
+      // If user is Assigned Sales Rep (Robust & Fuzzy check)
+      else if (custData.sales_rep && userProfile?.full_name) {
+          const s1 = normalizeString(custData.sales_rep);
+          const s2 = normalizeString(userProfile.full_name);
+          if (s1 === s2 || s1.includes(s2) || s2.includes(s1)) {
+              isViewOnly = false;
+          }
+      }
+
+      // If still view only, check shares
+      if (isViewOnly && userProfile) {
+          try {
+              const { data: share } = await supabase.from('customer_shares').select('permission').eq('customer_id', id).eq('shared_with', userProfile.id).maybeSingle();
+              if (share) {
+                  (custData as any)._shared_permission = share.permission;
+                  if (share.permission === 'edit') isViewOnly = false;
+              } else {
+                  // Fallback delegation check
+                  const { data: delegation } = await supabase.from('access_delegations').select('access_level').eq('recipient_id', userProfile.id).eq('target_user_id', custData.creator_id).single();
+                  if (delegation && delegation.access_level === 'edit') isViewOnly = false;
+              }
+          } catch(e) {}
+      }
+
+      setDbViewPermission(isViewOnly);
+      setCustomer(custData);
       
       if (data.classification) setClassification(data.classification);
       if (data.recare_date) setRecareDate(data.recare_date);
-      
       setIsSpecialCare(!!data.is_special_care);
       setIsLongTerm(!!data.is_long_term);
-
       setEditForm({ interest: data.interest || '', location: data.location || '', source: data.source || '', phone: data.phone || '', secondary_phone: data.secondary_phone || '' });
-
-      // Check Access / Delegation / Sharing
-      if (!isAdmin && data.creator_id !== userProfile?.id) {
-          // 1. Check direct share first (customer_shares)
-          const { data: share } = await supabase.from('customer_shares')
-              .select('permission')
-              .eq('customer_id', id)
-              .eq('shared_with', userProfile?.id)
-              .maybeSingle();
-          
-          if (share) {
-              // Explicit share found.
-              // If permission is 'edit', viewOnly = false. If 'view', viewOnly = true.
-              setIsDelegatedViewOnly(share.permission === 'view');
-          } else {
-              // 2. Fallback to old global delegation
-              try {
-                  const { data: delegation } = await supabase
-                      .from('access_delegations')
-                      .select('access_level')
-                      .eq('recipient_id', userProfile?.id)
-                      .eq('target_user_id', data.creator_id)
-                      .single();
-                  
-                  if (delegation && delegation.access_level === 'view') {
-                      setIsDelegatedViewOnly(true);
-                  } else {
-                      setIsDelegatedViewOnly(false); // Can view/edit if delegated with 'edit' or if mod logic allows
-                  }
-              } catch (e) { 
-                  // If no delegation and not explicit share, assume View Only unless Mod
-                  if (isMod) {
-                      // Mod can edit if MKT Group
-                      if (data.source === 'MKT Group') {
-                          setIsDelegatedViewOnly(false);
-                      } else {
-                          // Standard Mod Logic (can edit team)
-                          setIsDelegatedViewOnly(false); 
-                      }
-                  } else {
-                      setIsDelegatedViewOnly(true);
-                  }
-              }
-          }
-      } else {
-          setIsDelegatedViewOnly(false); // Owner or Admin
-      }
 
       const { data: interactionData } = await supabase.from('interactions').select('*').eq('customer_id', id).order('created_at', { ascending: false });
       if (interactionData) setInteractions(interactionData as Interaction[]);
@@ -262,14 +256,96 @@ const CustomerDetail: React.FC = () => {
           if (!isAdmin && !isMod && userProfile?.id) query = query.eq('creator_id', userProfile.id);
           const { data } = await query;
           if (!data) return;
-          const currentIndex = data.findIndex(c => c.id === id);
+          
+          const ids = data.map(c => c.id);
+          setCustomerListContext(ids); // Save fallback context so next navigation uses it
+
+          const currentIndex = ids.indexOf(id);
           if (currentIndex !== -1) {
-              setPrevCustomerId(currentIndex > 0 ? data[currentIndex - 1].id : null);
-              setNextCustomerId(currentIndex < data.length - 1 ? data[currentIndex + 1].id : null);
+              setPrevCustomerId(currentIndex > 0 ? ids[currentIndex - 1] : null);
+              setNextCustomerId(currentIndex < ids.length - 1 ? ids[currentIndex + 1] : null);
           }
       } catch (e) { console.error("Error fetching siblings", e); }
   };
 
+  // --- DERIVED VARIABLES ---
+  
+  const isAssignedRep = useMemo(() => {
+      if (!customer?.sales_rep || !userProfile?.full_name) return false;
+      const s1 = normalizeString(customer.sales_rep);
+      const s2 = normalizeString(userProfile.full_name);
+      return s1 === s2 || s1.includes(s2) || s2.includes(s1);
+  }, [customer, userProfile]);
+
+  const canEdit = useMemo(() => {
+      if (isAdmin || isMod) return true;
+      if (customer?.creator_id === userProfile?.id) return true;
+      if (isAssignedRep) return true; 
+      if (customer?._shared_permission === 'edit') return true; 
+      return !dbViewPermission; 
+  }, [isAdmin, isMod, customer, userProfile, dbViewPermission, isAssignedRep]);
+
+  const isDelegatedViewOnly = !canEdit;
+
+  const canShare = useMemo(() => {
+      if (isAdmin || isMod) return true;
+      if (customer?.creator_id === userProfile?.id) return true;
+      if (isAssignedRep) return true;
+      return false; 
+  }, [isAdmin, isMod, customer, userProfile, isAssignedRep]);
+
+  const showActionButtons = canEdit;
+
+  // --- LOGIC: SAME TEAM, SAME/LOWER LEVEL ---
+  
+  const availableUsersToShare = useMemo(() => {
+      if (!userProfile) return [];
+      
+      // ADMIN: Can share with anyone
+      if (isAdmin) return employees.filter(e => e.id !== userProfile.id);
+
+      // MOD: Can share with Subordinates (Down)
+      if (isMod) {
+          return employees.filter(e => e.manager_id === userProfile.id);
+      }
+
+      // SALES (Employee): Can share with Peers (Same Manager, Same Level)
+      // Cannot share with Manager (Up) - Manager implies higher level.
+      if (userProfile.manager_id) {
+          return employees.filter(e => 
+              e.id !== userProfile.id && 
+              e.manager_id === userProfile.manager_id && 
+              e.role === UserRole.EMPLOYEE // Must be same level
+          );
+      }
+
+      return [];
+  }, [employees, userProfile, isAdmin, isMod]);
+
+  const availableUsersToChange = useMemo(() => {
+      if (!userProfile) return [];
+
+      // ADMIN: Unrestricted
+      if (isAdmin) return employees.filter(e => e.id !== userProfile.id);
+
+      // MOD: Only Subordinates (Down)
+      if (isMod) {
+          return employees.filter(e => e.manager_id === userProfile.id);
+      }
+
+      // SALES: Only Peers (Same Team, Same Level)
+      if (userProfile.manager_id) {
+          return employees.filter(e => 
+              e.id !== userProfile.id && 
+              e.manager_id === userProfile.manager_id && 
+              e.role === UserRole.EMPLOYEE
+          );
+      }
+
+      return [];
+  }, [employees, userProfile, isAdmin, isMod]);
+
+  // ... (Keep existing handler functions: handleAddNote, handleTrackAction, updateCustomerField, handleSaveInfo, handleAcknowledge, handleClassificationChange, handleDateChange, toggleSpecialCare, toggleLongTerm, handleStopCare, handleReopenCare, handleApproveRequest, handleApproveTransfer, handleRejectTransfer, prepareChangeSales, executeChangeSales, handleOpenShareModal, handleShareCustomer, executeRevokeShare, executeDeleteCustomer, handleDealAction, confirmSuspend, handleAddRevenue, handleAddIncurredExpense, handleRequestExpense, handleRepayAdvance, handleSubmitDealerDebt, handleDealerDebtPaid, executeDealerDebtPaid, handleRequestWin, confirmDeleteTransaction) ...
   const handleAddNote = async (type: Interaction['type'] = 'note', customContent?: string) => {
       if (isDelegatedViewOnly) { showToast("Bạn chỉ có quyền xem, không thể thêm ghi chú.", 'error'); return; }
       if (!id || (!newNote.trim() && !customContent)) return;
@@ -282,24 +358,11 @@ const CustomerDetail: React.FC = () => {
       } catch (e) { showToast("Lỗi lưu ghi chú", 'error'); }
   };
 
-  // --- NEW: Handle Auto-track Call/Zalo ---
   const handleTrackAction = async (type: 'call' | 'zalo', content: string) => {
-      // Allow action even if delegated view only? Usually View Only cannot add history.
-      // But for calls, if they can see the number, they can call. Let's record it.
       if (!id || !userProfile?.id) return;
-      
       try {
-          const { data, error } = await supabase.from('interactions').insert([{ 
-              customer_id: id, 
-              user_id: userProfile.id, 
-              type: type, 
-              content: content, 
-              created_at: new Date().toISOString() 
-          }]).select().single();
-          
-          if (!error && data) {
-              setInteractions(prev => [data as Interaction, ...prev]);
-          }
+          const { data, error } = await supabase.from('interactions').insert([{ customer_id: id, user_id: userProfile.id, type: type, content: content, created_at: new Date().toISOString() }]).select().single();
+          if (!error && data) { setInteractions(prev => [data as Interaction, ...prev]); }
       } catch (e) { console.error("Auto-track error", e); }
   };
 
@@ -312,7 +375,7 @@ const CustomerDetail: React.FC = () => {
   };
 
   const handleSaveInfo = async () => {
-      if (customer?.status === CustomerStatus.WON) { showToast("Khách đã chốt không thể sửa thông tin!", 'error'); return; }
+      if (customer?.status === CustomerStatus.WON && !isAdmin && !isMod) { showToast("Khách đã chốt không thể sửa thông tin!", 'error'); return; }
       await updateCustomerField({ interest: editForm.interest, location: editForm.location, source: editForm.source, secondary_phone: editForm.secondary_phone });
       setIsEditingInfo(false); handleAddNote('note', "Đã cập nhật thông tin khách hàng."); showToast("Cập nhật thông tin thành công!");
   };
@@ -324,84 +387,52 @@ const CustomerDetail: React.FC = () => {
       showToast("Đã tiếp nhận thành công!", 'success');
   };
 
-  const handleClassificationChange = async (cls: CustomerClassification) => {
-      setClassification(cls);
-      await updateCustomerField({ classification: cls });
-      showToast(`Đã chuyển sang ${cls}`);
-  };
-
-  const handleDateChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const date = e.target.value;
+  const handleClassificationChange = async (cls: CustomerClassification) => { setClassification(cls); await updateCustomerField({ classification: cls }); showToast(`Đã chuyển sang ${cls}`); };
+  
+  const handleDateChange = async (e: React.ChangeEvent<HTMLInputElement>) => { 
+      const date = e.target.value; 
       if (isLongTerm) {
-          const minDate = getMinDate();
-          if (date < minDate) {
-              showToast(`CS Dài hạn phải chọn ngày tối thiểu 10 ngày từ hôm nay`, 'error');
-              return;
-          }
-      }
-      setRecareDate(date);
-      await updateCustomerField({ recare_date: date });
-      
-      if (longTermTimeoutRef.current) {
-          clearTimeout(longTermTimeoutRef.current);
-          longTermTimeoutRef.current = null;
-      }
-      
-      showToast("Đã cập nhật ngày chăm sóc");
-  };
-
-  const toggleSpecialCare = async () => {
-      const newVal = !isSpecialCare;
-      setIsSpecialCare(newVal);
-      if (newVal) {
-          setIsLongTerm(false); 
-          if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
-          
-          await updateCustomerField({ is_special_care: true, is_long_term: false, special_care_start_date: new Date().toISOString() });
-          handleAddNote('note', "Đã đánh dấu: Chăm sóc đặc biệt (Hot)");
+          if (date < getMinDate()) { showToast(`CS Dài hạn phải chọn ngày tối thiểu 10 ngày từ hôm nay`, 'error'); return; }
+          if (date > getMaxDate()) { showToast(`CS Dài hạn chỉ được chọn tối đa 3 tháng`, 'error'); return; }
       } else {
-          await updateCustomerField({ is_special_care: false, special_care_start_date: null });
+          if (date > getMaxDate()) { showToast(`CS thường chỉ được chọn tối đa 4 ngày`, 'error'); return; }
       }
+      setRecareDate(date); 
+      await updateCustomerField({ recare_date: date }); 
+      if (longTermTimeoutRef.current) { clearTimeout(longTermTimeoutRef.current); longTermTimeoutRef.current = null; } 
+      showToast("Đã cập nhật ngày chăm sóc"); 
   };
 
-  const toggleLongTerm = async () => {
-      const newVal = !isLongTerm;
-      setIsLongTerm(newVal);
-      if (newVal) {
-          setIsSpecialCare(false);
-          setRecareDate(''); 
-          setClassification('Cool');
-          await updateCustomerField({ is_long_term: true, is_special_care: false, recare_date: null, classification: 'Cool' });
-          handleAddNote('note', "Đã chuyển sang: Chăm sóc dài hạn (Phân loại: Cool)");
-          showToast("Đã bật CS Dài hạn. Vui lòng chọn ngày trong 10s!");
-
-          if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
-          longTermTimeoutRef.current = setTimeout(() => {
-              setRecareDate((currentDate) => {
-                  if (!currentDate) {
-                      setIsLongTerm(false);
-                      updateCustomerField({ is_long_term: false });
-                      showToast("Đã tự động tắt CS Dài hạn do không chọn ngày!", 'error');
-                      handleAddNote('note', "Hệ thống: Tự động tắt CS Dài hạn do quá hạn chọn ngày.");
-                  }
-                  return currentDate;
-              });
-          }, 10000); 
-
-      } else {
-          if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current);
-          await updateCustomerField({ is_long_term: false });
-      }
+  const toggleSpecialCare = async () => { const newVal = !isSpecialCare; setIsSpecialCare(newVal); if (newVal) { setIsLongTerm(false); await updateCustomerField({ is_special_care: true, is_long_term: false, special_care_start_date: new Date().toISOString() }); handleAddNote('note', "Đã đánh dấu: Chăm sóc đặc biệt (Hot)"); } else { await updateCustomerField({ is_special_care: false, special_care_start_date: null }); } };
+  
+  const toggleLongTerm = async () => { 
+      const newVal = !isLongTerm; 
+      setIsLongTerm(newVal); 
+      if (longTermTimeoutRef.current) { clearTimeout(longTermTimeoutRef.current); longTermTimeoutRef.current = null; }
+      if (newVal) { 
+          setIsSpecialCare(false); setRecareDate(''); setClassification('Cool'); 
+          await updateCustomerField({ is_long_term: true, is_special_care: false, recare_date: null, classification: 'Cool' }); 
+          handleAddNote('note', "Đã chuyển sang: Chăm sóc dài hạn (Phân loại: Cool)"); 
+          longTermTimeoutRef.current = setTimeout(async () => {
+              setIsLongTerm(false); await updateCustomerField({ is_long_term: false }); showToast("Tự động tắt CS dài hạn do không chọn ngày (5s)", 'error');
+          }, 5000);
+      } else { 
+          await updateCustomerField({ is_long_term: false }); 
+      } 
   };
-
+  
   const handleStopCare = async () => {
-      if (!stopReason) { showToast("Vui lòng nhập lý do.", 'error'); return; }
+      if (!stopReason.trim()) { showToast("Vui lòng nhập lý do ngưng chăm sóc.", 'error'); return; }
       const newStatus = (isAdmin || isMod) ? CustomerStatus.LOST : CustomerStatus.LOST_PENDING;
-      setClassification('Cool');
-      await updateCustomerField({ status: newStatus, stop_reason: stopReason, classification: 'Cool' });
-      handleAddNote('note', `Ngưng chăm sóc (Lý do: ${stopReason}). Trạng thái mới: ${newStatus}. Phân loại: Cool`);
-      setShowStopModal(false);
-      showToast("Đã cập nhật trạng thái thành công!");
+      try {
+          const { error } = await supabase.from('customers').update({ status: newStatus, stop_reason: stopReason, classification: 'Cool' }).eq('id', id);
+          if (error) throw error;
+          setCustomer(prev => prev ? ({ ...prev, status: newStatus, stop_reason: stopReason, classification: 'Cool' }) : null);
+          setClassification('Cool');
+          await handleAddNote('note', `Ngưng chăm sóc. Lý do: ${stopReason}. Trạng thái: ${newStatus}`);
+          setShowStopModal(false);
+          showToast("Đã cập nhật trạng thái Ngưng chăm sóc!", 'success');
+      } catch (err: any) { showToast("Lỗi cập nhật: " + err.message, 'error'); }
   };
 
   const handleReopenCare = async () => {
@@ -410,21 +441,14 @@ const CustomerDetail: React.FC = () => {
       showToast("Đã mở lại chăm sóc!");
   };
 
-  // CHECK IF MKT GROUP (For strictly enforcing finance visibility)
-  const isMKTSource = useMemo(() => {
-      return customer?.source === 'MKT Group' || (customer?.source || '').includes('MKT');
-  }, [customer]);
+  const isMKTSource = useMemo(() => { return customer?.source === 'MKT Group' || (customer?.source || '').includes('MKT'); }, [customer]);
 
   const handleApproveRequest = async () => {
       if (!customer) return;
       if (customer.status === CustomerStatus.WON_PENDING) {
           await updateCustomerField({ status: CustomerStatus.WON, deal_status: 'processing' });
-          // Only create revenue transaction if customer is MKT
           if (customer.deal_details?.revenue && isMKTSource) {
-             await supabase.from('transactions').insert([{
-                customer_id: id, customer_name: customer.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
-                type: 'revenue', amount: customer.deal_details.revenue, reason: 'Doanh thu dự kiến (Duyệt chốt)', status: 'approved'
-             }]);
+             await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'revenue', amount: customer.deal_details.revenue, reason: 'Doanh thu dự kiến (Duyệt chốt)', status: 'approved' }]);
           }
           showToast("Đã duyệt Chốt Deal!");
       } else if (customer.status === CustomerStatus.LOST_PENDING) {
@@ -435,309 +459,32 @@ const CustomerDetail: React.FC = () => {
 
   const handleApproveTransfer = async () => {
       if (!customer || !customer.pending_transfer_to) return;
-      
       const newRepId = customer.pending_transfer_to;
       let newRepName = 'Unknown';
       const rep = employees.find(e => e.id === newRepId);
-      if (rep) {
-          newRepName = rep.full_name;
-      } else {
-          const { data } = await supabase.from('profiles').select('full_name').eq('id', newRepId).single();
-          if (data) newRepName = data.full_name;
-      }
-
-      await updateCustomerField({ 
-          sales_rep: newRepName, 
-          creator_id: newRepId,
-          pending_transfer_to: null 
-      });
-      
+      if (rep) { newRepName = rep.full_name; } else { const { data } = await supabase.from('profiles').select('full_name').eq('id', newRepId).single(); if (data) newRepName = data.full_name; }
+      await updateCustomerField({ sales_rep: newRepName, creator_id: newRepId, pending_transfer_to: null });
       handleAddNote('note', `[Admin/Mod] Đã duyệt chuyển quyền chăm sóc sang ${newRepName}.`);
       showToast("Đã duyệt chuyển quyền!");
   };
 
-  const handleRejectTransfer = async () => {
-      await updateCustomerField({ pending_transfer_to: null });
-      handleAddNote('note', '[Admin/Mod] Đã từ chối yêu cầu chuyển quyền.');
-      showToast("Đã từ chối!");
-  };
+  const handleRejectTransfer = async () => { await updateCustomerField({ pending_transfer_to: null }); handleAddNote('note', '[Admin/Mod] Đã từ chối yêu cầu chuyển quyền.'); showToast("Đã từ chối!"); };
+  const prepareChangeSales = (newRep: UserProfile) => { if (isAdmin || isMod) { setShowChangeSalesConfirm({ rep: newRep, type: 'direct' }); } else { setShowChangeSalesConfirm({ rep: newRep, type: 'request' }); } };
+  const executeChangeSales = async () => { if (!showChangeSalesConfirm) return; const { rep, type } = showChangeSalesConfirm; if (type === 'direct') { await updateCustomerField({ sales_rep: rep.full_name, creator_id: rep.id }); handleAddNote('note', `Đã chuyển khách hàng sang TVBH: ${rep.full_name}`); showToast("Đã chuyển Sales thành công!"); } else { await updateCustomerField({ pending_transfer_to: rep.id }); handleAddNote('note', `Đã gửi yêu cầu chuyển khách sang: ${rep.full_name}`); showToast("Đã gửi yêu cầu!"); } setShowChangeSalesConfirm(null); setShowChangeSalesModal(false); };
+  
+  const handleOpenShareModal = async () => { if (!id) return; const { data } = await supabase.from('customer_shares').select('*').eq('customer_id', id); const mappedShares = []; if (data) { for (const s of data) { const u = employees.find(e => e.id === s.shared_with); mappedShares.push({ ...s, user_name: u?.full_name || 'Unknown' }); } } setExistingShares(mappedShares); setShowShareModal(true); };
+  
+  const handleShareCustomer = async () => { if (!shareForm.recipientId || !id) return; if (shareForm.recipientId === userProfile?.id) { alert("Không thể chia sẻ cho chính mình."); return; } try { const { data: existing } = await supabase.from('customer_shares').select('id').eq('customer_id', id).eq('shared_with', shareForm.recipientId).maybeSingle(); if (existing) { await supabase.from('customer_shares').update({ permission: shareForm.permission }).eq('id', existing.id); } else { await supabase.from('customer_shares').insert([{ customer_id: id, shared_by: userProfile?.id, shared_with: shareForm.recipientId, permission: shareForm.permission }]); } const recipient = employees.find(e => e.id === shareForm.recipientId); handleAddNote('note', `Đã chia sẻ quyền truy cập (${shareForm.permission === 'view' ? 'Xem' : 'Sửa'}) cho: ${recipient?.full_name}`); alert("Đã chia sẻ thành công!"); handleOpenShareModal(); } catch (e: any) { if (e.code === '42P01') alert("Lỗi: Bảng chia sẻ chưa được tạo trong Database. Vui lòng báo Admin."); else alert("Lỗi chia sẻ: " + e.message); } };
+  const executeRevokeShare = async (shareId: string, userName: string) => { try { await supabase.from('customer_shares').delete().eq('id', shareId); handleAddNote('note', `Đã hủy quyền truy cập của: ${userName}`); handleOpenShareModal(); } catch (e) { alert("Lỗi hủy chia sẻ."); } setRevokeConfirmId(null); };
+  const executeDeleteCustomer = async () => { if (!id) return; try { await supabase.from('interactions').delete().eq('customer_id', id); await supabase.from('transactions').delete().eq('customer_id', id); await supabase.from('customer_shares').delete().eq('customer_id', id); const { error } = await supabase.from('customers').delete().eq('id', id); if (error) { throw new Error(error.message); } navigate('/customers'); } catch (e: any) { showToast("Lỗi xóa: " + e.message, 'error'); setShowDeleteConfirm(false); } };
+  const handleDealAction = async (action: 'complete' | 'refund' | 'cancel' | 'reopen' | 'suspend') => { if (action === 'cancel') { await updateCustomerField({ status: CustomerStatus.POTENTIAL, deal_status: undefined }); handleAddNote('note', "Đã hủy chốt đơn, quay lại chăm sóc."); return; } if (action === 'reopen') { await updateCustomerField({ deal_status: 'processing' }); handleAddNote('note', "Đã mở lại xử lý đơn hàng."); showToast("Đã mở lại xử lý!"); return; } if (action === 'suspend') { setShowSuspendModal(true); return; } const statusMap: any = { 'complete': (isAdmin || isMod) ? 'completed' : 'completed_pending', 'refund': (isAdmin || isMod) ? 'refunded' : 'refund_pending', }; await updateCustomerField({ deal_status: statusMap[action] }); showToast("Đã cập nhật trạng thái đơn hàng!"); };
+  const confirmSuspend = async () => { if (!suspendReason.trim()) { showToast("Vui lòng nhập lý do treo hồ sơ.", 'error'); return; } const newStatus = (isAdmin || isMod) ? 'suspended' : 'suspended_pending'; await updateCustomerField({ deal_status: newStatus }); handleAddNote('note', `Treo hồ sơ. Lý do: ${suspendReason}`); setShowSuspendModal(false); setSuspendReason(''); showToast("Đã cập nhật trạng thái hồ sơ!"); };
+  const handleAddRevenue = async () => { const amount = Number(revenueForm.amount.replace(/\./g, '')); if (!amount || amount <= 0) return; try { const currentActual = customer?.deal_details?.actual_revenue || 0; const newActual = currentActual + amount; const newDealDetails = { ...customer?.deal_details, actual_revenue: newActual }; const { error } = await supabase.from('customers').update({ deal_details: newDealDetails }).eq('id', id); if (error) throw error; setCustomer(prev => { if(!prev) return null; return { ...prev, deal_details: newDealDetails as any }; }); setShowAddRevenueModal(false); setRevenueForm({amount: '', note: ''}); showToast("Đã thêm doanh thu thực tế!"); if (revenueForm.note) handleAddNote('note', `Thêm doanh thu thực tế: +${formatCurrency(amount)} VNĐ. Ghi chú: ${revenueForm.note}`); } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); } };
+  const handleAddIncurredExpense = async () => { const amount = Number(incurredExpenseForm.amount.replace(/\./g, '')); if (!amount || amount <= 0 || !incurredExpenseForm.reason) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; } try { const { data, error } = await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'incurred_expense', amount: amount, reason: incurredExpenseForm.reason, status: 'approved' }]).select().single(); if (error) throw error; setTransactions(prev => [data as Transaction, ...prev]); setShowIncurredExpenseModal(false); setIncurredExpenseForm({ amount: '', reason: '' }); handleAddNote('note', `Thêm khoản chi phát sinh: ${formatCurrency(amount)} VNĐ. Lý do: ${incurredExpenseForm.reason}`); showToast("Đã thêm khoản chi phát sinh!"); } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); } };
+  const handleRequestExpense = async () => { const amount = Number(expenseForm.amount.replace(/\./g, '')); if (!amount || amount <= 0) { showToast("Vui lòng nhập số tiền hợp lệ!", 'error'); return; } if (!expenseForm.reason.trim()) { showToast("Vui lòng nhập lý do chi/ứng!", 'error'); return; } const status = (isAdmin || isMod) ? 'approved' : 'pending'; const approvedBy = (isAdmin || isMod) ? userProfile?.id : null; try { const { data, error } = await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: expenseForm.type, amount: amount, reason: expenseForm.reason, status: status, approved_by: approvedBy }]).select().single(); if (error) throw error; setTransactions(prev => [data as Transaction, ...prev]); setShowExpenseModal(false); setExpenseForm({ type: 'expense', amount: '', reason: '' }); const actionText = expenseForm.type === 'advance' ? `ứng tiền` : 'chi tiền'; const statusText = status === 'approved' ? ' (Đã duyệt)' : ' (Chờ duyệt)'; handleAddNote('note', `Đã gửi yêu cầu ${actionText}: ${formatCurrency(amount)} VNĐ.${statusText}`); showToast(`Gửi yêu cầu thành công! ${status === 'pending' ? 'Vui lòng chờ duyệt.' : 'Đã được duyệt.'}`, 'success'); } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); } };
+  const handleRepayAdvance = async () => { const amount = Number(repayForm.amount.replace(/\./g, '')); if (!amount || amount <= 0) return; try { const { data, error } = await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'repayment', amount: amount, reason: `${repayForm.reason} [Ref:Self]`, status: 'pending' }]).select().single(); if (error) throw error; setTransactions(prev => [data as Transaction, ...prev]); setShowRepayModal(false); setRepayForm({ amount: '', reason: 'Nộp lại tiền ứng' }); handleAddNote('note', `Đã gửi yêu cầu nộp lại tiền ứng: ${formatCurrency(amount)} VNĐ.`); showToast("Đã gửi yêu cầu nộp tiền! Chờ Admin duyệt.", 'success'); } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); } };
 
-  const prepareChangeSales = (newRep: UserProfile) => {
-      if (isAdmin || isMod) {
-          setShowChangeSalesConfirm({ rep: newRep, type: 'direct' });
-      } else {
-          setShowChangeSalesConfirm({ rep: newRep, type: 'request' });
-      }
-  };
-
-  const executeChangeSales = async () => {
-      if (!showChangeSalesConfirm) return;
-      const { rep, type } = showChangeSalesConfirm;
-
-      if (type === 'direct') {
-          await updateCustomerField({ sales_rep: rep.full_name, creator_id: rep.id });
-          handleAddNote('note', `Đã chuyển khách hàng sang TVBH: ${rep.full_name}`);
-          showToast("Đã chuyển Sales thành công!");
-      } else {
-          await updateCustomerField({ pending_transfer_to: rep.id });
-          handleAddNote('note', `Đã gửi yêu cầu chuyển khách sang: ${rep.full_name}`);
-          showToast("Đã gửi yêu cầu!");
-      }
-      setShowChangeSalesConfirm(null);
-      setShowChangeSalesModal(false);
-  };
-
-  // --- SHARE CUSTOMER LOGIC ---
-  const handleOpenShareModal = async () => {
-      if (!id) return;
-      // Fetch existing shares
-      const { data } = await supabase.from('customer_shares').select('*').eq('customer_id', id);
-      const mappedShares = [];
-      if (data) {
-          for (const s of data) {
-              const u = employees.find(e => e.id === s.shared_with);
-              mappedShares.push({ ...s, user_name: u?.full_name || 'Unknown' });
-          }
-      }
-      setExistingShares(mappedShares);
-      setShowShareModal(true);
-  };
-
-  // --- SHARE USER FILTER LOGIC ---
-  const availableUsersToShare = useMemo(() => {
-      if (!userProfile) return [];
-      
-      // Filter self out
-      let targets = employees.filter(e => e.id !== userProfile.id);
-
-      if (isAdmin) return targets;
-
-      const myManagerId = userProfile.manager_id;
-
-      if (isMod) {
-          // Mod can share with:
-          // 1. Subordinates (manager_id = me)
-          // 2. My own manager (if exists)
-          // 3. Admin (Always allowed)
-          return targets.filter(e => 
-              e.manager_id === userProfile.id || 
-              (myManagerId && e.id === myManagerId) ||
-              e.role === UserRole.ADMIN
-          );
-      }
-
-      // Employee
-      // Share with Manager or Team Members (same manager)
-      return targets.filter(e => 
-          (myManagerId && e.manager_id === myManagerId) || // Teammates (Same manager)
-          (myManagerId && e.id === myManagerId) || // My Manager
-          e.role === UserRole.ADMIN // Admin
-      );
-  }, [employees, userProfile, isAdmin, isMod]);
-
-  // --- CHANGE SALES USER FILTER LOGIC ---
-  const availableUsersToChange = useMemo(() => {
-      if (!userProfile) return [];
-      let targets = employees.filter(e => e.id !== userProfile.id);
-
-      if (isAdmin) return targets;
-
-      if (isMod) {
-          // Mod can change sales to:
-          // Subordinates (manager_id = me) only.
-          return targets.filter(e => e.manager_id === userProfile.id);
-      }
-
-      // Sales: Can request transfer to Teammates (same manager) ONLY.
-      // Strictly peers only (same manager_id, role=employee). Exclude Manager.
-      if (userProfile.manager_id) {
-          return targets.filter(e => 
-              e.manager_id === userProfile.manager_id && 
-              e.role === UserRole.EMPLOYEE
-          );
-      }
-
-      return []; 
-  }, [employees, userProfile, isAdmin, isMod]);
-
-
-  const handleShareCustomer = async () => {
-      if (!shareForm.recipientId || !id) return;
-      if (shareForm.recipientId === userProfile?.id) { alert("Không thể chia sẻ cho chính mình."); return; }
-      
-      try {
-          // Upsert logic manually
-          const { data: existing } = await supabase.from('customer_shares')
-              .select('id')
-              .eq('customer_id', id)
-              .eq('shared_with', shareForm.recipientId)
-              .maybeSingle();
-          
-          if (existing) {
-              await supabase.from('customer_shares').update({
-                  permission: shareForm.permission
-              }).eq('id', existing.id);
-          } else {
-              await supabase.from('customer_shares').insert([{
-                  customer_id: id,
-                  shared_by: userProfile?.id,
-                  shared_with: shareForm.recipientId,
-                  permission: shareForm.permission
-              }]);
-          }
-          
-          const recipient = employees.find(e => e.id === shareForm.recipientId);
-          handleAddNote('note', `Đã chia sẻ quyền truy cập (${shareForm.permission === 'view' ? 'Xem' : 'Sửa'}) cho: ${recipient?.full_name}`);
-          alert("Đã chia sẻ thành công!");
-          handleOpenShareModal(); // Refresh list
-      } catch (e: any) {
-          if (e.code === '42P01') alert("Lỗi: Bảng chia sẻ chưa được tạo trong Database. Vui lòng báo Admin.");
-          else alert("Lỗi chia sẻ: " + e.message);
-      }
-  };
-
-  const executeRevokeShare = async (shareId: string, userName: string) => {
-      try {
-          await supabase.from('customer_shares').delete().eq('id', shareId);
-          handleAddNote('note', `Đã hủy quyền truy cập của: ${userName}`);
-          handleOpenShareModal(); // Refresh
-      } catch (e) { alert("Lỗi hủy chia sẻ."); }
-      setRevokeConfirmId(null);
-  };
-
-  const executeDeleteCustomer = async () => {
-      if (!id) return;
-      try {
-          await supabase.from('interactions').delete().eq('customer_id', id);
-          await supabase.from('transactions').delete().eq('customer_id', id);
-          await supabase.from('customer_shares').delete().eq('customer_id', id); // Clean up shares
-          
-          const { error } = await supabase.from('customers').delete().eq('id', id);
-          if (error) { throw new Error(error.message); }
-          navigate('/customers');
-      } catch (e: any) {
-          showToast("Lỗi xóa: " + e.message, 'error');
-          setShowDeleteConfirm(false);
-      }
-  };
-
-  const handleDealAction = async (action: 'complete' | 'refund' | 'cancel' | 'reopen' | 'suspend') => {
-      if (action === 'cancel') {
-          await updateCustomerField({ status: CustomerStatus.POTENTIAL, deal_status: undefined });
-          handleAddNote('note', "Đã hủy chốt đơn, quay lại chăm sóc.");
-          return;
-      }
-      if (action === 'reopen') {
-          await updateCustomerField({ deal_status: 'processing' }); 
-          handleAddNote('note', "Đã mở lại xử lý đơn hàng.");
-          showToast("Đã mở lại xử lý!");
-          return;
-      }
-      if (action === 'suspend') {
-          setShowSuspendModal(true);
-          return;
-      }
-      const statusMap: any = {
-          'complete': (isAdmin || isMod) ? 'completed' : 'completed_pending',
-          'refund': (isAdmin || isMod) ? 'refunded' : 'refund_pending',
-      };
-      await updateCustomerField({ deal_status: statusMap[action] });
-      showToast("Đã cập nhật trạng thái đơn hàng!");
-  };
-
-  const confirmSuspend = async () => {
-      if (!suspendReason.trim()) { showToast("Vui lòng nhập lý do treo hồ sơ.", 'error'); return; }
-      
-      const newStatus = (isAdmin || isMod) ? 'suspended' : 'suspended_pending';
-      await updateCustomerField({ deal_status: newStatus });
-      handleAddNote('note', `Treo hồ sơ. Lý do: ${suspendReason}`);
-      
-      setShowSuspendModal(false);
-      setSuspendReason('');
-      showToast("Đã cập nhật trạng thái hồ sơ!");
-  };
-
-  const handleAddRevenue = async () => {
-      const amount = Number(revenueForm.amount.replace(/\./g, ''));
-      if (!amount || amount <= 0) return;
-      try {
-          const currentActual = customer?.deal_details?.actual_revenue || 0;
-          const newActual = currentActual + amount;
-          const newDealDetails = { ...customer?.deal_details, actual_revenue: newActual };
-
-          // UPDATE CUSTOMER DB ONLY - NO TRANSACTION
-          const { error } = await supabase.from('customers').update({ deal_details: newDealDetails }).eq('id', id);
-          if (error) throw error;
-          
-          setCustomer(prev => { if(!prev) return null; return { ...prev, deal_details: newDealDetails as any }; });
-          setShowAddRevenueModal(false);
-          setRevenueForm({amount: '', note: ''});
-          showToast("Đã thêm doanh thu thực tế!");
-          if (revenueForm.note) handleAddNote('note', `Thêm doanh thu thực tế: +${formatCurrency(amount)} VNĐ. Ghi chú: ${revenueForm.note}`);
-      } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); }
-  };
-
-  const handleAddIncurredExpense = async () => {
-      const amount = Number(incurredExpenseForm.amount.replace(/\./g, ''));
-      if (!amount || amount <= 0 || !incurredExpenseForm.reason) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; }
-      try {
-          const { data, error } = await supabase.from('transactions').insert([{
-              customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
-              type: 'incurred_expense', // New Type
-              amount: amount, 
-              reason: incurredExpenseForm.reason, 
-              status: 'approved' // Usually auto-approved as it doesn't affect fund, just record keeping
-          }]).select().single();
-          if (error) throw error;
-          
-          setTransactions(prev => [data as Transaction, ...prev]);
-          setShowIncurredExpenseModal(false);
-          setIncurredExpenseForm({ amount: '', reason: '' });
-          handleAddNote('note', `Thêm khoản chi phát sinh: ${formatCurrency(amount)} VNĐ. Lý do: ${incurredExpenseForm.reason}`);
-          showToast("Đã thêm khoản chi phát sinh!");
-      } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); }
-  };
-
-  const handleRequestExpense = async () => {
-      const amount = Number(expenseForm.amount.replace(/\./g, ''));
-      if (!amount || amount <= 0 || !expenseForm.reason) { showToast("Vui lòng nhập đủ thông tin.", 'error'); return; }
-      try {
-          const { data, error } = await supabase.from('transactions').insert([{
-              customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
-              type: expenseForm.type, 
-              amount: amount, reason: expenseForm.reason, status: 'pending'
-          }]).select().single();
-          if (error) throw error;
-          setTransactions(prev => [data as Transaction, ...prev]);
-          setShowExpenseModal(false);
-          setExpenseForm({ type: 'expense', amount: '', reason: '' });
-          const actionText = expenseForm.type === 'advance' ? `ứng tiền` : 'chi tiền';
-          handleAddNote('note', `Đã gửi yêu cầu ${actionText}: ${formatCurrency(amount)} VNĐ.`);
-          showToast("Đã gửi yêu cầu duyệt!");
-      } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); }
-  };
-
-  const handleRepayAdvance = async () => {
-      const amount = Number(repayForm.amount.replace(/\./g, ''));
-      if (!amount || amount <= 0) return;
-      try {
-          const { data, error } = await supabase.from('transactions').insert([{
-              customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
-              type: 'repayment', 
-              amount: amount, 
-              reason: `${repayForm.reason} [Ref:Self]`,
-              status: 'pending'
-          }]).select().single();
-          
-          if (error) throw error;
-          setTransactions(prev => [data as Transaction, ...prev]);
-          setShowRepayModal(false);
-          setRepayForm({ amount: '', reason: 'Nộp lại tiền ứng' });
-          handleAddNote('note', `Đã gửi yêu cầu nộp lại tiền ứng: ${formatCurrency(amount)} VNĐ.`);
-          showToast("Đã gửi yêu cầu nộp tiền! Chờ Admin duyệt.", 'success');
-      } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); }
-  };
-
+  // UPDATED: Create Dealer Debt -> Increase Actual Revenue
   const handleSubmitDealerDebt = async () => {
       const amount = Number(dealerDebtForm.amount.replace(/\./g, ''));
       if (!amount || amount <= 0 || !dealerDebtForm.targetDate) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; }
@@ -747,52 +494,58 @@ const CustomerDetail: React.FC = () => {
               type: 'dealer_debt', target_date: dealerDebtForm.targetDate, amount: amount, reason: dealerDebtForm.reason, status: 'approved'
           }]).select().single();
           if (error) throw error;
+          
+          // CRITICAL: Update actual_revenue (add debt amount)
           const currentPredicted = customer?.deal_details?.revenue || 0;
           const currentActual = customer?.deal_details?.actual_revenue || 0;
-          const newDealDetails = { ...customer?.deal_details, revenue: currentPredicted + amount, actual_revenue: currentActual + amount };
+          const newDealDetails = { 
+              ...customer?.deal_details, 
+              revenue: currentPredicted + amount, // Optional: Increase forecast or keep same? User said "Revenue (Total) increases".
+              actual_revenue: currentActual + amount // Increase actual revenue -> Pending Deposit increases
+          };
+          
           await updateCustomerField({ deal_details: newDealDetails as any });
+          setCustomer(prev => { if(!prev) return null; return { ...prev, deal_details: newDealDetails as any }; });
+
           setTransactions(prev => [data as Transaction, ...prev]);
           setShowDealerDebtModal(false);
           setDealerDebtForm({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền' });
           handleAddNote('note', `Tạo khoản Đại lý nợ: ${formatCurrency(amount)} VNĐ. Dự kiến thu: ${new Date(dealerDebtForm.targetDate).toLocaleDateString('vi-VN')}`);
-          showToast("Đã tạo khoản nợ!");
+          showToast("Đã tạo khoản nợ! Doanh thu thực tế đã tăng.");
       } catch (e) { showToast("Lỗi tạo khoản nợ", 'error'); }
   };
 
   const handleDealerDebtPaid = (debtTransaction: Transaction) => { setDealerDebtToConfirm(debtTransaction); };
 
+  // UPDATED: Dealer Debt Paid -> Create Deposit -> Reduces Pending Deposit automatically
   const executeDealerDebtPaid = async () => {
       if (!dealerDebtToConfirm) return;
       try {
           const targetUserId = customer?.creator_id || dealerDebtToConfirm.user_id;
           const targetUserName = customer?.sales_rep || dealerDebtToConfirm.user_name;
+          // Create Deposit Transaction
           const { data, error } = await supabase.from('transactions').insert([{
               customer_id: id, customer_name: customer?.name, user_id: targetUserId, user_name: targetUserName,
               type: 'deposit', amount: dealerDebtToConfirm.amount, reason: `Thu nợ đại lý: ${dealerDebtToConfirm.reason}`, status: 'approved', approved_by: userProfile?.id
           }]).select().single();
           if (error) throw error;
+          
+          // Mark debt transaction as paid in reason or status (using reason here as per pattern)
           await supabase.from('transactions').update({ reason: `${dealerDebtToConfirm.reason} (Đã thu)` }).eq('id', dealerDebtToConfirm.id);
+          
           setTransactions(prev => [data as Transaction, ...prev.map(t => t.id === dealerDebtToConfirm.id ? {...t, reason: `${t.reason} (Đã thu)`} : t)]);
-          showToast("Đã thu nợ thành công!");
+          showToast("Đã thu nợ thành công! Đã nộp vào quỹ.");
           handleAddNote('note', `Đã thu hồi khoản nợ đại lý: ${formatCurrency(dealerDebtToConfirm.amount)} VNĐ.`);
       } catch (e: any) { showToast("Lỗi: " + (e.message || "Unknown"), 'error'); } finally { setDealerDebtToConfirm(null); }
   };
 
   const handleRequestWin = async () => {
-      if (!dealForm.payment_method || !dealForm.plate_type || !dealForm.distributor || !dealForm.car_availability || !dealForm.revenue) {
-          showToast("Vui lòng nhập đầy đủ thông tin bắt buộc (*) trước khi chốt deal!", 'error');
-          return;
-      }
+      if (!dealForm.payment_method || !dealForm.plate_type || !dealForm.distributor || !dealForm.car_availability || !dealForm.revenue) { showToast("Vui lòng nhập đầy đủ thông tin bắt buộc (*) trước khi chốt deal!", 'error'); return; }
       const newStatus = (isAdmin || isMod) ? CustomerStatus.WON : CustomerStatus.WON_PENDING;
       const revenueNum = Number(dealForm.revenue.replace(/\./g, ''));
       await updateCustomerField({ status: newStatus, deal_details: {...dealForm, revenue: revenueNum}, deal_status: newStatus === CustomerStatus.WON ? 'processing' : undefined });
-      
-      // ONLY create transaction if customer is MKT
       if (newStatus === CustomerStatus.WON && isMKTSource) {
-          await supabase.from('transactions').insert([{
-              customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name,
-              type: 'revenue', amount: revenueNum, reason: 'Doanh thu dự kiến (Chốt đơn)', status: 'approved'
-          }]);
+          await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'revenue', amount: revenueNum, reason: 'Doanh thu dự kiến (Chốt đơn)', status: 'approved' }]);
       }
       handleAddNote('note', `Chốt deal: ${formatCurrency(revenueNum)} VNĐ.`);
       setShowWinModal(false);
@@ -812,42 +565,20 @@ const CustomerDetail: React.FC = () => {
 
   // --- CALCULATION LOGIC ---
   const predictedRevenue = customer?.deal_details?.revenue || 0;
-  
-  // Calculate Incurred Expenses (Non-Fund Expenses)
-  const totalIncurredExpenses = transactions
-      .filter(t => t.type === 'incurred_expense' && t.status === 'approved')
-      .reduce((acc, curr) => acc + curr.amount, 0);
-
+  const totalIncurredExpenses = transactions.filter(t => t.type === 'incurred_expense' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
   const rawActualRevenue = customer?.deal_details?.actual_revenue || 0;
-  
-  // Adjusted Actual Revenue (Total) = Raw Revenue - Incurred Expenses
   const moneyInTotal = rawActualRevenue - totalIncurredExpenses;
+  const totalDeposited = transactions.filter(t => (t.type === 'deposit' || t.type === 'repayment') && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
   
-  // "Deposited" = Sum of all 'deposit' or 'revenue' type transactions that are NOT the initial predicted revenue
-  const totalDeposited = transactions
-      .filter(t => (t.type === 'deposit' || t.type === 'repayment') && t.status === 'approved')
-      .reduce((acc, curr) => acc + curr.amount, 0);
-
+  // Pending Deposit = Total Actual Money - Total Money Deposited
   const pendingDeposit = Math.max(0, moneyInTotal - totalDeposited);
 
-  // Refundable Advances Calculation (All Advances are Refundable now)
-  const refundableAdvances = transactions
-      .filter(t => t.type === 'advance' && t.status === 'approved')
-      .reduce((acc, curr) => acc + curr.amount, 0);
-  
-  const repayments = transactions
-      .filter(t => t.type === 'repayment' && t.status === 'approved')
-      .reduce((acc, curr) => acc + curr.amount, 0);
-  
+  const refundableAdvances = transactions.filter(t => t.type === 'advance' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
+  const repayments = transactions.filter(t => t.type === 'repayment' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
   const outstandingAdvance = Math.max(0, refundableAdvances - repayments);
-  
   const pendingRepaymentExists = transactions.some(t => t.type === 'repayment' && t.status === 'pending');
-
   const totalExpense = transactions.filter(t => (t.type === 'expense' || t.type === 'advance') && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
-
   const netRevenue = totalDeposited - totalExpense; 
-
-  // Interaction Counts
   const callCount = useMemo(() => interactions.filter(i => i.type === 'call').length, [interactions]);
   const messageCount = useMemo(() => interactions.filter(i => ['zalo', 'email', 'message'].includes(i.type) || i.content.toLowerCase().includes('zalo') || i.content.toLowerCase().includes('nhắn tin')).length, [interactions]);
 
@@ -861,15 +592,11 @@ const CustomerDetail: React.FC = () => {
   const isRefunded = customer.deal_status === 'refunded';
   const isSuspended = customer.deal_status === 'suspended';
   const hideCarePanel = isWon || isLost;
-  
-  // Updated showFinance Logic: Must be Won AND not finished AND MKT Source
   const showFinance = isWon && !isCompleted && !isRefunded && !isSuspended && isMKTSource;
-
-  const canShare = isAdmin || isMod || customer.creator_id === userProfile?.id; // Owners, Admin and Mod can share
-
+  
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10 relative">
-      {/* HEADER (Unchanged) */}
+      {/* HEADER */}
       <div className="flex flex-col gap-3 mb-2">
         <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -878,11 +605,9 @@ const CustomerDetail: React.FC = () => {
             <div className="flex gap-2">
                 <button onClick={() => prevCustomerId && navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext } })} disabled={!prevCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
                     <ChevronLeft size={16}/> <span className="hidden sm:inline">Trước</span>
-                    <span className="hidden sm:inline text-[10px] text-gray-400 bg-gray-100 px-1 rounded border border-gray-300 ml-1">←</span>
                 </button>
                 <button onClick={() => nextCustomerId && navigate(`/customers/${nextCustomerId}`, { state: { customerIds: customerListContext } })} disabled={!nextCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
                     <span className="hidden sm:inline">Sau</span> <ChevronRight size={16}/>
-                    <span className="hidden sm:inline text-[10px] text-gray-400 bg-gray-100 px-1 rounded border border-gray-300 ml-1">→</span>
                 </button>
             </div>
         </div>
@@ -907,16 +632,19 @@ const CustomerDetail: React.FC = () => {
                 {isPending && (isAdmin || isMod) && !isDelegatedViewOnly && (
                     <button onClick={handleApproveRequest} className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 flex items-center gap-2"><CheckCircle2 size={18}/> Duyệt Yêu Cầu</button>
                 )}
-                {!isDelegatedViewOnly && (
+                
+                {/* RESTORED: BUTTONS FOR CHANGE SALES & SHARE (UNRESTRICTED) */}
+                {!isWon && !isLost && !isDelegatedViewOnly && (
                     <>
-                        {!isWon && !isLost && (isAdmin || isMod || customer.creator_id === userProfile?.id) && (
-                            <button onClick={() => setShowChangeSalesModal(true)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><ArrowRightLeft size={16}/> Đổi Sales</button>
-                        )}
+                        <button onClick={() => setShowChangeSalesModal(true)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2">
+                            <ArrowRightLeft size={16}/> {isAdmin || isMod ? 'Đổi Sales' : 'Yêu cầu chuyển'}
+                        </button>
                         {canShare && (
                             <button onClick={handleOpenShareModal} className="px-3 py-2 bg-teal-50 border border-teal-200 text-teal-700 font-bold rounded-lg hover:bg-teal-100 flex items-center gap-2" title="Chia sẻ khách hàng"><Share2 size={16}/></button>
                         )}
                     </>
                 )}
+                
                 {(isAdmin || isMod) && (
                     <button onClick={() => setShowDeleteConfirm(true)} className="p-2 bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><Trash2 size={18}/></button>
                 )}
@@ -966,7 +694,7 @@ const CustomerDetail: React.FC = () => {
                           {!isLongTerm && <p className="text-xs text-gray-400 mt-1 italic">Giới hạn chọn: Tối đa 4 ngày từ hôm nay.</p>}
                       </div>
                   )}
-                  <div className="space-y-3"><button className="w-full py-2.5 bg-gray-800 text-white rounded-xl font-bold text-sm hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200"><Mail size={16} /> Đặt lịch Lái thử</button><div className="grid grid-cols-2 gap-3"><button disabled={isDelegatedViewOnly} onClick={() => setShowStopModal(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"><Ban size={16} /> Ngưng CS</button><button disabled={isDelegatedViewOnly} onClick={() => setShowWinModal(true)} className="py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-1 disabled:opacity-50"><CheckCircle2 size={16} /> Chốt Deal</button></div></div>
+                  <div className="space-y-3"><button className="w-full py-2.5 bg-gray-800 text-white rounded-xl font-bold text-sm hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200"><Mail size={16} /> Đặt lịch Lái thử</button><div className="grid grid-cols-2 gap-3"><button disabled={(isDelegatedViewOnly)} onClick={() => setShowStopModal(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"><Ban size={16} /> Ngưng CS</button><button disabled={(isDelegatedViewOnly)} onClick={() => setShowWinModal(true)} className="py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-1 disabled:opacity-50"><CheckCircle2 size={16} /> Chốt Deal</button></div></div>
               </div>
           )}
           {/* ... Customer Info & Finance Panels ... */}
@@ -1071,7 +799,7 @@ const CustomerDetail: React.FC = () => {
                         <span className="flex items-center gap-1"><MessageCircle size={12}/> {messageCount}</span>
                     </div>
                 </div>
-                {!isLost && !isDelegatedViewOnly && (<div className="p-4 border-b border-gray-100 bg-white"><div className="flex gap-4"><div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 font-bold shrink-0"><UserIcon size={20} /></div><div className="flex-1"><textarea className="w-full border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary-100 focus:border-primary-500 outline-none resize-none bg-gray-50 text-gray-900 font-medium" rows={3} placeholder="Ghi chú..." value={newNote} onChange={(e) => setNewNote(e.target.value)}></textarea><div className="flex justify-end mt-2"><button onClick={() => handleAddNote('note')} disabled={!newNote.trim()} className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-black disabled:opacity-50 transition-colors"><Send size={14} /> Lưu</button></div></div></div></div>)}<div className="p-6 bg-gray-50 min-h-[400px] max-h-[600px] overflow-y-auto"><div className="space-y-6 relative before:absolute before:left-5 before:top-2 before:bottom-0 before:w-0.5 before:bg-gray-200">{interactions.map((item) => (<div key={item.id} className="relative pl-12 animate-fade-in"><div className={`absolute left-0 top-0 w-10 h-10 rounded-full border-4 border-gray-50 flex items-center justify-center z-10 ${item.type === 'call' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{item.type === 'call' ? <Phone size={16} /> : <MessageCircle size={16} />}</div><div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm"><div className="flex justify-between items-start mb-2"><span className="font-bold text-gray-900 text-sm">{item.type === 'call' ? 'Cuộc gọi đi' : item.type === 'zalo' ? 'Chat Zalo' : 'Ghi chú'}</span><span className="text-xs text-gray-500 font-medium">{new Date(item.created_at).toLocaleString('vi-VN')}</span></div><p className="text-gray-900 text-sm leading-relaxed">{item.content}</p></div></div>))}</div></div>
+                {!isLost && (!isDelegatedViewOnly || isAssignedRep) && (<div className="p-4 border-b border-gray-100 bg-white"><div className="flex gap-4"><div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 font-bold shrink-0"><UserIcon size={20} /></div><div className="flex-1"><textarea className="w-full border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary-100 focus:border-primary-500 outline-none resize-none bg-gray-50 text-gray-900 font-medium" rows={3} placeholder="Ghi chú..." value={newNote} onChange={(e) => setNewNote(e.target.value)}></textarea><div className="flex justify-end mt-2"><button onClick={() => handleAddNote('note')} disabled={!newNote.trim()} className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-black disabled:opacity-50 transition-colors"><Send size={14} /> Lưu</button></div></div></div></div>)}<div className="p-6 bg-gray-50 min-h-[400px] max-h-[600px] overflow-y-auto"><div className="space-y-6 relative before:absolute before:left-5 before:top-2 before:bottom-0 before:w-0.5 before:bg-gray-200">{interactions.map((item) => (<div key={item.id} className="relative pl-12 animate-fade-in"><div className={`absolute left-0 top-0 w-10 h-10 rounded-full border-4 border-gray-50 flex items-center justify-center z-10 ${item.type === 'call' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{item.type === 'call' ? <Phone size={16} /> : <MessageCircle size={16} />}</div><div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm"><div className="flex justify-between items-start mb-2"><span className="font-bold text-gray-900 text-sm">{item.type === 'call' ? 'Cuộc gọi đi' : item.type === 'zalo' ? 'Chat Zalo' : 'Ghi chú'}</span><span className="text-xs text-gray-500 font-medium">{new Date(item.created_at).toLocaleString('vi-VN')}</span></div><p className="text-gray-900 text-sm leading-relaxed">{item.content}</p></div></div>))}</div></div>
             </div>
         </div>
       </div>
@@ -1101,20 +829,48 @@ const CustomerDetail: React.FC = () => {
           </div>
       )}
 
-      {showChangeSalesModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 max-h-[80vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Chuyển quyền chăm sóc</h3><button onClick={() => setShowChangeSalesModal(false)}><X size={24} className="text-gray-400"/></button></div><div className="space-y-2">{availableUsersToChange.map(emp => (<button key={emp.id} onClick={() => prepareChangeSales(emp)} className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors text-left group"><div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center font-bold text-gray-600 group-hover:bg-primary-100 group-hover:text-primary-700">{emp.full_name.charAt(0)}</div><div><p className="font-bold text-gray-900">{emp.full_name}</p><p className="text-xs text-gray-500 capitalize">{emp.role}</p></div></button>))}</div></div></div>)}
-      
-      {/* CONFIRMATION MODAL FOR CHANGE SALES */}
+      {showChangeSalesModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-2xl w-full max-w-sm p-6 max-h-[80vh] overflow-y-auto">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-bold text-gray-900">Chuyển quyền chăm sóc</h3>
+                      <button onClick={() => setShowChangeSalesModal(false)}><X size={24} className="text-gray-400"/></button>
+                  </div>
+                  <div className="space-y-2">
+                      {availableUsersToChange.map(emp => (
+                          <button 
+                              key={emp.id} 
+                              type="button"
+                              onClick={() => prepareChangeSales(emp)} 
+                              className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors text-left group cursor-pointer"
+                          >
+                              <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center font-bold text-gray-600 group-hover:bg-primary-100 group-hover:text-primary-700">
+                                  {emp.full_name.charAt(0)}
+                              </div>
+                              <div>
+                                  <p className="font-bold text-gray-900">{emp.full_name}</p>
+                                  <p className="text-xs text-gray-500 capitalize">{emp.role}</p>
+                              </div>
+                          </button>
+                      ))}
+                  </div>
+              </div>
+          </div>
+      )}
+
       {showChangeSalesConfirm && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex flex-col items-center text-center">
-                      <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4"><ArrowRightLeft size={24} /></div>
+                      <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4">
+                          <ArrowRightLeft size={24} />
+                      </div>
                       <h3 className="text-xl font-bold text-gray-900 mb-2">
                           {showChangeSalesConfirm.type === 'direct' ? 'Xác nhận chuyển Sales?' : 'Gửi yêu cầu chuyển?'}
                       </h3>
                       <p className="text-gray-500 text-sm mb-6">
                           {showChangeSalesConfirm.type === 'direct' 
-                              ? <>Chuyển khách hàng cho <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</>
+                              ? <>Chuyển khách hàng cho <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</> 
                               : <>Gửi yêu cầu chuyển cho <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</>
                           }
                       </p>
@@ -1352,6 +1108,75 @@ const CustomerDetail: React.FC = () => {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-green-100">
                   <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600"><CheckCircle2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Đại lý đã trả nợ?</h3><div className="bg-green-50 p-4 rounded-xl text-left w-full mb-4 border border-green-100 space-y-2"><div><p className="text-xs text-gray-500">Khoản nợ</p><p className="font-bold text-gray-900">{dealerDebtToConfirm.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền</p><p className="font-bold text-green-600 text-lg">{formatCurrency(dealerDebtToConfirm.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ ghi nhận <strong>Doanh thu/Nộp tiền</strong> vào hệ thống.</p><div className="flex gap-3 w-full"><button onClick={() => setDealerDebtToConfirm(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDealerDebtPaid} className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">Xác nhận</button></div></div>
+              </div>
+          </div>
+      )}
+
+      {/* NEW EXPENSE MODAL - FIX 1 */}
+      {showExpenseModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-bold text-red-700">Yêu cầu {expenseForm.type === 'advance' ? 'Ứng tiền' : 'Chi tiền'}</h3>
+                      <button onClick={() => setShowExpenseModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
+                  </div>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
+                          <input 
+                            type="text" 
+                            className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500 font-bold" 
+                            value={expenseForm.amount} 
+                            onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : ''}); }} 
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-1">Lý do</label>
+                          <input 
+                            type="text" 
+                            className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500" 
+                            value={expenseForm.reason} 
+                            onChange={e => setExpenseForm({...expenseForm, reason: e.target.value})} 
+                            placeholder="VD: Tiếp khách, mua đồ..."
+                          />
+                      </div>
+                      <div className="text-xs bg-gray-50 p-2 rounded text-gray-500 italic">
+                          {expenseForm.type === 'advance' 
+                              ? 'Khoản này sẽ tạo thành Nợ Tạm Ứng cần hoàn trả.' 
+                              : 'Khoản này là chi phí chung, trừ thẳng vào quỹ.'}
+                      </div>
+                      <button 
+                        onClick={handleRequestExpense} 
+                        className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors"
+                      >
+                          Gửi yêu cầu
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* STOP CARE MODAL - FIX 2 */}
+      {showStopModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-bold text-gray-900">Ngưng chăm sóc khách</h3>
+                      <button onClick={() => setShowStopModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
+                  </div>
+                  <textarea 
+                      value={stopReason} 
+                      onChange={(e) => setStopReason(e.target.value)} 
+                      className="w-full border border-gray-300 rounded-xl p-3 mb-4 outline-none focus:border-red-500 h-24 resize-none" 
+                      placeholder="Lý do ngưng (VD: Đã mua hãng khác, Sai số...)" 
+                  />
+                  <div className="bg-red-50 text-red-800 text-xs p-3 rounded-lg mb-4">
+                      Khách hàng sẽ chuyển sang trạng thái <strong>{isAdmin || isMod ? 'Đã hủy' : 'Chờ duyệt hủy'}</strong> và phân loại <strong>Cool</strong>.
+                  </div>
+                  <div className="flex gap-2">
+                      <button onClick={() => setShowStopModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl">Hủy</button>
+                      <button onClick={handleStopCare} className="flex-1 py-2 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Xác nhận</button>
+                  </div>
               </div>
           </div>
       )}

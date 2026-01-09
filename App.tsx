@@ -22,6 +22,9 @@ import TeamFund from './pages/TeamFund';
 import CarPrices from './pages/CarPrices';
 import BankRates from './pages/BankRates';
 import Inventory from './pages/Inventory';
+import Proposals from './pages/Proposals';
+import Analytics from './pages/Analytics';
+import CalendarPage from './pages/Calendar';
 
 const { HashRouter, Routes, Route, Navigate } = ReactRouterDOM as any;
 
@@ -53,6 +56,8 @@ const App: React.FC = () => {
           <Route path="/update-password" element={<UpdatePassword />} />
           
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
+          <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute><CustomerList /></ProtectedRoute>} />
           <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetail /></ProtectedRoute>} />
           <Route path="/assign" element={<ProtectedRoute><AssignCustomers /></ProtectedRoute>} />
@@ -71,6 +76,7 @@ const App: React.FC = () => {
           <Route path="/car-prices" element={<ProtectedRoute><CarPrices /></ProtectedRoute>} />
           <Route path="/bank-rates" element={<ProtectedRoute><BankRates /></ProtectedRoute>} />
           <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
+          <Route path="/proposals" element={<ProtectedRoute><Proposals /></ProtectedRoute>} />
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

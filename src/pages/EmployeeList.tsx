@@ -35,10 +35,10 @@ const EmployeeList: React.FC = () => {
   const [targetUserForPerm, setTargetUserForPerm] = useState<UserProfile | null>(null);
   const [permForm, setPermForm] = useState({ lockAdd: false, lockView: false });
 
-  // Confirmation Modal State (Replaces window.confirm)
+  // --- CONFIRMATION MODAL STATE (Replaces window.confirm) ---
   const [confirmAction, setConfirmAction] = useState<{
       type: 'terminate' | 'reject' | 'delete';
-      payload: any;
+      payload: any; // UserProfile or ID
       title: string;
       message: string;
   } | null>(null);
@@ -198,6 +198,8 @@ const EmployeeList: React.FC = () => {
     }
   };
 
+  // --- NEW: ACTION HANDLERS WITH CUSTOM MODAL (NO WINDOW.CONFIRM) ---
+
   const handleReject = (id: string) => {
       setConfirmAction({
           type: 'reject',
@@ -225,9 +227,12 @@ const EmployeeList: React.FC = () => {
       });
   };
 
+  // --- UNIFIED EXECUTE FUNCTION ---
   const executeConfirmAction = async () => {
       if (!confirmAction) return;
       const { type, payload } = confirmAction;
+      
+      // Close modal immediately to prevent double clicks
       setConfirmAction(null);
 
       if (type === 'reject') {
@@ -262,10 +267,13 @@ const EmployeeList: React.FC = () => {
           setEmployees(employees.map(e => e.id === employee.id ? { ...e, status: 'blocked' } : e));
 
           try {
+              // Block profile
               const { data, error } = await supabase.from('profiles').update({ status: 'blocked' }).eq('id', employee.id).select();
+              
               if (error) throw error;
               if (!data || data.length === 0) throw new Error("RLS_BLOCK");
               
+              // Log system note
               try {
                   await supabase.from('interactions').insert([{ 
                       user_id: userProfile?.id, 
@@ -289,6 +297,7 @@ const EmployeeList: React.FC = () => {
       }
   };
 
+  // --- PERMISSION LOGIC ---
   const openPermissionModal = (emp: UserProfile) => {
       setTargetUserForPerm(emp);
       setPermForm({ lockAdd: !!emp.is_locked_add, lockView: !!emp.is_locked_view });
