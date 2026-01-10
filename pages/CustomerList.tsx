@@ -21,18 +21,18 @@ const CustomerList: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [employees, setEmployees] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   
-  // Filter States
+  // Initialize States
+  const [searchTerm, setSearchTerm] = useState('');
   const [selectedRep, setSelectedRep] = useState<string>('all');
-  const [selectedTeam, setSelectedTeam] = useState<string>('all'); // Add Team Filter
+  const [selectedTeam, setSelectedTeam] = useState<string>('all'); 
   const [isTodayFilter, setIsTodayFilter] = useState(false);
   const [isUnacknowledgedFilter, setIsUnacknowledgedFilter] = useState(false); 
   const [isExpiredLongTermFilter, setIsExpiredLongTermFilter] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('general');
 
   // Tabs State
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<string>('general');
   const navigate = useNavigate();
 
   // Modals
@@ -66,38 +66,66 @@ const CustomerList: React.FC = () => {
   
   const [formData, setFormData] = useState(initialFormState);
 
+  // --- RESTORE STATE LOGIC (SessionStorage) ---
   useEffect(() => {
-    fetchCustomersWithIsolation();
-  }, [userProfile]);
-
-  useEffect(() => {
+    // 1. If explicit navigation from Dashboard (Alerts), use location.state
     if (location.state) {
       if (location.state.initialTab) {
         setActiveTab(location.state.initialTab);
-        setIsTodayFilter(false);
-        setIsUnacknowledgedFilter(false);
-        setIsExpiredLongTermFilter(false);
+        setIsTodayFilter(false); setIsUnacknowledgedFilter(false); setIsExpiredLongTermFilter(false);
       }
       if (location.state.filterType === 'today') {
-        setIsTodayFilter(true);
-        setIsUnacknowledgedFilter(false);
-        setIsExpiredLongTermFilter(false);
-        setActiveTab('all'); 
+        setIsTodayFilter(true); setActiveTab('all');
+        setIsUnacknowledgedFilter(false); setIsExpiredLongTermFilter(false);
       }
       if (location.state.filterType === 'unacknowledged') {
-        setIsUnacknowledgedFilter(true);
-        setIsTodayFilter(false);
-        setIsExpiredLongTermFilter(false);
-        setActiveTab('all'); 
+        setIsUnacknowledgedFilter(true); setActiveTab('all');
+        setIsTodayFilter(false); setIsExpiredLongTermFilter(false);
       }
       if (location.state.filterType === 'expired_longterm') {
-        setIsExpiredLongTermFilter(true);
-        setIsTodayFilter(false);
-        setIsUnacknowledgedFilter(false);
-        setActiveTab('all');
+        setIsExpiredLongTermFilter(true); setActiveTab('all');
+        setIsTodayFilter(false); setIsUnacknowledgedFilter(false);
+      }
+    } 
+    // 2. Else, restore from SessionStorage if available
+    else {
+      const savedState = sessionStorage.getItem('crm_customer_view_state');
+      if (savedState) {
+        try {
+          const parsed = JSON.parse(savedState);
+          // Only restore if valid
+          if (parsed.activeTab) setActiveTab(parsed.activeTab);
+          if (parsed.searchTerm) setSearchTerm(parsed.searchTerm);
+          if (parsed.selectedRep) setSelectedRep(parsed.selectedRep);
+          if (parsed.selectedTeam) setSelectedTeam(parsed.selectedTeam);
+          setIsTodayFilter(!!parsed.isTodayFilter);
+          setIsUnacknowledgedFilter(!!parsed.isUnacknowledgedFilter);
+          setIsExpiredLongTermFilter(!!parsed.isExpiredLongTermFilter);
+        } catch (e) {
+          console.error("Failed to restore state", e);
+        }
       }
     }
   }, [location.state]);
+
+  // --- SAVE STATE LOGIC ---
+  useEffect(() => {
+    const stateToSave = {
+      activeTab,
+      searchTerm,
+      selectedRep,
+      selectedTeam,
+      isTodayFilter,
+      isUnacknowledgedFilter,
+      isExpiredLongTermFilter
+    };
+    sessionStorage.setItem('crm_customer_view_state', JSON.stringify(stateToSave));
+  }, [activeTab, searchTerm, selectedRep, selectedTeam, isTodayFilter, isUnacknowledgedFilter, isExpiredLongTermFilter]);
+
+
+  useEffect(() => {
+    fetchCustomersWithIsolation();
+  }, [userProfile]);
 
   const fetchCustomersWithIsolation = async () => {
     if (!userProfile) return;
@@ -697,7 +725,8 @@ const CustomerList: React.FC = () => {
                 key={customer.id} 
                 onClick={() => navigate(`/customers/${customer.id}`, { 
                     state: { 
-                        customerIds: filteredList.map(c => c.id) // Pass current list context
+                        customerIds: filteredList.map(c => c.id), // Pass current list context
+                        from: '/customers' // Added source identification
                     } 
                 })} 
                 className={`group bg-white rounded-2xl p-4 shadow-sm border hover:shadow-md transition-all cursor-pointer relative overflow-hidden 

@@ -33,15 +33,13 @@ const Deals: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [employees, setEmployees] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // States initialized with default values
   const [activeTab, setActiveTab] = useState<'processing' | 'completed' | 'refunded' | 'suspended'>('processing');
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // Filter State
   const [sourceFilter, setSourceFilter] = useState<'all' | 'mkt' | 'other'>('all');
   const [selectedRep, setSelectedRep] = useState<string>('all');
-  const [selectedTeam, setSelectedTeam] = useState<string>('all'); // Add Team Filter
-  
-  // Date Filter State - Default to 'all' to show everything initially
+  const [selectedTeam, setSelectedTeam] = useState<string>('all'); 
   const [filterMonth, setFilterMonth] = useState<string>('all');
   const [filterYear, setFilterYear] = useState<number | 'all'>('all');
   
@@ -51,6 +49,32 @@ const Deals: React.FC = () => {
   // --- NEW: Manual Date Edit Modal State ---
   const [showDateModal, setShowDateModal] = useState(false);
   const [dateForm, setDateForm] = useState<{id: string, date: string, name: string}>({ id: '', date: '', name: '' });
+
+  // --- RESTORE STATE LOGIC (SessionStorage) ---
+  useEffect(() => {
+      const savedState = sessionStorage.getItem('crm_deals_view_state');
+      if (savedState) {
+          try {
+              const parsed = JSON.parse(savedState);
+              if (parsed.activeTab) setActiveTab(parsed.activeTab);
+              if (parsed.searchTerm) setSearchTerm(parsed.searchTerm);
+              if (parsed.sourceFilter) setSourceFilter(parsed.sourceFilter);
+              if (parsed.selectedRep) setSelectedRep(parsed.selectedRep);
+              if (parsed.selectedTeam) setSelectedTeam(parsed.selectedTeam);
+              if (parsed.filterMonth) setFilterMonth(parsed.filterMonth);
+              if (parsed.filterYear) setFilterYear(parsed.filterYear);
+          } catch (e) { console.error("Failed to restore deals state", e); }
+      }
+  }, []);
+
+  // --- SAVE STATE LOGIC ---
+  useEffect(() => {
+      const stateToSave = {
+          activeTab, searchTerm, sourceFilter, selectedRep, selectedTeam, filterMonth, filterYear
+      };
+      sessionStorage.setItem('crm_deals_view_state', JSON.stringify(stateToSave));
+  }, [activeTab, searchTerm, sourceFilter, selectedRep, selectedTeam, filterMonth, filterYear]);
+
 
   useEffect(() => {
     fetchDataWithIsolation();
@@ -434,8 +458,8 @@ const Deals: React.FC = () => {
                                 ${c.deal_status?.includes('pending') ? 'border-blue-200 ring-2 ring-blue-100' : 'border-gray-100'}
                                 ${c.deal_status === 'suspended' ? 'bg-gray-50 opacity-80' : ''}
                             `}
-                            // Pass IDs to enable navigation context
-                            onClick={() => navigate(`/customers/${c.id}`, { state: { customerIds: filteredCustomers.map(cust => cust.id) } })}
+                            // Pass 'from' state to navigate back correctly
+                            onClick={() => navigate(`/customers/${c.id}`, { state: { customerIds: filteredCustomers.map(cust => cust.id), from: '/deals' } })}
                         >
                             {/* Approval Actions for Admin/Mod */}
                             {(isAdmin || isMod) && (c.deal_status === 'completed_pending' || c.deal_status === 'refund_pending' || c.deal_status === 'suspended_pending') && (

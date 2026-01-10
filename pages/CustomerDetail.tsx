@@ -46,6 +46,9 @@ const CustomerDetail: React.FC = () => {
   const [prevCustomerId, setPrevCustomerId] = useState<string | null>(null);
   // Initialize from location state if available to ensure context persists on first render
   const [customerListContext, setCustomerListContext] = useState<string[]>(location.state?.customerIds || []);
+  
+  // Back navigation path
+  const backPath = location.state?.from || '/customers';
 
   // Modals
   const [showStopModal, setShowStopModal] = useState(false);
@@ -161,12 +164,12 @@ const CustomerDetail: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
-        if (e.key === 'ArrowLeft' && prevCustomerId) navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext } });
-        else if (e.key === 'ArrowRight' && nextCustomerId) navigate(`/customers/${nextCustomerId}`, { state: { customerIds: customerListContext } });
+        if (e.key === 'ArrowLeft' && prevCustomerId) navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext, from: backPath } });
+        else if (e.key === 'ArrowRight' && nextCustomerId) navigate(`/customers/${nextCustomerId}`, { state: { customerIds: customerListContext, from: backPath } });
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => { window.removeEventListener('keydown', handleKeyDown); };
-  }, [prevCustomerId, nextCustomerId, customerListContext, id, navigate]);
+  }, [prevCustomerId, nextCustomerId, customerListContext, id, navigate, backPath]);
 
   useEffect(() => { if (toast) { const timer = setTimeout(() => setToast(null), 3000); return () => clearTimeout(timer); } }, [toast]);
 
@@ -600,13 +603,13 @@ const CustomerDetail: React.FC = () => {
       <div className="flex flex-col gap-3 mb-2">
         <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-                <button onClick={() => navigate('/customers')} className="p-2 hover:bg-white rounded-full transition-colors text-gray-500"><ArrowLeft size={24} /></button>
+                <button onClick={() => navigate(backPath)} className="p-2 hover:bg-white rounded-full transition-colors text-gray-500"><ArrowLeft size={24} /></button>
             </div>
             <div className="flex gap-2">
-                <button onClick={() => prevCustomerId && navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext } })} disabled={!prevCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
+                <button onClick={() => prevCustomerId && navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext, from: backPath } })} disabled={!prevCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
                     <ChevronLeft size={16}/> <span className="hidden sm:inline">Trước</span>
                 </button>
-                <button onClick={() => nextCustomerId && navigate(`/customers/${nextCustomerId}`, { state: { customerIds: customerListContext } })} disabled={!nextCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
+                <button onClick={() => nextCustomerId && navigate(`/customers/${nextCustomerId}`, { state: { customerIds: customerListContext, from: backPath } })} disabled={!nextCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
                     <span className="hidden sm:inline">Sau</span> <ChevronRight size={16}/>
                 </button>
             </div>
@@ -633,12 +636,10 @@ const CustomerDetail: React.FC = () => {
                     <button onClick={handleApproveRequest} className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 flex items-center gap-2"><CheckCircle2 size={18}/> Duyệt Yêu Cầu</button>
                 )}
                 
-                {/* RESTORED: BUTTONS FOR CHANGE SALES & SHARE (UNRESTRICTED) */}
-                {!isWon && !isLost && !isDelegatedViewOnly && (
+                {/* FORCE SHOW BUTTONS IF AUTHORIZED */}
+                {(showActionButtons || isAssignedRep) && (
                     <>
-                        <button onClick={() => setShowChangeSalesModal(true)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2">
-                            <ArrowRightLeft size={16}/> {isAdmin || isMod ? 'Đổi Sales' : 'Yêu cầu chuyển'}
-                        </button>
+                        <button onClick={() => setShowChangeSalesModal(true)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><ArrowRightLeft size={16}/> Đổi Sales</button>
                         {canShare && (
                             <button onClick={handleOpenShareModal} className="px-3 py-2 bg-teal-50 border border-teal-200 text-teal-700 font-bold rounded-lg hover:bg-teal-100 flex items-center gap-2" title="Chia sẻ khách hàng"><Share2 size={16}/></button>
                         )}

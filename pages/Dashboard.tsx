@@ -381,16 +381,18 @@ const Dashboard: React.FC = () => {
     <div className="space-y-6 pb-10">
       
       {/* HEADER & ALERTS */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div><h1 className="text-2xl font-bold text-gray-900">Tổng quan {(isAdmin || isMod) ? '(Team)' : '(Cá nhân)'}</h1><p className="text-gray-500">Xin chào, {userProfile?.full_name}!</p></div>
-        <div className="flex flex-wrap gap-3 items-center">
-          <div className="relative mr-2" ref={notiRef}>
+        
+        {/* Actions Container - Updated for better mobile alignment */}
+        <div className="flex w-full md:w-auto items-center justify-end gap-3">
+          <div className="relative" ref={notiRef}>
               <button onClick={() => setIsNotiOpen(!isNotiOpen)} className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-600 hover:text-primary-600 hover:bg-gray-50 shadow-sm transition-all relative">
                   <Bell size={20} />
                   {displayNotifCount > 0 && (<span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white animate-pulse">{displayNotifCount > 9 ? '9+' : displayNotifCount}</span>)}
               </button>
               {isNotiOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-[60] overflow-hidden animate-fade-in origin-top-right ring-1 ring-black/5">
+                  <div className="absolute right-[-110px] md:right-0 top-full mt-2 w-[90vw] sm:w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-[60] overflow-hidden animate-fade-in origin-top-right ring-1 ring-black/5">
                       <div className="p-4 border-b border-gray-50 bg-gray-50/50"><h4 className="font-bold text-gray-800 flex items-center gap-2"><BellRing size={16} className="text-primary-600"/> Thông báo</h4></div>
                       <div className="max-h-[300px] overflow-y-auto">
                           {displayNotifCount === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Không có thông báo mới.</div> : (

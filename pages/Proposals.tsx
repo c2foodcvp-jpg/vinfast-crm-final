@@ -50,39 +50,59 @@ const Proposals: React.FC = () => {
   const fetchData = async () => {
       setLoading(true);
       try {
-          // 1. Fetch Basic Data (Filtered by Team for Mod/Sales)
-          let carQuery = supabase.from('demo_cars').select('*').order('created_at', { ascending: false });
+          // 1. Fetch Profiles FIRST to determine team structure for filtering
+          const { data: profiles } = await supabase.from('profiles').select('*');
+          const profilesList = profiles as UserProfile[] || [];
+          setAllProfiles(profilesList);
+
+          // 2. Determine Viewable User IDs based on Role (Isolation Logic)
+          let viewableIds: string[] = [];
           
+          if (isAdmin) {
+              // Admin sees all
+              viewableIds = profilesList.map(p => p.id);
+          } else if (isMod && userProfile) {
+              // Mod sees Self + Subordinates (Team)
+              viewableIds = profilesList
+                  .filter(p => p.id === userProfile.id || p.manager_id === userProfile.id)
+                  .map(p => p.id);
+          } else if (userProfile) {
+              // Sales sees Self only
+              viewableIds = [userProfile.id];
+          }
+
+          // 3. Fetch Demo Cars (Filtered by Team Manager)
+          let carQuery = supabase.from('demo_cars').select('*').order('created_at', { ascending: false });
           if (!isAdmin && userProfile) {
               const managerId = isMod ? userProfile.id : userProfile.manager_id;
               if (managerId) {
                   carQuery = carQuery.eq('manager_id', managerId);
               }
           }
-          
           const { data: cars } = await carQuery;
           if (cars) setDemoCars(cars as DemoCar[]);
 
-          // 2. Fetch Proposals
+          // 4. Fetch Proposals (Strictly Filtered by Viewable IDs)
           let pQuery = supabase.from('proposals').select('*').order('created_at', { ascending: false });
-          if (!isAdmin && !isMod) {
-              pQuery = pQuery.eq('user_id', userProfile?.id);
+          
+          if (viewableIds.length > 0) {
+              pQuery = pQuery.in('user_id', viewableIds);
+          } else {
+              // Fallback safety to show nothing if IDs not resolved
+              pQuery = pQuery.eq('id', '00000000-0000-0000-0000-000000000000'); 
           }
+
           const { data: props } = await pQuery;
           
-          // Map user names if Admin/Mod
-          const { data: profiles } = await supabase.from('profiles').select('*');
-          if (profiles) setAllProfiles(profiles as UserProfile[]);
-
           if (props) {
               const mapped = props.map((p: any) => ({
                   ...p,
-                  user_name: profiles?.find((u: any) => u.id === p.user_id)?.full_name || 'Unknown'
+                  user_name: profilesList?.find((u: any) => u.id === p.user_id)?.full_name || 'Unknown'
               }));
               setProposals(mapped);
           }
 
-          // 3. Fetch Financial Data for Salary Check (Only needed if user is active)
+          // 5. Fetch Financial Data for Salary Check (Only needed if user is active)
           const { data: cust } = await supabase.from('customers').select('*');
           if (cust) setAllCustomers(cust as Customer[]);
           
@@ -92,7 +112,7 @@ const Proposals: React.FC = () => {
               // Add Helper Fields like Finance.tsx
               const extendedTrans = trans.map((t: any) => {
                   const customer = t.customer_id ? cust?.find((c:any) => c.id === t.customer_id) : null;
-                  const creator = profiles?.find((p:any) => p.id === t.user_id);
+                  const creator = profilesList?.find((p:any) => p.id === t.user_id);
                   return {
                       ...t,
                       _source: customer?.source,
