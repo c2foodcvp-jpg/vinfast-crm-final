@@ -467,11 +467,17 @@ const CustomerList: React.FC = () => {
   // Base list filtered by Search/Rep/Date (Not Tabs)
   const baseFilteredCustomers = useMemo(() => {
       const normalizedSearch = searchTerm.replace(/\s+/g, '');
+      const lowerSearchTerm = searchTerm.toLowerCase();
+
       let filtered = customers.filter(c => {
         const normalizedPhone = c.phone ? c.phone.replace(/\s+/g, '') : '';
+        const normalizedSecPhone = c.secondary_phone ? c.secondary_phone.replace(/\s+/g, '') : '';
+        
         return (
-          (c.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || 
-          normalizedPhone.includes(normalizedSearch)
+          (c.name?.toLowerCase() || '').includes(lowerSearchTerm) || 
+          (c.interest?.toLowerCase() || '').includes(lowerSearchTerm) || 
+          normalizedPhone.includes(normalizedSearch) ||
+          normalizedSecPhone.includes(normalizedSearch)
         );
       });
 
@@ -647,7 +653,7 @@ const CustomerList: React.FC = () => {
       <div className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-          <input type="text" placeholder="Tìm kiếm theo tên, SĐT..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all" />
+          <input type="text" placeholder="Tìm tên, dòng xe, SĐT (Chính/Phụ)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all" />
         </div>
         
         {/* FILTERS & EXPORT */}
