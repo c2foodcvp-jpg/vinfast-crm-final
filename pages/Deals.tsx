@@ -24,8 +24,12 @@ import {
   Calendar,
   ArrowRight,
   Edit,
-  Download
+  Download,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
+
+const ITEMS_PER_PAGE = 30;
 
 const Deals: React.FC = () => {
   const { userProfile, isAdmin, isMod } = useAuth();
@@ -43,6 +47,9 @@ const Deals: React.FC = () => {
   const [filterMonth, setFilterMonth] = useState<string>('all');
   const [filterYear, setFilterYear] = useState<number | 'all'>('all');
   
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+
   // Confirmation Modal
   const [confirmAction, setConfirmAction] = useState<{id: string, type: 'completed' | 'refunded' | 'suspended'} | null>(null);
 
@@ -75,6 +82,10 @@ const Deals: React.FC = () => {
       sessionStorage.setItem('crm_deals_view_state', JSON.stringify(stateToSave));
   }, [activeTab, searchTerm, sourceFilter, selectedRep, selectedTeam, filterMonth, filterYear]);
 
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm, sourceFilter, selectedRep, selectedTeam, filterMonth, filterYear]);
 
   useEffect(() => {
     fetchDataWithIsolation();
@@ -258,6 +269,20 @@ const Deals: React.FC = () => {
 
       return matchesSearch && matchesSource && matchesRep && matchesStatus && matchesTeam && matchesDate;
   });
+
+  // PAGINATION LOGIC
+  const totalPages = Math.ceil(filteredCustomers.length / ITEMS_PER_PAGE);
+  const paginatedCustomers = useMemo(() => {
+      const start = (currentPage - 1) * ITEMS_PER_PAGE;
+      return filteredCustomers.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredCustomers, currentPage]);
+
+  const handlePageChange = (page: number) => {
+      if (page >= 1 && page <= totalPages) {
+          setCurrentPage(page);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+  };
 
   // Export Function
   const handleExport = () => {
@@ -450,7 +475,7 @@ const Deals: React.FC = () => {
 
         {/* List */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredCustomers.length === 0 ? (
+            {paginatedCustomers.length === 0 ? (
                 <div className="col-span-full py-12 text-center text-gray-500 bg-white rounded-2xl border border-gray-100 border-dashed">
                     {filterYear === 'all' 
                         ? 'Không có hồ sơ nào trong toàn bộ lịch sử.'
@@ -458,7 +483,7 @@ const Deals: React.FC = () => {
                     }
                 </div>
             ) : (
-                filteredCustomers.map(c => {
+                paginatedCustomers.map(c => {
                     const dateToUse = c.updated_at || c.created_at;
                     const displayDate = new Date(dateToUse).toLocaleDateString('vi-VN');
                     const isoDate = new Date(dateToUse).toISOString().split('T')[0];
@@ -569,6 +594,29 @@ const Deals: React.FC = () => {
                 })
             )}
         </div>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+            <div className="flex justify-center items-center gap-4 mt-6 pt-4 border-t border-gray-100">
+                <button 
+                    onClick={() => handlePageChange(currentPage - 1)} 
+                    disabled={currentPage === 1}
+                    className="p-2 rounded-xl bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                    <ChevronLeft size={20} />
+                </button>
+                <span className="text-sm font-bold text-gray-700">
+                    Trang {currentPage} / {totalPages}
+                </span>
+                <button 
+                    onClick={() => handlePageChange(currentPage + 1)} 
+                    disabled={currentPage === totalPages}
+                    className="p-2 rounded-xl bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                    <ChevronRight size={20} />
+                </button>
+            </div>
+        )}
 
         {/* Modal Approval */}
         {confirmAction && (

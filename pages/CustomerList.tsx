@@ -5,7 +5,7 @@ import { Customer, CustomerStatus, CustomerClassification, UserProfile, AccessDe
 import { useAuth } from '../contexts/AuthContext';
 import * as ReactRouterDOM from 'react-router-dom';
 import { exportToExcel } from '../utils/excelExport';
-import { Search, Plus, X, User, CarFront, Calendar, AlertCircle, Clock, CheckCircle2, MessageSquare, ShieldAlert, Upload, FileSpreadsheet, Download, AlertTriangle, Flame, History, RotateCcw, HardDrive, MapPin, Loader2, ChevronDown, List, Filter, Webhook, UserX, ScanSearch, Phone, Trash2, Eye, Share2, Star, Activity, PauseCircle, Ban, EyeOff, Lock } from 'lucide-react';
+import { Search, Plus, X, User, CarFront, Calendar, AlertCircle, Clock, CheckCircle2, MessageSquare, ShieldAlert, Upload, FileSpreadsheet, Download, AlertTriangle, Flame, History, RotateCcw, HardDrive, MapPin, Loader2, ChevronDown, List, Filter, Webhook, UserX, ScanSearch, Phone, Trash2, Eye, Share2, Star, Activity, PauseCircle, Ban, EyeOff, Lock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { CAR_MODELS } from '../types';
 
 const { useNavigate, useLocation } = ReactRouterDOM as any;
@@ -15,6 +15,8 @@ interface DuplicateGroup {
   phone: string;
   customers: Customer[];
 }
+
+const ITEMS_PER_PAGE = 30;
 
 const CustomerList: React.FC = () => {
   const { userProfile, isAdmin, isMod } = useAuth();
@@ -30,6 +32,9 @@ const CustomerList: React.FC = () => {
   const [isUnacknowledgedFilter, setIsUnacknowledgedFilter] = useState(false); 
   const [isExpiredLongTermFilter, setIsExpiredLongTermFilter] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('general');
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Tabs State
   const location = useLocation();
@@ -122,6 +127,10 @@ const CustomerList: React.FC = () => {
     sessionStorage.setItem('crm_customer_view_state', JSON.stringify(stateToSave));
   }, [activeTab, searchTerm, selectedRep, selectedTeam, isTodayFilter, isUnacknowledgedFilter, isExpiredLongTermFilter]);
 
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedRep, selectedTeam, isTodayFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, activeTab]);
 
   useEffect(() => {
     fetchCustomersWithIsolation();
@@ -546,6 +555,20 @@ const CustomerList: React.FC = () => {
       stopped: baseFilteredCustomers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING).length
   }), [baseFilteredCustomers, todayStr]);
 
+  // PAGINATION LOGIC
+  const totalPages = Math.ceil(filteredList.length / ITEMS_PER_PAGE);
+  const paginatedCustomers = useMemo(() => {
+      const start = (currentPage - 1) * ITEMS_PER_PAGE;
+      return filteredList.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredList, currentPage]);
+
+  const handlePageChange = (page: number) => {
+      if (page >= 1 && page <= totalPages) {
+          setCurrentPage(page);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+  };
+
   const tabs: {id: string; label: string; icon: any; count?: number; colorClass?: string}[] = [
     { id: 'general', label: 'Khách hàng', icon: User, count: counts.general, colorClass: 'text-green-600 bg-green-100' }, 
     { id: 'special', label: 'CS Đặc biệt', icon: AlertCircle, count: counts.special, colorClass: 'text-purple-600 bg-purple-100' }, 
@@ -710,12 +733,12 @@ const CustomerList: React.FC = () => {
 
       {/* List content */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredList.length === 0 ? (
+        {paginatedCustomers.length === 0 ? (
           <div className="col-span-full py-12 text-center text-gray-500 bg-white rounded-2xl border border-gray-100 border-dashed">
             <User size={48} className="mx-auto text-gray-300 mb-3" /> <p>Không tìm thấy khách hàng nào.</p>
           </div>
         ) : (
-          filteredList.map((customer) => {
+          paginatedCustomers.map((customer) => {
             const recareStatus = getRecareStatus(customer);
             const isFinishedStatus = [CustomerStatus.WON, CustomerStatus.LOST, CustomerStatus.WON_PENDING, CustomerStatus.LOST_PENDING].includes(customer.status);
             // Visual check if explicitly shared via 'customer_shares' table
@@ -786,6 +809,29 @@ const CustomerList: React.FC = () => {
           })
         )}
       </div>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex justify-center items-center gap-4 mt-6 pt-4 border-t border-gray-100">
+            <button 
+                onClick={() => handlePageChange(currentPage - 1)} 
+                disabled={currentPage === 1}
+                className="p-2 rounded-xl bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+                <ChevronLeft size={20} />
+            </button>
+            <span className="text-sm font-bold text-gray-700">
+                Trang {currentPage} / {totalPages}
+            </span>
+            <button 
+                onClick={() => handlePageChange(currentPage + 1)} 
+                disabled={currentPage === totalPages}
+                className="p-2 rounded-xl bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+                <ChevronRight size={20} />
+            </button>
+        </div>
+      )}
       
       {/* ... Add/Duplicate Modals (Identical to previous) ... */}
       {isAddModalOpen && (

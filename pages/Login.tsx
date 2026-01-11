@@ -130,7 +130,7 @@ const Login: React.FC = () => {
                 </p>
             </div>
             <div className="relative z-10 text-xs text-blue-200/50">
-                © 2025 VinFast CRM Enterprise by Nguyen Ho
+                © 2025 VinFast CRM Enterprise
             </div>
             
             {/* Overlay Pattern */}
