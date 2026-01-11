@@ -16,7 +16,7 @@ interface DuplicateGroup {
   customers: Customer[];
 }
 
-const ITEMS_PER_PAGE = 30;
+const ITEMS_PER_PAGE = 15;
 
 const CustomerList: React.FC = () => {
   const { userProfile, isAdmin, isMod } = useAuth();
@@ -28,7 +28,8 @@ const CustomerList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRep, setSelectedRep] = useState<string>('all');
   const [selectedTeam, setSelectedTeam] = useState<string>('all'); 
-  const [isTodayFilter, setIsTodayFilter] = useState(false);
+  const [timeFilter, setTimeFilter] = useState<'today' | 'this_month' | 'last_month' | 'quarter' | 'year' | 'all'>('all');
+  
   const [isUnacknowledgedFilter, setIsUnacknowledgedFilter] = useState(false); 
   const [isExpiredLongTermFilter, setIsExpiredLongTermFilter] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('general');
@@ -77,19 +78,19 @@ const CustomerList: React.FC = () => {
     if (location.state) {
       if (location.state.initialTab) {
         setActiveTab(location.state.initialTab);
-        setIsTodayFilter(false); setIsUnacknowledgedFilter(false); setIsExpiredLongTermFilter(false);
+        setTimeFilter('all'); setIsUnacknowledgedFilter(false); setIsExpiredLongTermFilter(false);
       }
       if (location.state.filterType === 'today') {
-        setIsTodayFilter(true); setActiveTab('all');
+        setTimeFilter('today'); setActiveTab('all');
         setIsUnacknowledgedFilter(false); setIsExpiredLongTermFilter(false);
       }
       if (location.state.filterType === 'unacknowledged') {
         setIsUnacknowledgedFilter(true); setActiveTab('all');
-        setIsTodayFilter(false); setIsExpiredLongTermFilter(false);
+        setTimeFilter('all'); setIsExpiredLongTermFilter(false);
       }
       if (location.state.filterType === 'expired_longterm') {
         setIsExpiredLongTermFilter(true); setActiveTab('all');
-        setIsTodayFilter(false); setIsUnacknowledgedFilter(false);
+        setTimeFilter('all'); setIsUnacknowledgedFilter(false);
       }
     } 
     // 2. Else, restore from SessionStorage if available
@@ -103,7 +104,7 @@ const CustomerList: React.FC = () => {
           if (parsed.searchTerm) setSearchTerm(parsed.searchTerm);
           if (parsed.selectedRep) setSelectedRep(parsed.selectedRep);
           if (parsed.selectedTeam) setSelectedTeam(parsed.selectedTeam);
-          setIsTodayFilter(!!parsed.isTodayFilter);
+          if (parsed.timeFilter) setTimeFilter(parsed.timeFilter);
           setIsUnacknowledgedFilter(!!parsed.isUnacknowledgedFilter);
           setIsExpiredLongTermFilter(!!parsed.isExpiredLongTermFilter);
         } catch (e) {
@@ -120,17 +121,17 @@ const CustomerList: React.FC = () => {
       searchTerm,
       selectedRep,
       selectedTeam,
-      isTodayFilter,
+      timeFilter,
       isUnacknowledgedFilter,
       isExpiredLongTermFilter
     };
     sessionStorage.setItem('crm_customer_view_state', JSON.stringify(stateToSave));
-  }, [activeTab, searchTerm, selectedRep, selectedTeam, isTodayFilter, isUnacknowledgedFilter, isExpiredLongTermFilter]);
+  }, [activeTab, searchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedRep, selectedTeam, isTodayFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, activeTab]);
+  }, [searchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, activeTab]);
 
   useEffect(() => {
     fetchCustomersWithIsolation();
@@ -502,13 +503,33 @@ const CustomerList: React.FC = () => {
           filtered = filtered.filter(c => c.creator_id === selectedRep);
       }
 
-      if (isTodayFilter) {
+      // Time Range Filter Logic
+      if (timeFilter !== 'all') {
+          const now = new Date();
+          let start = new Date(0); // Epoch
+          let end = new Date();
+
+          if (timeFilter === 'today') {
+              start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+              end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+          } else if (timeFilter === 'this_month') {
+              start = new Date(now.getFullYear(), now.getMonth(), 1);
+              end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+          } else if (timeFilter === 'last_month') {
+              start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+              end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+          } else if (timeFilter === 'quarter') {
+              const q = Math.floor(now.getMonth() / 3);
+              start = new Date(now.getFullYear(), q * 3, 1);
+              end = new Date(now.getFullYear(), (q + 1) * 3, 0, 23, 59, 59);
+          } else if (timeFilter === 'year') {
+              start = new Date(now.getFullYear(), 0, 1);
+              end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+          }
+
           filtered = filtered.filter(c => {
-              if (!c.created_at) return false;
               const d = new Date(c.created_at);
-              const vnDate = new Date(d.getTime() + (7 * 60 * 60 * 1000));
-              const cDate = vnDate.toISOString().split('T')[0];
-              return cDate === todayStr;
+              return d >= start && d <= end;
           });
       }
 
@@ -526,7 +547,7 @@ const CustomerList: React.FC = () => {
       }
 
       return filtered;
-  }, [customers, searchTerm, selectedRep, selectedTeam, isTodayFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, isAdmin, isMod, todayStr, employees]);
+  }, [customers, searchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, isAdmin, isMod, todayStr, employees]);
 
   // Tab Filtering logic applied to base list
   const filteredList = useMemo(() => {
@@ -663,7 +684,7 @@ const CustomerList: React.FC = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
             <h1 className="text-2xl font-bold text-gray-900">Quản lý Khách hàng</h1>
-            {isTodayFilter && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold"><Calendar size={14} /> Đang xem: Khách mới hôm nay<button onClick={() => setIsTodayFilter(false)} className="ml-1 hover:text-green-900"><X size={14}/></button></span>)}
+            {timeFilter === 'today' && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold"><Calendar size={14} /> Đang xem: Khách mới hôm nay<button onClick={() => setTimeFilter('all')} className="ml-1 hover:text-green-900"><X size={14}/></button></span>)}
             {isUnacknowledgedFilter && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold animate-fade-in"><UserX size={14} /> Đang xem: Khách chưa được TVBH tiếp nhận<button onClick={() => setIsUnacknowledgedFilter(false)} className="ml-1 hover:text-purple-900"><X size={14}/></button></span>)}
             {isExpiredLongTermFilter && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold animate-fade-in"><AlertTriangle size={14} /> Đang xem: Khách CS Dài hạn đã đến hạn (Hết hạn)<button onClick={() => setIsExpiredLongTermFilter(false)} className="ml-1 hover:text-blue-900"><X size={14}/></button></span>)}
         </div>
@@ -681,6 +702,24 @@ const CustomerList: React.FC = () => {
         
         {/* FILTERS & EXPORT */}
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto">
+            {/* Time Filter */}
+            <div className="relative min-w-[140px]">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <select 
+                    value={timeFilter} 
+                    onChange={(e) => setTimeFilter(e.target.value as any)}
+                    className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-8 text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all appearance-none cursor-pointer"
+                >
+                    <option value="all">Tất cả</option>
+                    <option value="today">Hôm nay</option>
+                    <option value="this_month">Tháng này</option>
+                    <option value="last_month">Tháng trước</option>
+                    <option value="quarter">Quý này</option>
+                    <option value="year">Năm nay</option>
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
+            </div>
+
             {/* Team Filter */}
             {isAdmin && (
                 <div className="relative min-w-[150px]">

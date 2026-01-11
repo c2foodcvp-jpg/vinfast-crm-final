@@ -126,11 +126,11 @@ const Login: React.FC = () => {
                 </div>
                 <h1 className="text-4xl font-bold mb-4 leading-tight">Quản lý khách hàng<br/><span className="text-primary-400">Chuyên nghiệp</span></h1>
                 <p className="text-blue-100/80 text-sm leading-relaxed max-w-sm">
-                    Hệ thống CRM tối ưu dành riêng cho đội ngũ kinh doanh VinFast. Tăng tốc độ chốt đơn, quản lý dòng tiền và chăm sóc khách hàng hiệu quả.
+                    Hệ thống CRM tối ưu dành riêng cho đội ngũ kinh doanh VinFast. Tăng tốc độ chốt đơn, quản lý dòng tiền và chăm sóc khách hàng hiệu quả. Còn chờ gì nữa mua ngay đi !
                 </p>
             </div>
             <div className="relative z-10 text-xs text-blue-200/50">
-                © 2025 VinFast CRM Enterprise
+                © 2025 VinFast CRM by Nguyên Hồ
             </div>
             
             {/* Overlay Pattern */}

@@ -29,7 +29,7 @@ const Dashboard: React.FC = () => {
   
   // Filter States
   const [selectedTeam, setSelectedTeam] = useState<string>('all');
-  const [timeFilter, setTimeFilter] = useState<'this_month' | 'last_month' | 'quarter' | 'year' | 'all'>('this_month');
+  const [timeFilter, setTimeFilter] = useState<'today' | 'this_month' | 'last_month' | 'quarter' | 'year' | 'all'>('today');
 
   // Stats States
   const [stats, setStats] = useState({ total: 0, new: 0, won: 0, potential: 0 });
@@ -204,7 +204,10 @@ const Dashboard: React.FC = () => {
       let start = new Date(0); // Epoch
       let end = new Date();
 
-      if (timeFilter === 'this_month') {
+      if (timeFilter === 'today') {
+          start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+      } else if (timeFilter === 'this_month') {
           start = new Date(now.getFullYear(), now.getMonth(), 1);
           end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
       } else if (timeFilter === 'last_month') {
@@ -272,7 +275,10 @@ const Dashboard: React.FC = () => {
       let start = new Date(0);
       let end = new Date();
 
-      if (timeFilter === 'this_month') {
+      if (timeFilter === 'today') {
+          start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+          end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+      } else if (timeFilter === 'this_month') {
           start = new Date(now.getFullYear(), now.getMonth(), 1);
           end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
       } else if (timeFilter === 'last_month') {
@@ -448,6 +454,7 @@ const Dashboard: React.FC = () => {
                   onChange={(e) => setTimeFilter(e.target.value as any)}
                   className="bg-transparent text-sm font-bold text-gray-700 outline-none cursor-pointer"
               >
+                  <option value="today">Hôm nay</option>
                   <option value="this_month">Tháng này</option>
                   <option value="last_month">Tháng trước</option>
                   <option value="quarter">Quý này</option>
