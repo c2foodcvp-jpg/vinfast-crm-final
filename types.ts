@@ -63,7 +63,7 @@ export interface UserProfile {
   status: UserStatus;
   avatar_url?: string;
   manager_id?: string | null;
-  kpi_target?: number; // Target number of cars per month
+  kpi_target?: number; // Deprecated: Use EmployeeKPI table
   is_part_time?: boolean; // New Flag for Part-time
   profit_share_ratio?: number; // Custom profit share ratio (optional)
   
@@ -73,6 +73,15 @@ export interface UserProfile {
 
   created_at?: string;
   discord_config?: any;
+}
+
+export interface EmployeeKPI {
+  id: string;
+  user_id: string;
+  month: number;
+  year: number;
+  target: number;
+  updated_at?: string;
 }
 
 export interface Customer {

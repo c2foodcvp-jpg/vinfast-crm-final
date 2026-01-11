@@ -2,10 +2,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, UserProfile, Transaction } from '../types';
+import { Customer, CustomerStatus, UserProfile, Transaction, EmployeeKPI } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  ArrowLeft, Users, CheckCircle, Ban, TrendingUp, Calendar, Phone, MapPin, CarFront, Loader2, User, Clock, AlertTriangle, BadgeDollarSign, Wallet, ArrowUpRight, ArrowDownLeft, Building2, Target, Trophy, X, Save, UserX, Hand, Flame, Briefcase
+  ArrowLeft, Users, CheckCircle, Ban, TrendingUp, Calendar, Phone, MapPin, CarFront, Loader2, User, Clock, AlertTriangle, BadgeDollarSign, Wallet, ArrowUpRight, ArrowDownLeft, Building2, Target, Trophy, X, Save, UserX, Hand, Flame, Briefcase, Database, Copy, Terminal
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
 
@@ -19,13 +19,23 @@ const EmployeeDetail: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // KPI Logic
+  const [currentMonthKPI, setCurrentMonthKPI] = useState<number>(0);
+  
   // KPI Modal
   const [showKpiModal, setShowKpiModal] = useState(false);
-  const [newKpiTarget, setNewKpiTarget] = useState('');
+  const [kpiForm, setKpiForm] = useState({ 
+      target: '', 
+      month: new Date().getMonth() + 1, 
+      year: new Date().getFullYear() 
+  });
   const [isSavingKpi, setIsSavingKpi] = useState(false);
 
   // Tabs State
   const [activeTab, setActiveTab] = useState<'due' | 'overdue' | 'longterm' | 'won' | 'stopped' | 'all'>('due');
+
+  // SQL Helper
+  const [showSql, setShowSql] = useState(false);
 
   // GMT+7 Helper
   const getLocalTodayStr = () => {
@@ -51,20 +61,46 @@ const EmployeeDetail: React.FC = () => {
       const { data: empData, error: empError } = await supabase.from('profiles').select('*').eq('id', id).single();
       if (empError) throw empError;
       setEmployee(empData as UserProfile);
-      setNewKpiTarget(empData.kpi_target?.toString() || '0');
 
       // 2. Fetch Customers
       const { data: custData, error: custError } = await supabase.from('customers').select('*').eq('creator_id', id).order('created_at', { ascending: false });
       if (custError) throw custError;
       setCustomers(custData as Customer[]);
 
-      // 3. Fetch Transactions (History of In/Out for this employee)
+      // 3. Fetch Transactions
       const { data: transData, error: transError } = await supabase.from('transactions').select('*').eq('user_id', id).order('created_at', { ascending: false });
       if (transError) throw transError;
       setTransactions(transData as Transaction[]);
 
+      // 4. Fetch Current Month KPI
+      const currentMonth = new Date().getMonth() + 1;
+      const currentYear = new Date().getFullYear();
+      try {
+          const { data: kpiData, error: kpiError } = await supabase.from('employee_kpis')
+              .select('target')
+              .eq('user_id', id)
+              .eq('month', currentMonth)
+              .eq('year', currentYear)
+              .maybeSingle();
+          
+          if (kpiError) {
+              // Check for table missing error (42P01 or 404 from REST)
+              if (kpiError.code === '42P01' || kpiError.message?.includes('404')) {
+                  setShowSql(true);
+                  setCurrentMonthKPI(empData.kpi_target || 0); // Fallback to old field
+              } else {
+                  console.error(kpiError);
+              }
+          } else {
+              setCurrentMonthKPI(kpiData ? kpiData.target : (empData.kpi_target || 0));
+          }
+      } catch (e) {
+          // Fallback if table fetch fails completely
+          setCurrentMonthKPI(empData.kpi_target || 0);
+      }
+
     } catch (err) {
-      console.error("Error fetching employee details:", err);
+      console.error("Error fetching details:", err);
     } finally {
       setLoading(false);
     }
@@ -73,19 +109,66 @@ const EmployeeDetail: React.FC = () => {
   const handleUpdateKpi = async () => {
       setIsSavingKpi(true);
       try {
-          const target = parseInt(newKpiTarget);
-          const { error } = await supabase.from('profiles').update({ kpi_target: isNaN(target) ? 0 : target }).eq('id', id);
+          const target = parseInt(kpiForm.target);
+          if (isNaN(target)) throw new Error("KPI phải là số.");
+
+          // Upsert into employee_kpis
+          const { error } = await supabase.from('employee_kpis').upsert({
+              user_id: id,
+              month: kpiForm.month,
+              year: kpiForm.year,
+              target: target,
+              updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id, month, year' });
+
           if (error) throw error;
           
-          setEmployee(prev => prev ? ({ ...prev, kpi_target: target }) : null);
+          // Refresh if setting for current month
+          const currentMonth = new Date().getMonth() + 1;
+          const currentYear = new Date().getFullYear();
+          if (kpiForm.month === currentMonth && kpiForm.year === currentYear) {
+              setCurrentMonthKPI(target);
+          }
+
           setShowKpiModal(false);
-          alert("Đã cập nhật KPI!");
-      } catch (e) {
-          alert("Lỗi cập nhật KPI.");
+          alert(`Đã cập nhật KPI tháng ${kpiForm.month}/${kpiForm.year}!`);
+      } catch (e: any) {
+          console.error(e);
+          // Check for table missing (404 Not Found usually implies table doesn't exist in Supabase REST)
+          if (e.code === '42P01' || e.message?.includes('404') || e.code === 'PGRST204') {
+              alert("Lỗi: Bảng dữ liệu KPI chưa được tạo. Vui lòng chạy mã SQL setup bên dưới.");
+              setShowSql(true);
+          } else {
+              alert("Lỗi: " + e.message);
+          }
       } finally {
           setIsSavingKpi(false);
       }
   };
+
+  const setupSQL = `
+-- 1. Tạo bảng KPI nhân viên theo tháng
+create table if not exists public.employee_kpis (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references public.profiles(id),
+  month int not null,
+  year int not null,
+  target int default 0,
+  updated_at timestamptz default now(),
+  unique(user_id, month, year)
+);
+
+-- 2. Bật bảo mật RLS
+alter table public.employee_kpis enable row level security;
+
+-- 3. Policy: Mọi người xem được
+create policy "Read KPIs" on public.employee_kpis for select using (true);
+
+-- 4. Policy: Chỉ Admin/Mod được sửa/thêm
+create policy "Write KPIs" on public.employee_kpis for all using (
+  exists (select 1 from profiles where id = auth.uid() and role in ('admin', 'mod'))
+);
+`;
 
   // --- STATS CALCULATION ---
   const stats = useMemo(() => {
@@ -93,18 +176,8 @@ const EmployeeDetail: React.FC = () => {
       const won = customers.filter(c => c.status === CustomerStatus.WON).length;
       const lost = customers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING).length;
       const active = total - won - lost; 
-      
-      // Khách tiềm năng = Chỉ tính khách HOT
-      const potentialHot = customers.filter(c => 
-          c.classification === 'Hot' && 
-          c.status !== CustomerStatus.WON && 
-          c.status !== CustomerStatus.LOST && 
-          c.status !== CustomerStatus.LOST_PENDING
-      ).length;
-
-      // Tính số khách chưa tiếp nhận
+      const potentialHot = customers.filter(c => c.classification === 'Hot' && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.LOST_PENDING).length;
       const unacknowledged = customers.filter(c => c.status === CustomerStatus.NEW && c.is_acknowledged === false).length;
-      
       const conversionRate = total > 0 ? ((won / total) * 100).toFixed(1) : '0.0';
       return { total, won, lost, active, potentialHot, conversionRate, unacknowledged };
   }, [customers]);
@@ -120,17 +193,12 @@ const EmployeeDetail: React.FC = () => {
           return d.getMonth() + 1 === currentMonth && d.getFullYear() === currentYear;
       }).length;
 
-      const target = employee?.kpi_target || 0;
+      const target = currentMonthKPI || 0;
       const percentage = target > 0 ? Math.min(100, Math.round((wonThisMonth / target) * 100)) : 0;
       
       return { wonThisMonth, target, percentage };
-  }, [customers, employee]);
+  }, [customers, currentMonthKPI]);
 
-  const kpiChartData = [
-      { name: 'Đã đạt', value: kpiData.wonThisMonth },
-      { name: 'Còn lại', value: Math.max(0, kpiData.target - kpiData.wonThisMonth) }
-  ];
-  
   // --- FINANCIAL CHART DATA (Monthly) ---
   const financialData = useMemo(() => {
       const last6Months = [];
@@ -183,44 +251,16 @@ const EmployeeDetail: React.FC = () => {
 
   // --- CUSTOMER FILTER LOGIC ---
   const filteredCustomers = useMemo(() => {
-      // Hàm kiểm tra chung để loại bỏ khách đã xong
       const isActiveCustomer = (c: Customer) => c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST;
-
       switch (activeTab) {
-          case 'due':
-              return customers.filter(c => {
-                  if (!isActiveCustomer(c) || c.is_special_care) return false;
-                  // Logic: Nếu ngày hẹn = hôm nay, coi là đến hạn (bất kể có cờ dài hạn hay không)
-                  return c.recare_date === todayStr;
-              });
-          case 'overdue':
-              return customers.filter(c => {
-                  if (!isActiveCustomer(c) || c.is_special_care) return false;
-                  // Logic: Nếu không có ngày hẹn -> không quá hạn (hoặc logic khác tùy nhu cầu)
-                  if (!c.recare_date) return false;
-                  // Logic QUAN TRỌNG: Nếu ngày hẹn < hôm nay, hệ thống TỰ ĐỘNG coi là quá hạn 
-                  // Bất kể trong DB c.is_long_term là true hay false.
-                  return c.recare_date < todayStr;
-              });
-          case 'longterm':
-              return customers.filter(c => {
-                  // Logic: Chỉ hiển thị ở tab Dài hạn nếu:
-                  // 1. Đang bật cờ dài hạn
-                  // 2. VÀ Ngày hẹn phải là TƯƠNG LAI (> hôm nay).
-                  // Nếu ngày hẹn <= hôm nay, nó đã rơi vào case 'due' hoặc 'overdue' ở trên rồi.
-                  return isActiveCustomer(c) && c.is_long_term === true && c.recare_date && c.recare_date > todayStr;
-              });
-          case 'won':
-              return customers.filter(c => c.status === CustomerStatus.WON);
-          case 'stopped':
-              return customers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING);
-          case 'all':
-          default:
-              return customers;
+          case 'due': return customers.filter(c => isActiveCustomer(c) && !c.is_special_care && c.recare_date === todayStr);
+          case 'overdue': return customers.filter(c => isActiveCustomer(c) && !c.is_special_care && c.recare_date && c.recare_date < todayStr);
+          case 'longterm': return customers.filter(c => isActiveCustomer(c) && c.is_long_term === true && c.recare_date && c.recare_date > todayStr);
+          case 'won': return customers.filter(c => c.status === CustomerStatus.WON);
+          case 'stopped': return customers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING);
+          case 'all': default: return customers;
       }
   }, [customers, activeTab, todayStr]);
-
-  const filteredCustomerIds = useMemo(() => filteredCustomers.map(c => c.id), [filteredCustomers]);
 
   const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
 
@@ -230,24 +270,42 @@ const EmployeeDetail: React.FC = () => {
   return (
     <div className="space-y-6 pb-20">
       {/* Header */}
-      <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/employees')} className="p-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
-              <ArrowLeft size={20} className="text-gray-600" />
-          </button>
-          <div>
-              <div className="flex items-center gap-2">
-                  <h1 className="text-2xl font-bold text-gray-900">{employee.full_name}</h1>
-                  {employee.is_part_time && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-0.5 rounded border border-orange-200 uppercase">Part-time</span>}
+      <div className="flex flex-col md:flex-row items-center gap-4">
+          <div className="flex items-center gap-4 w-full md:w-auto">
+              <button onClick={() => navigate('/employees')} className="p-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                  <ArrowLeft size={20} className="text-gray-600" />
+              </button>
+              <div>
+                  <div className="flex items-center gap-2">
+                      <h1 className="text-2xl font-bold text-gray-900">{employee.full_name}</h1>
+                      {employee.is_part_time && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-0.5 rounded border border-orange-200 uppercase">Part-time</span>}
+                  </div>
+                  <p className="text-gray-500 text-sm">{employee.email} • {employee.phone}</p>
               </div>
-              <p className="text-gray-500 text-sm">{employee.email} • {employee.phone}</p>
           </div>
           <div className="ml-auto flex items-center gap-3">
               <div className="px-3 py-1 bg-primary-50 text-primary-700 rounded-lg text-xs font-bold uppercase">{employee.role}</div>
               {!employee.is_part_time && (
-                  <button onClick={() => setShowKpiModal(true)} className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-purple-700"><Target size={14}/> Set KPI</button>
+                  <button onClick={() => { setKpiForm({target: currentMonthKPI.toString(), month: new Date().getMonth()+1, year: new Date().getFullYear()}); setShowKpiModal(true); }} className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-purple-700"><Target size={14}/> Set KPI</button>
               )}
           </div>
       </div>
+
+      {showSql && isAdmin && (
+          <div className="bg-slate-900 rounded-xl p-4 border border-slate-700 shadow-xl overflow-hidden animate-fade-in relative">
+              <div className="flex justify-between items-center mb-2">
+                  <span className="text-green-400 font-mono text-xs font-bold flex items-center gap-2"><Terminal size={14}/> Setup Database (SQL)</span>
+                  <button onClick={() => { navigator.clipboard.writeText(setupSQL); alert("Đã copy SQL!"); }} className="text-xs bg-white/10 text-white px-2 py-1 rounded hover:bg-white/20 flex items-center gap-1">
+                      <Copy size={12}/> Copy
+                  </button>
+              </div>
+              <p className="text-gray-400 text-xs mb-2">Lỗi "404 Not Found" hoặc "relation does not exist" nghĩa là bảng `employee_kpis` chưa được tạo. Hãy chạy mã này:</p>
+              <pre className="text-xs text-slate-300 font-mono overflow-x-auto p-2 bg-black/30 rounded border border-white/10">
+                  {setupSQL}
+              </pre>
+              <button onClick={() => setShowSql(false)} className="absolute top-2 right-2 p-1 text-gray-500 hover:text-white"><X size={16}/></button>
+          </div>
+      )}
 
       {/* KPI & STATS CARDS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -415,16 +473,38 @@ const EmployeeDetail: React.FC = () => {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6">
                   <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Target className="text-purple-600"/> Thiết lập KPI Tháng</h3>
+                      <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Target className="text-purple-600"/> Thiết lập KPI</h3>
                       <button onClick={() => setShowKpiModal(false)}><X className="text-gray-400 hover:text-gray-600" /></button>
                   </div>
                   <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">Tháng</label>
+                              <select 
+                                  value={kpiForm.month}
+                                  onChange={(e) => setKpiForm({...kpiForm, month: parseInt(e.target.value)})}
+                                  className="w-full border p-2 rounded-xl"
+                              >
+                                  {Array.from({length: 12}, (_, i) => i + 1).map(m => <option key={m} value={m}>Tháng {m}</option>)}
+                              </select>
+                          </div>
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">Năm</label>
+                              <select 
+                                  value={kpiForm.year}
+                                  onChange={(e) => setKpiForm({...kpiForm, year: parseInt(e.target.value)})}
+                                  className="w-full border p-2 rounded-xl"
+                              >
+                                  {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+                              </select>
+                          </div>
+                      </div>
                       <div>
-                          <label className="block text-sm font-bold text-gray-700 mb-1">Mục tiêu số xe chốt / tháng</label>
+                          <label className="block text-sm font-bold text-gray-700 mb-1">Mục tiêu số xe</label>
                           <input 
                               type="number"
-                              value={newKpiTarget}
-                              onChange={(e) => setNewKpiTarget(e.target.value)}
+                              value={kpiForm.target}
+                              onChange={(e) => setKpiForm({...kpiForm, target: e.target.value})}
                               className="w-full bg-white border border-gray-300 rounded-xl px-4 py-2 text-gray-900 font-bold outline-none focus:border-purple-500"
                               placeholder="Ví dụ: 5"
                           />

@@ -21,19 +21,25 @@ const COLORS = {
 const Dashboard: React.FC = () => {
   const { userProfile, isAdmin, isMod } = useAuth();
   const navigate = useNavigate();
+  
+  // Data States
+  const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+  const [teamMembers, setTeamMembers] = useState<UserProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Filter States
+  const [selectedTeam, setSelectedTeam] = useState<string>('all');
+  const [timeFilter, setTimeFilter] = useState<'this_month' | 'last_month' | 'quarter' | 'year' | 'all'>('this_month');
+
+  // Stats States
   const [stats, setStats] = useState({ total: 0, new: 0, won: 0, potential: 0 });
   const [alerts, setAlerts] = useState({ 
       due: 0, overdue: 0, pendingCustomers: 0, pendingEmployees: 0, pendingTransfers: 0, pendingDeals: 0, assignedTodayToMe: 0, pendingAckCount: 0, pendingAckReps: 0, expiredLongTerm: 0, pendingFinance: 0
   });
-  const [loading, setLoading] = useState(true);
   const [statusData, setStatusData] = useState<any[]>([]);
   const [leadData, setLeadData] = useState<any[]>([]);
-  const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
-  const [teamMembers, setTeamMembers] = useState<UserProfile[]>([]);
+  
   const [carList, setCarList] = useState<string[]>(DEFAULT_CAR_MODELS);
-
-  // Performance Filter State (For Admin to filter by specific teams)
-  const [selectedTeam, setSelectedTeam] = useState<string>('all');
 
   // Notification Bell State
   const [isNotiOpen, setIsNotiOpen] = useState(false);
@@ -73,6 +79,13 @@ const Dashboard: React.FC = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [userProfile, selectedTeam]); 
 
+  // --- RE-CALCULATE STATS WHEN FILTER CHANGES ---
+  useEffect(() => {
+      if (allCustomers.length > 0) {
+          calculateStats();
+      }
+  }, [timeFilter, allCustomers]);
+
   const fetchCarModels = async () => {
       try {
           const { data } = await supabase.from('car_models').select('name').order('created_at', { ascending: false });
@@ -109,7 +122,6 @@ const Dashboard: React.FC = () => {
               teamIds = members.map(m => m.id);
           } else {
               // Regular User (Sales): STRICTLY SELF ONLY
-              // Force teamIds to only contain current user ID
               members = [userProfile];
               teamIds = [userProfile.id];
           }
@@ -124,7 +136,6 @@ const Dashboard: React.FC = () => {
               if (teamIds.length > 0) {
                   query = query.in('creator_id', teamIds);
               } else {
-                  // Fallback safety: If no team IDs found (shouldn't happen), show nothing or self
                   query = query.eq('creator_id', userProfile.id);
               }
           } else {
@@ -138,9 +149,9 @@ const Dashboard: React.FC = () => {
           if (error) throw error;
           const customers = customersData as Customer[] || [];
           setAllCustomers(customers);
-
-          // 2. Calculate Stats
-          await calculateDashboardStats(customers, members, teamIds);
+          
+          // Alerts are calculated on ALL fetched data (Operational)
+          await calculateAlerts(customers, teamIds);
 
       } catch (err) {
           console.error("Error fetching isolated data:", err);
@@ -149,35 +160,12 @@ const Dashboard: React.FC = () => {
       }
   };
 
-  const calculateDashboardStats = async (customers: Customer[], members: UserProfile[], teamIds: string[]) => {
-      const total = customers.length;
-      
-      const newLeads = customers.filter((c: any) => {
-          if (!c.created_at) return false;
-          const d = new Date(c.created_at);
-          const vnDate = new Date(d.getTime() + (7 * 60 * 60 * 1000));
-          const cDate = vnDate.toISOString().split('T')[0];
-          return cDate === todayStr;
-      }).length;
-
-      const won = customers.filter((c: any) => c.status === CustomerStatus.WON).length;
-      
-      // LOGIC: Potential = Special Care only
-      const potential = customers.filter((c: any) => 
-          c.is_special_care === true && 
-          c.status !== CustomerStatus.WON && 
-          c.status !== CustomerStatus.LOST
-      ).length;
-
-      setStats({ total, new: newLeads, won, potential });
-
-      // Alerts Calculation
+  const calculateAlerts = async (customers: Customer[], teamIds: string[]) => {
       const dueCount = customers.filter((c: any) => !c.is_special_care && !c.is_long_term && c.recare_date === todayStr && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length;
       const overdueCount = customers.filter((c: any) => !c.is_special_care && !c.is_long_term && c.recare_date && c.recare_date < todayStr && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length;
       const expiredLongTerm = customers.filter((c: any) => c.is_long_term && c.recare_date && c.recare_date <= todayStr && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
       const assignedTodayToMe = customers.filter((c: Customer) => c.status === CustomerStatus.NEW && c.is_acknowledged === false && c.creator_id === userProfile?.id).length;
       
-      // Only show pending ACKs for team if Admin/Mod
       const unacknowledgedLeads = (isAdmin || isMod) 
           ? customers.filter((c: any) => c.status === CustomerStatus.NEW && c.is_acknowledged === false && c.sales_rep)
           : [];
@@ -185,11 +173,9 @@ const Dashboard: React.FC = () => {
       const pendingAckCount = unacknowledgedLeads.length;
       const pendingAckReps = new Set(unacknowledgedLeads.map((c: any) => c.sales_rep)).size;
       
-      // Pending Finance 
       let pendingFinance = 0;
       if (isAdmin || isMod) {
           let fQuery = supabase.from('transactions').select('*', {count: 'exact', head: true}).eq('status', 'pending');
-          // If filtered by team, also filter finance
           if (!isAdmin || (isAdmin && selectedTeam !== 'all')) {
               fQuery = fQuery.in('user_id', teamIds);
           }
@@ -210,44 +196,112 @@ const Dashboard: React.FC = () => {
       }
 
       setAlerts({ due: dueCount, overdue: overdueCount, pendingCustomers, pendingEmployees, pendingTransfers, pendingDeals, assignedTodayToMe, pendingAckCount, pendingAckReps, expiredLongTerm, pendingFinance });
+  };
 
-      const countWon = customers.filter(c => c.status === CustomerStatus.WON).length;
-      const countLost = customers.filter(c => c.status === CustomerStatus.LOST).length;
-      const countPotential = customers.filter(c => c.is_special_care && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
-      const countNew = customers.filter(c => !c.is_special_care && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
+  const calculateStats = () => {
+      // 1. Filter customers based on Time Range
+      const now = new Date();
+      let start = new Date(0); // Epoch
+      let end = new Date();
+
+      if (timeFilter === 'this_month') {
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+      } else if (timeFilter === 'last_month') {
+          start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      } else if (timeFilter === 'quarter') {
+          const q = Math.floor(now.getMonth() / 3);
+          start = new Date(now.getFullYear(), q * 3, 1);
+          end = new Date(now.getFullYear(), (q + 1) * 3, 0, 23, 59, 59);
+      } else if (timeFilter === 'year') {
+          start = new Date(now.getFullYear(), 0, 1);
+          end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+      }
+
+      const filteredCustomers = timeFilter === 'all' 
+          ? allCustomers 
+          : allCustomers.filter(c => {
+              const d = new Date(c.created_at);
+              return d >= start && d <= end;
+          });
+
+      // 2. Calculate Stats from Filtered List
+      const total = filteredCustomers.length;
+      const newLeads = filteredCustomers.filter(c => c.status === CustomerStatus.NEW || c.status === CustomerStatus.CONTACTED).length; // "New" in period context usually means added
+      const won = filteredCustomers.filter(c => c.status === CustomerStatus.WON).length;
+      const potential = filteredCustomers.filter(c => c.is_special_care === true).length;
+
+      setStats({ total, new: newLeads, won, potential });
+
+      // 3. Status Pie Chart
+      const countWon = filteredCustomers.filter(c => c.status === CustomerStatus.WON).length;
+      const countLost = filteredCustomers.filter(c => c.status === CustomerStatus.LOST).length;
+      const countPotential = filteredCustomers.filter(c => c.is_special_care && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
+      const countOthers = filteredCustomers.length - countWon - countLost - countPotential;
 
       const pieData = [
-          { name: 'Mới / Đang CS', value: countNew, color: COLORS.NEW },
+          { name: 'Mới / Đang CS', value: Math.max(0, countOthers), color: COLORS.NEW },
           { name: 'Chốt đơn', value: countWon, color: COLORS.WON },
           { name: 'Đã hủy', value: countLost, color: COLORS.LOST },
           { name: 'Tiềm năng', value: countPotential, color: COLORS.POTENTIAL },
       ].filter(d => d.value > 0);
-      
       setStatusData(pieData);
 
-      // Trend Data (Last 7 Days)
+      // 4. Trend Data (Last 7 Days - Always Realtime trend for UX, or Filtered?)
+      // Let's make "Recent Trend" strictly reflect the LAST 7 DAYS regardless of filter for "Activity Monitor" purposes,
+      // OR we can make it distribution of the selected period.
+      // Decision: Keep "Last 7 Days" as an operational metric (Recent Activity).
       const last7Days = [];
-      const now = new Date();
-      const vnNow = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+      const vnNow = new Date(new Date().getTime() + (7 * 60 * 60 * 1000));
       for (let i = 6; i >= 0; i--) {
           const d = new Date(vnNow);
           d.setDate(vnNow.getDate() - i);
           const dateStr = d.toISOString().split('T')[0];
           const [y, m, day] = dateStr.split('-');
-          const count = customers.filter((c: any) => c.created_at && c.created_at.startsWith(dateStr)).length;
+          // Check against ALL customers to show recent global trend
+          const count = allCustomers.filter((c: any) => c.created_at && c.created_at.startsWith(dateStr)).length;
           last7Days.push({ name: `${day}/${m}`, customers: count });
       }
       setLeadData(last7Days);
   };
 
+  // Memoized Filtered List for Rep Stats
+  const filteredRepStatsList = useMemo(() => {
+      const now = new Date();
+      let start = new Date(0);
+      let end = new Date();
+
+      if (timeFilter === 'this_month') {
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+      } else if (timeFilter === 'last_month') {
+          start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      } else if (timeFilter === 'quarter') {
+          const q = Math.floor(now.getMonth() / 3);
+          start = new Date(now.getFullYear(), q * 3, 1);
+          end = new Date(now.getFullYear(), (q + 1) * 3, 0, 23, 59, 59);
+      } else if (timeFilter === 'year') {
+          start = new Date(now.getFullYear(), 0, 1);
+          end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+      }
+
+      if (timeFilter === 'all') return allCustomers;
+      return allCustomers.filter(c => {
+          const d = new Date(c.created_at);
+          return d >= start && d <= end;
+      });
+  }, [allCustomers, timeFilter]);
+
   const repStats = useMemo(() => {
       // Only show rep stats for Admin or Mod
       if (!isAdmin && !isMod) return [];
-      if (!teamMembers.length || !allCustomers.length) return [];
+      if (!teamMembers.length || !filteredRepStatsList.length) return [];
       let targetProfiles = teamMembers.filter(p => p.role !== UserRole.ADMIN && p.status === 'active');
       
       return targetProfiles.map(rep => {
-          const repCustomers = allCustomers.filter(c => c.creator_id === rep.id);
+          const repCustomers = filteredRepStatsList.filter(c => c.creator_id === rep.id);
           const total = repCustomers.length;
           const won = repCustomers.filter(c => c.status === CustomerStatus.WON).length;
           const stopped = repCustomers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING).length;
@@ -255,7 +309,7 @@ const Dashboard: React.FC = () => {
           const conversionRate = total > 0 ? ((won / total) * 100).toFixed(1) : '0.0';
           return { id: rep.id, name: rep.full_name, avatar: rep.avatar_url, role: rep.role, total, active, won, stopped, conversionRate };
       }).sort((a, b) => b.won - a.won); 
-  }, [teamMembers, allCustomers, isAdmin, isMod, selectedTeam]);
+  }, [teamMembers, filteredRepStatsList, isAdmin, isMod, selectedTeam]);
 
   // For Admin Filter Dropdown
   const [allManagers, setAllManagers] = useState<{id: string, name: string}[]>([]);
@@ -381,18 +435,34 @@ const Dashboard: React.FC = () => {
     <div className="space-y-6 pb-10">
       
       {/* HEADER & ALERTS */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <div><h1 className="text-2xl font-bold text-gray-900">Tổng quan {(isAdmin || isMod) ? '(Team)' : '(Cá nhân)'}</h1><p className="text-gray-500">Xin chào, {userProfile?.full_name}!</p></div>
         
         {/* Actions Container - Updated for better mobile alignment */}
-        <div className="flex w-full md:w-auto items-center justify-end gap-3">
+        <div className="flex w-full xl:w-auto items-center justify-end gap-3 flex-wrap">
+          {/* TIME FILTER */}
+          <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
+              <Calendar size={16} className="text-gray-500"/>
+              <select 
+                  value={timeFilter} 
+                  onChange={(e) => setTimeFilter(e.target.value as any)}
+                  className="bg-transparent text-sm font-bold text-gray-700 outline-none cursor-pointer"
+              >
+                  <option value="this_month">Tháng này</option>
+                  <option value="last_month">Tháng trước</option>
+                  <option value="quarter">Quý này</option>
+                  <option value="year">Năm nay</option>
+                  <option value="all">Tất cả</option>
+              </select>
+          </div>
+
           <div className="relative" ref={notiRef}>
               <button onClick={() => setIsNotiOpen(!isNotiOpen)} className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-600 hover:text-primary-600 hover:bg-gray-50 shadow-sm transition-all relative">
                   <Bell size={20} />
                   {displayNotifCount > 0 && (<span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white animate-pulse">{displayNotifCount > 9 ? '9+' : displayNotifCount}</span>)}
               </button>
               {isNotiOpen && (
-                  <div className="absolute right-[-110px] md:right-0 top-full mt-2 w-[90vw] sm:w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-[60] overflow-hidden animate-fade-in origin-top-right ring-1 ring-black/5">
+                  <div className="absolute right-[-60px] sm:right-0 top-full mt-2 w-[85vw] sm:w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-[60] overflow-hidden animate-fade-in origin-top-right ring-1 ring-black/5">
                       <div className="p-4 border-b border-gray-50 bg-gray-50/50"><h4 className="font-bold text-gray-800 flex items-center gap-2"><BellRing size={16} className="text-primary-600"/> Thông báo</h4></div>
                       <div className="max-h-[300px] overflow-y-auto">
                           {displayNotifCount === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Không có thông báo mới.</div> : (
@@ -427,8 +497,8 @@ const Dashboard: React.FC = () => {
 
       {/* STAT CARDS */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Tổng khách hàng" value={stats.total} icon={Users} color="bg-blue-500" onClick={() => navigate('/customers', { state: { initialTab: 'all' } })} />
-        <StatCard title="Khách mới (Hôm nay)" value={stats.new} icon={Plus} color="bg-emerald-500" onClick={() => navigate('/customers', { state: { filterType: 'today' } })} />
+        <StatCard title="Tổng khách hàng (Lọc)" value={stats.total} icon={Users} color="bg-blue-500" onClick={() => navigate('/customers', { state: { initialTab: 'all' } })} />
+        <StatCard title="Khách mới (Trong kỳ)" value={stats.new} icon={Plus} color="bg-emerald-500" onClick={() => navigate('/customers', { state: { filterType: 'today' } })} />
         <StatCard title="Tiềm năng (Hot/Special)" value={stats.potential} icon={TrendingUp} color="bg-red-500" onClick={() => navigate('/customers', { state: { initialTab: 'special' } })} />
         <StatCard title="Đã chốt đơn" value={stats.won} icon={CheckCircle} color="bg-green-500" onClick={() => navigate('/customers', { state: { initialTab: 'won' } })} />
       </div>
@@ -436,7 +506,7 @@ const Dashboard: React.FC = () => {
       {/* CHARTS */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-2xl bg-white p-6 shadow-sm border border-gray-100 h-[400px] flex flex-col">
-          <h3 className="mb-6 text-lg font-bold text-gray-900">Phân tích lượng khách (07 ngày qua)</h3>
+          <h3 className="mb-6 text-lg font-bold text-gray-900">Hoạt động gần đây (7 ngày qua)</h3>
           <div className="flex-1 w-full h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={leadData}>
@@ -451,7 +521,7 @@ const Dashboard: React.FC = () => {
         </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-sm border border-gray-100 h-[400px] flex flex-col">
-          <h3 className="mb-6 text-lg font-bold text-gray-900">Phân loại khách hàng</h3>
+          <h3 className="mb-6 text-lg font-bold text-gray-900">Phân loại khách hàng (Theo bộ lọc)</h3>
           <div className="flex-1 w-full h-[250px] relative">
              {statusData.length > 0 ? (
                <ResponsiveContainer width="100%" height="100%">
@@ -476,7 +546,7 @@ const Dashboard: React.FC = () => {
       {(isAdmin || isMod) && (
           <div className="rounded-2xl bg-white shadow-sm border border-gray-100 overflow-hidden">
               <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-4">
-                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Briefcase size={20} className="text-primary-600" /> Hiệu suất Kinh doanh</h3>
+                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Briefcase size={20} className="text-primary-600" /> Hiệu suất Kinh doanh (Theo bộ lọc)</h3>
                   {isAdmin && (
                       <div className="relative">
                           <select value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)} className="appearance-none bg-gray-50 border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-medium cursor-pointer">
