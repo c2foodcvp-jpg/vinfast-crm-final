@@ -11,7 +11,8 @@ import {
   BadgeDollarSign, Settings2, Undo2, ExternalLink, Building2, QrCode,
   Percent,
   MinusCircle,
-  Gift
+  Gift,
+  Scale
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis, Legend } from 'recharts';
 
@@ -565,6 +566,19 @@ const Finance: React.FC = () => {
   const collectionData = [
       { name: 'Tổng quan', 'Dự kiến (Sau ứng)': Math.max(0, totalExpectedRevenue - (displayTotalExpense - partTimeSalaryLiability)), 'Đã thu': pnlRevenue }
   ];
+
+  // --- NEW: TOTAL DEBT CALCULATION ---
+  // 1. Total Dealer Debt
+  const totalDealerDebt = pendingDealerDebts.reduce((sum, t) => sum + t.amount, 0);
+
+  // 2. Total Pending Customer Revenue (Contract - Deposited)
+  // Calculate Actual Total Deposits for Filtered Customers (MKT only as per filters)
+  const totalDepositedReal = filteredTransactions
+      .filter(t => t.type === 'deposit' && t.status === 'approved')
+      .reduce((sum, t) => sum + t.amount, 0);
+  
+  const totalCustomerDebt = Math.max(0, totalExpectedRevenue - totalDepositedReal);
+  const totalDebtToCollect = totalDealerDebt + totalCustomerDebt;
   
   const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
 
@@ -623,7 +637,7 @@ const Finance: React.FC = () => {
       </div>
 
       {/* DASHBOARD CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
               <h3 className="font-bold text-gray-700 mb-4">Tổng quan Quỹ (MKT Only)</h3>
               <div className="w-full h-40"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData1} cx="50%" cy="50%" innerRadius={40} outerRadius={70} dataKey="value"><Cell fill="#10b981" /><Cell fill="#ef4444" /><Cell fill="#f59e0b" /></Pie><ReTooltip formatter={(val: number) => formatCurrency(val) + ' VNĐ'} /></PieChart></ResponsiveContainer></div>
@@ -656,6 +670,35 @@ const Finance: React.FC = () => {
               </div>
               <div className="w-full h-px bg-gray-100"></div>
               <div className="text-center bg-blue-50 w-full py-2 rounded-xl border border-blue-100"><p className="text-blue-800 font-bold uppercase text-xs">LỢI NHUẬN RÒNG (NET)</p><p className="text-xl font-bold text-blue-900">{formatCurrency(pnlNet)} VNĐ</p></div>
+          </div>
+
+          {/* NEW CARD: TOTAL DEBT TO COLLECT */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-4">
+              <h3 className="font-bold text-gray-700 flex items-center gap-2"><Scale className="text-orange-500"/> Công nợ phải đòi</h3>
+              
+              <div className="text-center w-full bg-orange-50 py-3 rounded-xl border border-orange-100 mb-2">
+                  <p className="text-orange-800 font-bold uppercase text-xs">TỔNG PHẢI THU</p>
+                  <p className="text-2xl font-bold text-orange-900">{formatCurrency(totalDebtToCollect)} VNĐ</p>
+              </div>
+
+              <div className="w-full space-y-3">
+                  <div className="flex justify-between items-center px-2">
+                      <div className="flex items-center gap-2 text-xs text-gray-600 font-semibold">
+                          <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><User size={12}/></div>
+                          Dư nợ Khách hàng
+                      </div>
+                      <span className="font-bold text-gray-800 text-sm">{formatCurrency(totalCustomerDebt)}</span>
+                  </div>
+                  <div className="w-full h-px bg-gray-100"></div>
+                  <div className="flex justify-between items-center px-2">
+                      <div className="flex items-center gap-2 text-xs text-gray-600 font-semibold">
+                          <div className="p-1.5 bg-purple-100 text-purple-600 rounded-lg"><Building2 size={12}/></div>
+                          Nợ Đại lý
+                      </div>
+                      <span className="font-bold text-gray-800 text-sm">{formatCurrency(totalDealerDebt)}</span>
+                  </div>
+              </div>
+              <p className="text-[10px] text-gray-400 italic text-center w-full mt-1">(*Dư nợ khách = Dự kiến HĐ - Thực nộp)</p>
           </div>
       </div>
 
