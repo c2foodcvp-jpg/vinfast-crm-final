@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../supabaseClient';
 import { 
   LayoutDashboard, Users, LogOut, Menu, X, UserCircle, Briefcase, UserCog, Building2,
-  FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, PiggyBank, CarFront, Landmark, AlertCircle, Box, Settings, User, FileInput, BarChart2, Calendar
+  FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, PiggyBank, CarFront, Landmark, AlertCircle, Box, Settings, User, FileInput, BarChart2, Calendar, Calculator
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -35,6 +35,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const MENU_DEFINITIONS: NavItemDef[] = useMemo(() => [
     { key: 'dashboard', icon: LayoutDashboard, label: 'Tổng quan', path: '/' },
     { key: 'calendar', icon: Calendar, label: 'Lịch làm việc', path: '/calendar' },
+    { key: 'quote', icon: Calculator, label: 'Báo giá Online', path: '/quote' },
     { key: 'analytics', icon: BarChart2, label: 'Phân tích (BI)', path: '/analytics', roleReq: [UserRole.ADMIN, UserRole.MOD] },
     { key: 'customers', icon: Users, label: 'Khách hàng', path: '/customers' },
     { key: 'deals', icon: FileCheck2, label: 'Đơn hàng', path: '/deals' },
@@ -65,7 +66,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         const { count } = await supabase.from('team_fines').select('*', { count: 'exact', head: true }).eq('user_id', userProfile.id).eq('status', 'pending');
         return count || 0;
     }},
-    { key: 'configuration', icon: Settings, label: 'Cấu hình', path: '/configuration', roleReq: [UserRole.ADMIN] },
+    { key: 'configuration', icon: Settings, label: 'Cấu hình', path: '/configuration', roleReq: [UserRole.ADMIN, UserRole.MOD] },
     { key: 'profile', icon: User, label: 'Cá nhân', path: '/profile' },
   ], [userProfile]);
 

@@ -25,6 +25,7 @@ import Inventory from './pages/Inventory';
 import Proposals from './pages/Proposals';
 import Analytics from './pages/Analytics';
 import CalendarPage from './pages/Calendar';
+import OnlineQuote from './pages/OnlineQuote';
 
 const { HashRouter, Routes, Route, Navigate } = ReactRouterDOM as any;
 
@@ -64,8 +65,10 @@ const App: React.FC = () => {
           <Route path="/deals" element={<ProtectedRoute><Deals /></ProtectedRoute>} />
           <Route path="/employees" element={<ProtectedRoute><EmployeeList /></ProtectedRoute>} />
           <Route path="/employees/:id" element={<ProtectedRoute><EmployeeDetail /></ProtectedRoute>} />
-          {/* Changed route to Configuration */}
+          
           <Route path="/configuration" element={<ProtectedRoute><Configuration /></ProtectedRoute>} />
+          <Route path="/quote" element={<ProtectedRoute><OnlineQuote /></ProtectedRoute>} />
+          
           <Route path="/distributors" element={<Navigate to="/configuration" replace />} /> 
           
           <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />

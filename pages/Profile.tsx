@@ -36,8 +36,9 @@ const Profile: React.FC = () => {
   // Define default menu keys for reference
   const DEFAULT_MENU_KEYS = [
       { key: 'dashboard', label: 'Tổng quan' },
-      { key: 'calendar', label: 'Lịch làm việc' }, // Added
-      { key: 'analytics', label: 'Phân tích (BI)' }, // Added
+      { key: 'calendar', label: 'Lịch làm việc' },
+      { key: 'quote', label: 'Báo giá Online' }, // Added Quote
+      { key: 'analytics', label: 'Phân tích (BI)' },
       { key: 'customers', label: 'Khách hàng' },
       { key: 'deals', label: 'Đơn hàng' },
       { key: 'finance', label: 'Tài chính & Quỹ' },

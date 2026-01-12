@@ -54,7 +54,7 @@ export interface QuoteConfigOption {
 // NEW: Quote Configuration (Khuyến mãi & Phí & Bảo hành)
 export interface QuoteConfig {
   id: string;
-  type: 'promotion' | 'fee' | 'gift' | 'membership' | 'warranty'; 
+  type: 'promotion' | 'fee' | 'gift' | 'membership' | 'warranty'; // Added warranty
   name: string;
   value: number; // Giá trị mặc định (Giảm giá cho Membership, 0 cho warranty)
   value_type: 'percent' | 'fixed'; // Giảm % hay tiền mặt
