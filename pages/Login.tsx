@@ -122,7 +122,7 @@ const Login: React.FC = () => {
         <div className="hidden md:flex flex-col justify-between w-1/2 p-10 bg-gradient-to-br from-primary-900/80 to-slate-900/80 text-white relative">
             <div className="relative z-10">
                 <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/20 mb-6">
-                    <span className="font-bold text-2xl">V I N F A S T</span>
+                    <span className="font-bold text-2xl">V</span>
                 </div>
                 <h1 className="text-4xl font-bold mb-4 leading-tight">Quản lý khách hàng<br/><span className="text-primary-400">Chuyên nghiệp</span></h1>
                 <p className="text-blue-100/80 text-sm leading-relaxed max-w-sm">
@@ -130,8 +130,7 @@ const Login: React.FC = () => {
                 </p>
             </div>
             <div className="relative z-10 text-xs text-blue-200/50">
-                © 2025 VinFast CRM Enterprise by Hồ Nguyên </br>
-		Phiên bản : 1.000157
+                © 2025 VinFast CRM Enterprise by Nguyên Hồ
             </div>
             
             {/* Overlay Pattern */}

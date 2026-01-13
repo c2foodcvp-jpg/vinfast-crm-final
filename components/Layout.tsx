@@ -166,7 +166,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 flex items-center justify-center text-white font-bold text-2xl shadow-glow mr-3">V</div>
             <div>
                 <h1 className="text-xl font-extrabold text-slate-900 tracking-tight leading-none">VinFast<span className="text-primary-600">CRM</span></h1>
-                <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-1">Developer by Nguyên Hồ</p>
+                <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-1">Enterprise</p>
             </div>
             <button onClick={() => setIsSidebarOpen(false)} className="md:hidden ml-auto text-slate-400 hover:text-slate-600"><X/></button>
         </div>
