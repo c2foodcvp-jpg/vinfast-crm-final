@@ -269,7 +269,7 @@ const OnlineQuote: React.FC = () => {
   const [customFees, setCustomFees] = useState<Record<string, number>>({});
   const [feeOptions, setFeeOptions] = useState<Record<string, number>>({});
   const [manualDiscount, setManualDiscount] = useState<string>('');
-  const [manualServiceFee, setManualServiceFee] = useState<string>('');
+  const [manualServiceFee, setManualServiceFee] = useState<string>('3.000.000');
   
   // --- NEW: INSURANCE STATE ---
   const [includeInsurance, setIncludeInsurance] = useState(false);
@@ -958,7 +958,7 @@ const OnlineQuote: React.FC = () => {
                               <span className="text-sm font-bold text-gray-500 uppercase">Chi phí lăn bánh (Dự kiến)</span>
                           </div>
                           <div className="space-y-2 text-sm">
-                              {feeCalculation.breakdown.map((item, idx) => (
+                              {feeCalculation.breakdown.filter(item => item.originalId !== 'manual_service').map((item, idx) => (
                                   <div key={idx} className="flex justify-between items-center group">
                                       <span className="text-gray-700 font-medium">{item.name}</span>
                                       <div className="flex items-center gap-2">
