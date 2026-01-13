@@ -5,11 +5,110 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { CarModel, CarVersion, QuoteConfig, BankConfig, BankPackage } from '../types';
 import { 
-  Car, Calculator, Check, ChevronDown, DollarSign, Calendar, Landmark, Download, FileText, Loader2, CheckCircle2, AlertCircle, FileImage, Gift, Crown, Coins, ShieldCheck, Phone, MapPin
+  Car, Calculator, Check, ChevronDown, DollarSign, Calendar, Landmark, Download, FileText, Loader2, CheckCircle2, AlertCircle, FileImage, Gift, Crown, Coins, ShieldCheck, Phone, MapPin, Search
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+
+// --- DATA: BẢNG GIÁ DỊCH VỤ ĐĂNG KÝ 2025 ---
+const REGISTRATION_SERVICES = [
+    { label: '[HCM] VNEID TOÀN TRÌNH - KHÔNG XE', value: 3000000 },
+    { label: '[HCM] VNEID - TRUYỀN THỐNG (KHÔNG XE)', value: 3000000 },
+    { label: '[HCM] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Bình Dương] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3000000 },
+    { label: '[Bình Dương] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3100000 },
+    { label: '[Bình Dương] PHÍ CÀ VẸT NHANH', value: 1500000 }, // Assumed standard
+    { label: '[Đồng Nai] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3200000 },
+    { label: '[Đồng Nai] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3400000 },
+    { label: '[Đồng Nai] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Bình Phước] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3700000 },
+    { label: '[Bình Phước] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3900000 },
+    { label: '[Bình Phước] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Vũng Tàu] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3700000 },
+    { label: '[Vũng Tàu] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3900000 },
+    { label: '[Vũng Tàu] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Tây Ninh] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3500000 },
+    { label: '[Tây Ninh] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
+    { label: '[Tây Ninh] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Đắk Lắk] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
+    { label: '[Đắk Lắk] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6000000 },
+    { label: '[Đắk Lắk] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Quy Nhơn] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6000000 },
+    { label: '[Quy Nhơn] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6500000 },
+    { label: '[Quy Nhơn] PHÍ CÀ VẸT NHANH', value: 1000000 },
+    { label: '[Đắk Nông] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6500000 },
+    { label: '[Đắk Nông] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6800000 },
+    { label: '[Đắk Nông] PHÍ CÀ VẸT NHANH', value: 1000000 },
+    { label: '[Gia Lai] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6500000 },
+    { label: '[Gia Lai] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 7500000 },
+    { label: '[Gia Lai] PHÍ CÀ VẸT NHANH', value: 1000000 },
+    { label: '[Cần Thơ] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
+    { label: '[Cần Thơ] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
+    { label: '[Cần Thơ] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Kon Tum] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 7000000 },
+    { label: '[Kon Tum] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 8000000 },
+    // Lâm Đồng Special Case handled generic or range max
+    { label: '[Lâm Đồng] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5200000 },
+    { label: '[Lâm Đồng] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5700000 },
+    { label: '[Lâm Đồng] PHÍ CÀ VẸT NHANH', value: 2000000 }, 
+    { label: '[An Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
+    { label: '[An Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
+    { label: '[An Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Bạc Liêu] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
+    { label: '[Bạc Liêu] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5300000 },
+    { label: '[Bạc Liêu] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Bến Tre] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3700000 },
+    { label: '[Bến Tre] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
+    { label: '[Bến Tre] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Cà Mau] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
+    { label: '[Cà Mau] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5500000 },
+    { label: '[Cà Mau] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Long An] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3500000 },
+    { label: '[Long An] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
+    { label: '[Long An] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Sóc Trăng] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
+    { label: '[Sóc Trăng] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
+    { label: '[Sóc Trăng] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Quảng Trị] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 9000000 },
+    { label: '[Quảng Trị] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 9000000 },
+    { label: '[Quảng Trị] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Tiền Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3500000 },
+    { label: '[Tiền Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
+    { label: '[Tiền Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Vĩnh Long] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3800000 },
+    { label: '[Vĩnh Long] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4100000 },
+    { label: '[Vĩnh Long] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    // Bình Định - Hỏi lại (Set 0 or placeholder) -> Skipping "Hỏi lại" or setting 0
+    { label: '[Bình Thuận] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
+    { label: '[Bình Thuận] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5200000 },
+    { label: '[Bình Thuận] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Đà Nẵng] Các Quận', value: 11000000 },
+    { label: '[Nha Trang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6200000 },
+    { label: '[Nha Trang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 7500000 },
+    { label: '[Nha Trang] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Ninh Thuận] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5700000 },
+    { label: '[Ninh Thuận] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6200000 },
+    { label: '[Ninh Thuận] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Phú Yên] TP Tuy Hòa / Sông Cầu / Đông Hòa...', value: 8000000 },
+    { label: '[Quảng Nam] Hội An / Tam Kỳ...', value: 11000000 },
+    { label: '[Quảng Ngãi] TP Quảng Ngãi / Bình Sơn...', value: 11000000 },
+    { label: '[Kiên Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
+    { label: '[Kiên Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5300000 },
+    { label: '[Kiên Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Đồng Tháp] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3800000 },
+    { label: '[Đồng Tháp] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4000000 },
+    { label: '[Đồng Tháp] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Hà Tĩnh] Hưng Khê / Nghi Lộc', value: 10000000 },
+    { label: '[Hà Tĩnh] Huyện khác', value: 8000000 },
+    { label: '[Hậu Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
+    { label: '[Hậu Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
+    { label: '[Hậu Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
+    { label: '[Huế] Thành Phố Huế', value: 12000000 },
+    { label: '[Trà Vinh] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4100000 },
+    { label: '[Trà Vinh] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4300000 },
+    { label: '[Trà Vinh] PHÍ CÀ VẸT NHANH', value: 1500000 },
+];
 
 // --- HELPER: WARRANTY TEXT LOGIC ---
 const getWarrantyText = (modelName: string) => {
@@ -271,9 +370,11 @@ const OnlineQuote: React.FC = () => {
   const [manualDiscount, setManualDiscount] = useState<string>('');
   const [manualServiceFee, setManualServiceFee] = useState<string>('3.000.000');
   
-  // --- NEW: INSURANCE STATE ---
+  // --- NEW: INSURANCE & REG FEE STATE ---
   const [includeInsurance, setIncludeInsurance] = useState(false);
   const [insuranceRate, setInsuranceRate] = useState<number>(1.2); // Default 1.2%
+  const [feeSearch, setFeeSearch] = useState('');
+  const [showFeeList, setShowFeeList] = useState(false);
 
   useEffect(() => {
     fetchQuoteData();
@@ -375,6 +476,13 @@ const OnlineQuote: React.FC = () => {
       if (!selectedBank || !selectedBank.packages || selectedBank.packages.length === 0) return '';
       return selectedBank.packages[selectedPackageIndex]?.name || '';
   }, [selectedBank, selectedPackageIndex]);
+
+  // Filtered Reg Fees for Search
+  const filteredRegFees = useMemo(() => {
+      if (!feeSearch) return [];
+      const lower = feeSearch.toLowerCase();
+      return REGISTRATION_SERVICES.filter(s => s.label.toLowerCase().includes(lower));
+  }, [feeSearch]);
 
   // --- CALCULATIONS ---
   const listPrice = selectedVersion?.price || 0;
@@ -802,6 +910,47 @@ const OnlineQuote: React.FC = () => {
                               </div>
                           )}
                       </div>
+                  </div>
+
+                  {/* NEW: QUICK REGISTRATION FEE LOOKUP */}
+                  <div className="pt-4 border-t border-gray-100 relative">
+                      <div className="flex justify-between items-center mb-2">
+                          <h4 className="font-bold text-gray-700 text-sm flex items-center gap-2"><Search size={16}/> Tra cứu Phí đăng ký</h4>
+                      </div>
+                      <input 
+                          type="text"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 mb-2"
+                          placeholder="Nhập tỉnh/thành (VD: HCM, Đồng Nai...)"
+                          value={feeSearch}
+                          onChange={(e) => {
+                              setFeeSearch(e.target.value);
+                              setShowFeeList(true);
+                          }}
+                          onFocus={() => setShowFeeList(true)}
+                          onBlur={() => setTimeout(() => setShowFeeList(false), 200)}
+                      />
+                      {showFeeList && feeSearch && (
+                          <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto mt-1">
+                              {filteredRegFees.length > 0 ? (
+                                  filteredRegFees.map((item, idx) => (
+                                      <div 
+                                          key={idx}
+                                          className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-xs border-b border-gray-50 last:border-0"
+                                          onMouseDown={() => {
+                                              setManualServiceFee(item.value.toLocaleString('vi-VN'));
+                                              setFeeSearch('');
+                                              setShowFeeList(false);
+                                          }}
+                                      >
+                                          <div className="font-bold text-gray-800">{item.label}</div>
+                                          <div className="text-blue-600 font-bold">{item.value.toLocaleString('vi-VN')} VNĐ</div>
+                                      </div>
+                                  ))
+                              ) : (
+                                  <div className="px-3 py-2 text-xs text-gray-500">Không tìm thấy kết quả.</div>
+                              )}
+                          </div>
+                      )}
                   </div>
               </div>
 
