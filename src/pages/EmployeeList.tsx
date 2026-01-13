@@ -421,7 +421,7 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
                                           <p className="font-semibold text-gray-900 cursor-pointer hover:text-primary-600" onClick={() => (isAdmin || isMod) && emp.status === 'active' && window.location.assign('#/employees/' + emp.id)}>{emp.full_name}</p>
                                           {emp.is_part_time && (<span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[9px] font-bold rounded uppercase border border-orange-200">Part-time</span>)}
                                           {/* Permission Icons */}
-                                          {(emp.is_locked_add || emp.is_locked_view) && <div className="flex gap-1 ml-1"><Lock size={12} className="text-red-500" title="Bị hạn chế quyền"/></div>}
+                                          {(emp.is_locked_add || emp.is_locked_view) && <div className="flex gap-1 ml-1" title="Bị hạn chế quyền"><Lock size={12} className="text-red-500" /></div>}
                                       </div>
                                       <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${emp.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : emp.status === 'blocked' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{emp.status}</span>
                                   </div>

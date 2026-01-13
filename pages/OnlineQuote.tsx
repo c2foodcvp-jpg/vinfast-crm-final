@@ -1,14 +1,242 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createRoot } from 'react-dom/client';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { CarModel, CarVersion, QuoteConfig, BankConfig, BankPackage } from '../types';
 import { 
-  Car, Calculator, Check, ChevronDown, DollarSign, Calendar, Landmark, Download, FileText, Loader2, CheckCircle2, AlertCircle, FileImage, Gift, Crown, Coins, ShieldCheck
+  Car, Calculator, Check, ChevronDown, DollarSign, Calendar, Landmark, Download, FileText, Loader2, CheckCircle2, AlertCircle, FileImage, Gift, Crown, Coins, ShieldCheck, Phone, MapPin
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
+// --- HELPER: WARRANTY TEXT LOGIC ---
+const getWarrantyText = (modelName: string) => {
+    const tenYearModels = ['VF 7', 'VF 8', 'VF 9', 'VF7', 'VF8', 'VF9', 'Lạc Hồng', 'Dragon'];
+    // Check if model name contains any of the 10-year keywords
+    const isTenYear = tenYearModels.some(m => modelName.toUpperCase().includes(m.toUpperCase()));
+    
+    if (isTenYear) {
+        return "Bảo hành 10 năm - Không giới hạn Km";
+    }
+    return "Bảo hành 07 năm hoặc 160.000 Km";
+};
+
+// --- 1. MẪU BÁO GIÁ CHUẨN (Dùng để render ẩn và chụp ảnh - Inline CSS 100%) ---
+const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
+    const { 
+        carModelName, versionName, listPrice, finalInvoicePrice, totalFees, finalRollingPrice,
+        invoiceBreakdown, feeBreakdown, rollingBreakdown, activeGifts, membershipData,
+        bankName, loanAmount, upfrontPayment, monthlyPaymentTable, userProfile, prepaidPercent
+    } = data;
+
+    const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
+    const today = new Date().toLocaleDateString('vi-VN');
+    const warrantyText = getWarrantyText(carModelName);
+
+    // Inline Styles để đảm bảo tính nhất quán tuyệt đối khi render
+    const styles = {
+        container: {
+            width: '800px', // Cố định chiều rộng chuẩn
+            backgroundColor: '#ffffff',
+            padding: '40px',
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            color: '#111827',
+            position: 'relative' as const,
+            lineHeight: '1.5',
+            boxSizing: 'border-box' as const,
+            margin: '0 auto'
+        },
+        header: {
+            borderBottom: '3px solid #059669',
+            paddingBottom: '20px',
+            marginBottom: '30px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start'
+        },
+        title: {
+            fontSize: '28px',
+            fontWeight: 'bold',
+            color: '#059669',
+            margin: '0 0 5px 0',
+            textTransform: 'uppercase' as const
+        },
+        sectionTitle: {
+            fontSize: '16px',
+            fontWeight: 'bold',
+            color: '#fff',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            margin: '0 0 15px 0',
+            display: 'inline-block',
+            width: '100%',
+            boxSizing: 'border-box' as const
+        },
+        row: {
+            display: 'flex',
+            justifyContent: 'space-between',
+            padding: '8px 0',
+            borderBottom: '1px solid #f3f4f6'
+        },
+        table: {
+            width: '100%',
+            borderCollapse: 'collapse' as const,
+            fontSize: '14px',
+            marginBottom: '20px'
+        },
+        td: {
+            padding: '8px 5px',
+            borderBottom: '1px solid #e5e7eb',
+            color: '#374151'
+        },
+        tdRight: {
+            padding: '8px 5px',
+            borderBottom: '1px solid #e5e7eb',
+            textAlign: 'right' as const,
+            fontWeight: 'bold',
+            color: '#111827'
+        },
+        totalRow: {
+            backgroundColor: '#ecfdf5',
+            fontWeight: 'bold',
+            color: '#047857',
+            fontSize: '16px'
+        }
+    };
+
+    return (
+        <div id="print-template" style={styles.container}>
+            {/* HEADER */}
+            <div style={styles.header}>
+                <div>
+                    <h1 style={styles.title}>BÁO GIÁ XE VINFAST</h1>
+                    <p style={{ margin: 0, fontSize: '14px', color: '#6b7280' }}>Ngày báo giá: {today}</p>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '14px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>CHÍNH SÁCH BẢO HÀNH</div>
+                    <div style={{ fontWeight: 'bold', fontSize: '16px', color: '#111827', marginTop: '4px' }}>{warrantyText}</div>
+                    <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>Cứu hộ 24/7 miễn phí</div>
+                </div>
+            </div>
+
+            {/* SECTION 1: XE & GIÁ */}
+            <div style={{ marginBottom: '30px' }}>
+                <h2 style={{ ...styles.sectionTitle, backgroundColor: '#059669' }}>
+                    1. THÔNG TIN XE & GIÁ BÁN
+                </h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', padding: '15px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                    <div><span style={{color:'#6b7280', fontSize:'13px', display:'block'}}>Dòng xe</span> <strong style={{fontSize:'16px'}}>{carModelName}</strong></div>
+                    <div><span style={{color:'#6b7280', fontSize:'13px', display:'block'}}>Phiên bản</span> <strong style={{fontSize:'16px'}}>{versionName}</strong></div>
+                    <div style={{textAlign:'right'}}><span style={{color:'#6b7280', fontSize:'13px', display:'block'}}>Giá Niêm Yết</span> <strong style={{color:'#059669', fontSize:'18px'}}>{formatCurrency(listPrice)} VNĐ</strong></div>
+                </div>
+
+                <table style={styles.table}>
+                    <tbody>
+                        {invoiceBreakdown.map((item: any, idx: number) => (
+                            <tr key={idx}>
+                                <td style={styles.td}>• {item.name}</td>
+                                <td style={{...styles.tdRight, color: '#dc2626'}}>-{formatCurrency(item.amount)}</td>
+                            </tr>
+                        ))}
+                        <tr style={styles.totalRow}>
+                            <td style={{padding: '12px 10px'}}>GIÁ XUẤT HÓA ĐƠN</td>
+                            <td style={{padding: '12px 10px', textAlign: 'right'}}>{formatCurrency(finalInvoicePrice)} VNĐ</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            {/* SECTION 2: LĂN BÁNH */}
+            <div style={{ marginBottom: '30px' }}>
+                <h2 style={{ ...styles.sectionTitle, backgroundColor: '#374151' }}>
+                    2. CHI PHÍ LĂN BÁNH (DỰ KIẾN)
+                </h2>
+                <table style={styles.table}>
+                    <tbody>
+                        {feeBreakdown.map((item: any, idx: number) => (
+                            <tr key={idx}>
+                                <td style={styles.td}>{item.name}</td>
+                                <td style={{...styles.tdRight, fontWeight: 'normal'}}>{formatCurrency(item.amount)}</td>
+                            </tr>
+                        ))}
+                        {rollingBreakdown.map((item: any, idx: number) => (
+                            <tr key={`r-${idx}`} style={{ backgroundColor: '#fff7ed' }}>
+                                <td style={{...styles.td, color: '#ea580c', fontWeight: 'bold'}}>• {item.name} (Ưu đãi)</td>
+                                <td style={{...styles.tdRight, color: '#ea580c'}}>-{formatCurrency(item.amount)}</td>
+                            </tr>
+                        ))}
+                        <tr style={{ borderTop: '2px solid #374151' }}>
+                            <td style={{ padding: '15px 5px', fontWeight: 'bold', fontSize: '16px' }}>TỔNG CỘNG LĂN BÁNH</td>
+                            <td style={{ padding: '15px 5px', textAlign: 'right', fontWeight: 'bold', fontSize: '24px', color: '#dc2626' }}>{formatCurrency(finalRollingPrice)} VNĐ</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            {/* SECTION 3: QUÀ TẶNG */}
+            {(activeGifts.length > 0 || membershipData.giftValue > 0) && (
+                <div style={{ marginBottom: '30px' }}>
+                    <h2 style={{ ...styles.sectionTitle, backgroundColor: '#8b5cf6' }}>
+                        3. QUÀ TẶNG & ƯU ĐÃI KHÁC
+                    </h2>
+                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px', color: '#374151', lineHeight: '1.8' }}>
+                        {activeGifts.map((g: any, idx: number) => (
+                            <li key={idx}>
+                                <strong>{g.label}</strong> {g.isVinPoint ? `: ${formatCurrency(g.value)} điểm VinPoint` : (g.value > 0 ? `: ${formatCurrency(g.value)}` : '')}
+                            </li>
+                        ))}
+                        {membershipData.giftValue > 0 && (
+                            <li>
+                                <strong>Ưu đãi {membershipData.name}:</strong> Tặng thêm {formatCurrency(membershipData.giftValue)} (Voucher/Quà)
+                            </li>
+                        )}
+                    </ul>
+                </div>
+            )}
+
+            {/* SECTION 4: NGÂN HÀNG */}
+            {bankName && loanAmount > 0 && (
+                <div style={{ marginBottom: '30px', pageBreakInside: 'avoid' }}>
+                    <h2 style={{ ...styles.sectionTitle, backgroundColor: '#2563eb' }}>
+                        4. DỰ TÍNH TRẢ GÓP ({bankName})
+                    </h2>
+                    <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+                        <div style={{ flex: 1, backgroundColor: '#eff6ff', padding: '15px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                            <p style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Thanh toán đối ứng</p>
+                            <p style={{ fontSize: '22px', fontWeight: 'bold', color: '#1e3a8a', margin: '5px 0 0 0' }}>{formatCurrency(upfrontPayment)}</p>
+                            <p style={{ fontSize: '11px', color: '#60a5fa', margin: '2px 0 0 0' }}>(Lăn bánh - Vay)</p>
+                        </div>
+                        <div style={{ flex: 1, backgroundColor: '#eff6ff', padding: '15px', borderRadius: '8px', border: '1px solid #bfdbfe', textAlign: 'right' }}>
+                            <p style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Số tiền vay ({100-prepaidPercent}%)</p>
+                            <p style={{ fontSize: '22px', fontWeight: 'bold', color: '#1e3a8a', margin: '5px 0 0 0' }}>{formatCurrency(loanAmount)}</p>
+                        </div>
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                        {monthlyPaymentTable.map((row: any) => (
+                            <div key={row.year} style={{ padding: '10px', border: '1px solid #e5e7eb', borderRadius: '6px', textAlign: 'center', backgroundColor: '#f9fafb' }}>
+                                <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#6b7280', margin: 0 }}>Vay {row.year} Năm</p>
+                                <p style={{ fontSize: '15px', fontWeight: 'bold', color: '#2563eb', margin: '4px 0 0 0' }}>{formatCurrency(row.monthly)}/tháng</p>
+                            </div>
+                        ))}
+                    </div>
+                    <p style={{ fontSize: '11px', fontStyle: 'italic', color: '#9ca3af', marginTop: '10px', textAlign: 'center' }}>
+                        * Số tiền trả góp tính theo dư nợ giảm dần (Gốc + Lãi tháng đầu). Lãi suất thực tế tuỳ thuộc chính sách ngân hàng tại thời điểm vay.
+                    </p>
+                </div>
+            )}
+
+            <div style={{ marginTop: '40px', borderTop: '1px dashed #d1d5db', paddingTop: '20px', textAlign: 'center', fontSize: '12px', color: '#6b7280' }}>
+                <p>Bảng báo giá có giá trị tham khảo. Vui lòng liên hệ trực tiếp TVBH để được tư vấn chương trình khuyến mãi chính xác nhất.</p>
+                <p style={{ fontWeight: 'bold', marginTop: '5px', fontSize: '14px', color: '#111827' }}>Hotline Kinh Doanh: {userProfile?.phone || '...'}</p>
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN COMPONENT ---
 const OnlineQuote: React.FC = () => {
   const { userProfile } = useAuth();
   const quoteRef = useRef<HTMLDivElement>(null);
@@ -28,7 +256,7 @@ const OnlineQuote: React.FC = () => {
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [selectedVersionId, setSelectedVersionId] = useState<string>('');
   const [selectedBankId, setSelectedBankId] = useState<string>('');
-  const [selectedMembershipId, setSelectedMembershipId] = useState<string>(''); // For Membership Selection
+  const [selectedMembershipId, setSelectedMembershipId] = useState<string>(''); 
   
   // Bank Package Selection
   const [selectedPackageIndex, setSelectedPackageIndex] = useState<number>(0);
@@ -42,6 +270,10 @@ const OnlineQuote: React.FC = () => {
   const [feeOptions, setFeeOptions] = useState<Record<string, number>>({});
   const [manualDiscount, setManualDiscount] = useState<string>('');
   const [manualServiceFee, setManualServiceFee] = useState<string>('');
+  
+  // --- NEW: INSURANCE STATE ---
+  const [includeInsurance, setIncludeInsurance] = useState(false);
+  const [insuranceRate, setInsuranceRate] = useState<number>(1.2); // Default 1.2%
 
   useEffect(() => {
     fetchQuoteData();
@@ -118,21 +350,16 @@ const OnlineQuote: React.FC = () => {
 
   const selectedVersion = carVersions.find(v => v.id === selectedVersionId);
   const selectedBank = banks.find(b => b.id === selectedBankId);
+  const selectedModel = carModels.find(m => m.id === selectedModelId);
 
-  // --- UPDATED WARRANTY LOGIC (Hardcoded as requested) ---
+  // Warranty Logic Helper - Updated to use Config
   const getWarrantyPeriod = (modelId: string) => {
-      const model = carModels.find(m => m.id === modelId);
-      if (!model) return "Theo chính sách VinFast";
+      // Find warranty config for this model
+      const config = warranties.find(w => w.apply_to_model_ids && w.apply_to_model_ids.includes(modelId));
+      if (config) return config.name;
 
-      const name = model.name.toUpperCase();
-      
-      // Logic: VF 7, 8, 9, Lac Hong -> 10 Years
-      if (name.includes('VF 7') || name.includes('VF 8') || name.includes('VF 9') || name.includes('LẠC HỒNG')) {
-          return "10 Năm không giới hạn Km";
-      }
-      
-      // Default: 7 Years
-      return "07 năm hoặc 160.000 Km";
+      // Default Fallback
+      return "Theo chính sách VinFast";
   };
 
   const currentInterestRate = useMemo(() => {
@@ -141,6 +368,12 @@ const OnlineQuote: React.FC = () => {
           return selectedBank.packages[selectedPackageIndex]?.rate || 0;
       }
       return selectedBank.interest_rate_1y || 0;
+  }, [selectedBank, selectedPackageIndex]);
+
+  // --- NEW: Helper to get package name ---
+  const currentPackageName = useMemo(() => {
+      if (!selectedBank || !selectedBank.packages || selectedBank.packages.length === 0) return '';
+      return selectedBank.packages[selectedPackageIndex]?.name || '';
   }, [selectedBank, selectedPackageIndex]);
 
   // --- CALCULATIONS ---
@@ -157,12 +390,11 @@ const OnlineQuote: React.FC = () => {
       return { discount, giftValue, name: selectedMem.name, percent: selectedMem.value, giftPercent: selectedMem.gift_ratio };
   }, [selectedMembershipId, listPrice, memberships]);
 
-  // 1. Calculate Final INVOICE Price (Giá Xe Hóa Đơn)
+  // 1. Calculate Final INVOICE Price
   const invoicePromoCalculation = useMemo(() => {
       let currentPrice = listPrice;
       const breakdown: {name: string, amount: number}[] = [];
       
-      // A. Standard Promos (Target: Invoice)
       const applicable = promotions.filter(p => {
           const modelMatch = !p.apply_to_model_ids || p.apply_to_model_ids.length === 0 || p.apply_to_model_ids.includes(selectedModelId);
           let versionMatch = true;
@@ -188,7 +420,6 @@ const OnlineQuote: React.FC = () => {
           }
       });
 
-      // B. Membership Discount
       if (membershipCalculation.discount > 0) {
           currentPrice -= membershipCalculation.discount;
           breakdown.push({ name: `Ưu đãi ${membershipCalculation.name} (-${membershipCalculation.percent}%)`, amount: membershipCalculation.discount });
@@ -199,7 +430,7 @@ const OnlineQuote: React.FC = () => {
 
   const finalInvoicePrice = invoicePromoCalculation.finalPrice;
 
-  // 2. Fees
+  // 2. Fees + INSURANCE
   const feeCalculation = useMemo(() => {
       let totalFees = 0;
       const breakdown: {name: string, amount: number, originalId: string}[] = [];
@@ -228,6 +459,12 @@ const OnlineQuote: React.FC = () => {
           breakdown.push({ name: displayLabel, amount, originalId: f.id });
       });
       
+      if (includeInsurance) {
+          const insuranceAmount = listPrice * (insuranceRate / 100);
+          totalFees += insuranceAmount;
+          breakdown.push({ name: `Bảo hiểm thân vỏ (${insuranceRate}%)`, amount: insuranceAmount, originalId: 'hull_insurance' });
+      }
+      
       const serviceFee = Number(manualServiceFee.replace(/\D/g, ''));
       if (serviceFee > 0) {
           totalFees += serviceFee;
@@ -235,7 +472,7 @@ const OnlineQuote: React.FC = () => {
       }
 
       return { totalFees, breakdown };
-  }, [fees, customFees, feeOptions, listPrice, manualServiceFee]);
+  }, [fees, customFees, feeOptions, listPrice, manualServiceFee, includeInsurance, insuranceRate]);
 
   const totalFees = feeCalculation.totalFees;
 
@@ -277,7 +514,6 @@ const OnlineQuote: React.FC = () => {
       return { totalDiscount, breakdown };
   }, [promotions, appliedPromos, selectedModelId, selectedVersionId, listPrice, manualDiscount]);
 
-  // Final Rolling Calculation
   const preRollingPrice = finalInvoicePrice + totalFees;
   const finalRollingPrice = Math.max(0, preRollingPrice - rollingPromoCalculation.totalDiscount);
 
@@ -335,40 +571,91 @@ const OnlineQuote: React.FC = () => {
 
   const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
 
-  // --- IMPROVED EXPORT LOGIC WITH CLONE ---
-  const handleExportQuote = async (type: 'pdf' | 'image') => {
-      if (!quoteRef.current) return;
-      
-      // 1. Create a deep clone of the element
-      const originalElement = quoteRef.current;
-      const clone = originalElement.cloneNode(true) as HTMLElement;
-      
-      // 2. Setup the clone container with fixed desktop-like dimensions
-      // This ensures the layout is always consistent regardless of current screen size
-      clone.style.width = '1000px'; 
-      clone.style.height = 'auto';
-      clone.style.position = 'absolute';
-      clone.style.left = '-9999px';
-      clone.style.top = '0';
-      clone.style.zIndex = '-1000';
-      clone.style.backgroundColor = '#ffffff'; // Force white background
-      
-      // Remove classes that might cause issues (like sticky positioning)
-      clone.classList.remove('sticky', 'top-6');
-      const stickyElements = clone.querySelectorAll('.sticky');
-      stickyElements.forEach(el => el.classList.remove('sticky'));
+  // --- UPDATED EXPORT LOGIC: GHOST RENDER STRATEGY ---
+  const handleExportQuote = async (type: 'excel' | 'pdf' | 'image') => {
+      if (type === 'excel') {
+          // Keep existing Excel logic
+          const data = [
+              ["BÁO GIÁ XE VINFAST", ""],
+              ["Dòng xe", `${selectedVersion?.name || ''} (${carModels.find(m=>m.id===selectedModelId)?.name})`],
+              ["Giá Niêm Yết", formatCurrency(listPrice)],
+              ...invoicePromoCalculation.breakdown.map(p => [p.name, `-${formatCurrency(p.amount)}`]),
+              ["GIÁ XUẤT HÓA ĐƠN", formatCurrency(finalInvoicePrice)],
+              ["", ""],
+              ["CHI PHÍ LĂN BÁNH", ""],
+              ...feeCalculation.breakdown.map(f => [f.name, formatCurrency(f.amount)]),
+              ["TỔNG PHÍ", formatCurrency(totalFees)],
+              ["", ""],
+              ["ƯU ĐÃI LĂN BÁNH", ""],
+              ...rollingPromoCalculation.breakdown.map(p => [p.name, `-${formatCurrency(p.amount)}`]),
+              ["", ""],
+              ["TỔNG CỘNG LĂN BÁNH", formatCurrency(finalRollingPrice)],
+              ["", ""],
+              ["QUÀ TẶNG KÈM THEO", ""],
+              ...activeGifts.map(g => [g.label, g.isVinPoint ? `${formatCurrency(g.value)} điểm` : (g.value > 0 ? formatCurrency(g.value) : '')]),
+              ...(membershipCalculation.giftValue > 0 ? [[`Ưu đãi ${membershipCalculation.name} (Tặng thêm)`, formatCurrency(membershipCalculation.giftValue)]] : []),
+              ["", ""],
+              ["DỰ TÍNH NGÂN HÀNG", selectedBank?.name],
+              ["Trả trước", `${prepaidPercent}% (~${formatCurrency(finalInvoicePrice - loanAmount)})`],
+              ["Số tiền vay", formatCurrency(loanAmount)],
+              ["Thanh toán đối ứng", formatCurrency(upfrontPayment)],
+              ["", ""],
+              ["GÓP HÀNG THÁNG (Dư nợ giảm dần)", ""],
+              ...monthlyPaymentTable.map(r => [`${r.year} Năm`, `${formatCurrency(r.monthly)} VNĐ/tháng`])
+          ];
+          const ws = XLSX.utils.aoa_to_sheet(data);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "BaoGia");
+          XLSX.writeFile(wb, "Bao_Gia_VinFast.xlsx");
+          return;
+      }
 
-      // 3. Append to body so html2canvas can see it
-      document.body.appendChild(clone);
+      // --- NEW GHOST RENDER LOGIC FOR IMAGE/PDF (Using PrintableQuoteTemplate) ---
+      
+      const quoteData = {
+          carModelName: carModels.find(m => m.id === selectedModelId)?.name || 'VinFast',
+          versionName: selectedVersion?.name || '',
+          listPrice,
+          finalInvoicePrice,
+          totalFees,
+          finalRollingPrice,
+          invoiceBreakdown: invoicePromoCalculation.breakdown,
+          feeBreakdown: feeCalculation.breakdown,
+          rollingBreakdown: rollingPromoCalculation.breakdown,
+          activeGifts,
+          membershipData: membershipCalculation,
+          bankName: selectedBank?.name,
+          loanAmount,
+          upfrontPayment,
+          monthlyPaymentTable,
+          userProfile,
+          prepaidPercent
+      };
+
+      const container = document.createElement('div');
+      container.style.position = 'absolute';
+      container.style.top = '-10000px';
+      container.style.left = '0';
+      container.style.zIndex = '-1000';
+      document.body.appendChild(container);
+
+      const root = createRoot(container);
+      root.render(<PrintableQuoteTemplate data={quoteData} />);
+
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      const element = document.getElementById('print-template');
+      if (!element) {
+          document.body.removeChild(container);
+          alert("Lỗi tạo mẫu in.");
+          return;
+      }
 
       try {
-          // 4. Capture using html2canvas
-          const canvas = await html2canvas(clone, { 
-              scale: 2, // High resolution for better text clarity
-              useCORS: true, 
-              backgroundColor: '#ffffff',
-              width: 1000,
-              windowWidth: 1280 // Simulate a desktop window width
+          const canvas = await html2canvas(element, { 
+              scale: 2, // High resolution
+              useCORS: true,
+              backgroundColor: '#ffffff'
           });
           
           const imgData = canvas.toDataURL('image/jpeg', 1.0);
@@ -377,26 +664,25 @@ const OnlineQuote: React.FC = () => {
               const link = document.createElement('a');
               link.download = `BaoGia_VinFast_${new Date().getTime()}.jpg`;
               link.href = imgData;
+              document.body.appendChild(link);
               link.click();
+              document.body.removeChild(link);
           } else {
-              // PDF Export
               const pdf = new jsPDF('p', 'mm', 'a4');
               const pdfWidth = pdf.internal.pageSize.getWidth();
-              const pdfHeight = pdf.internal.pageSize.getHeight();
+              const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
               
-              // Calculate scaled height to fit A4 width
-              const imgProps = pdf.getImageProperties(imgData);
-              const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-              
-              pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, imgHeight);
+              pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
               pdf.save(`BaoGia_VinFast_${new Date().getTime()}.pdf`);
           }
       } catch (err) {
           console.error("Export failed", err);
           alert("Lỗi khi xuất file. Vui lòng thử lại.");
       } finally {
-          // 5. Cleanup: Remove the clone from DOM
-          document.body.removeChild(clone);
+          setTimeout(() => {
+              root.unmount();
+              document.body.removeChild(container);
+          }, 100);
       }
   };
 
@@ -423,6 +709,9 @@ const OnlineQuote: React.FC = () => {
               </button>
               <button onClick={() => handleExportQuote('pdf')} className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-lg text-sm">
                   <FileText size={16}/> Xuất PDF
+              </button>
+              <button onClick={() => handleExportQuote('excel')} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 shadow-lg text-sm">
+                  <Download size={16}/> Excel
               </button>
           </div>
       </div>
@@ -452,10 +741,10 @@ const OnlineQuote: React.FC = () => {
                   </div>
               </div>
 
-              {/* MEMBERSHIP */}
+              {/* MEMBERSHIP & INSURANCE */}
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
                   <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Crown size={18}/> Hạng Khách hàng</h3>
-                  <div className="space-y-2">
+                  <div className="space-y-2 mb-4">
                       <label className="flex items-center gap-3 cursor-pointer p-2 border border-gray-200 rounded-lg hover:bg-gray-50">
                           <input 
                               type="radio" 
@@ -484,6 +773,34 @@ const OnlineQuote: React.FC = () => {
                               </div>
                           </label>
                       ))}
+                  </div>
+
+                  {/* INSURANCE CHECKBOX */}
+                  <div className="pt-4 border-t border-gray-100">
+                      <h4 className="font-bold text-gray-700 text-sm mb-2 flex items-center gap-2"><ShieldCheck size={16}/> Bảo hiểm thân vỏ</h4>
+                      <div className="flex items-center justify-between p-2 border border-blue-100 bg-blue-50 rounded-lg">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                              <input 
+                                  type="checkbox" 
+                                  checked={includeInsurance}
+                                  onChange={(e) => setIncludeInsurance(e.target.checked)}
+                                  className="w-4 h-4 text-blue-600 rounded"
+                              />
+                              <span className="text-sm font-bold text-blue-800">Mua Bảo Hiểm</span>
+                          </label>
+                          {includeInsurance && (
+                              <div className="flex items-center gap-2">
+                                  <input 
+                                      type="number"
+                                      step="0.1" 
+                                      value={insuranceRate}
+                                      onChange={(e) => setInsuranceRate(parseFloat(e.target.value))}
+                                      className="w-16 px-2 py-1 text-sm text-right font-bold border border-blue-200 rounded outline-none"
+                                  />
+                                  <span className="text-xs font-bold text-blue-600">%</span>
+                              </div>
+                          )}
+                      </div>
                   </div>
               </div>
 
@@ -596,7 +913,7 @@ const OnlineQuote: React.FC = () => {
                   {/* Header Image Area */}
                   <div className="bg-gradient-to-r from-emerald-600 to-teal-500 p-6 text-white relative overflow-hidden">
                       <div className="relative z-10">
-                          <h2 className="text-3xl font-extrabold uppercase tracking-tight">Báo Giá Xe {carModels.find(m=>m.id===selectedModelId)?.name || 'VinFast'}</h2>
+                          <h2 className="text-3xl font-extrabold uppercase tracking-tight">Báo Giá Xe {selectedModel?.name || 'VinFast'}</h2>
                           <p className="text-emerald-100 font-medium text-lg mt-1">{selectedVersion?.name || 'Vui lòng chọn phiên bản'}</p>
                           
                           {/* Specs Summary */}
@@ -640,11 +957,29 @@ const OnlineQuote: React.FC = () => {
                               <span className="text-sm font-bold text-gray-500 uppercase">Chi phí lăn bánh (Dự kiến)</span>
                           </div>
                           <div className="space-y-2 text-sm">
-                              {fees.map((f) => (
+                              {feeCalculation.breakdown.map((item, idx) => (
+                                  <div key={idx} className="flex justify-between items-center group">
+                                      <span className="text-gray-700 font-medium">{item.name}</span>
+                                      <div className="flex items-center gap-2">
+                                          {/* Check if this is a configurable fee or calculated one (like insurance) */}
+                                          {item.originalId && fees.find(f => f.id === item.originalId) ? (
+                                              <>
+                                                  {/* Standard Fee Logic */}
+                                                  <span className="font-bold">{formatCurrency(item.amount)}</span>
+                                              </>
+                                          ) : (
+                                              <span className="font-bold">{formatCurrency(item.amount)}</span>
+                                          )}
+                                          <span className="text-gray-500 text-xs">VNĐ</span>
+                                      </div>
+                                  </div>
+                              ))}
+
+                              {/* Configurable Fees Rendering (Re-using old logic to allow edit) */}
+                              {fees.filter(f => !feeCalculation.breakdown.find(b => b.originalId === f.id)).map((f) => (
                                   <div key={f.id} className="flex justify-between items-center group">
                                       <div className="flex items-center gap-2">
                                           <span className="text-gray-700 font-medium">{f.name}</span>
-                                          {/* Show Dropdown if Options exist */}
                                           {f.options && f.options.length > 0 && (
                                               <select 
                                                   className="bg-gray-50 border border-gray-300 text-gray-800 text-xs rounded p-1 outline-none font-bold"
@@ -658,14 +993,12 @@ const OnlineQuote: React.FC = () => {
                                           )}
                                       </div>
                                       <div className="flex items-center gap-2">
-                                          {/* Editable Fee if no options */}
                                           <input 
                                             className="text-right font-bold text-gray-800 bg-transparent border-b border-transparent focus:border-emerald-500 focus:bg-white w-28 outline-none transition-all"
                                             value={formatCurrency(
                                                 (f.options && f.options.length > 0) ? (feeOptions[f.id] || 0) : (customFees[f.id] !== undefined ? customFees[f.id] : f.value)
                                             )}
                                             onChange={(e) => {
-                                                // Only allow manual edit if NOT options based
                                                 if (!f.options || f.options.length === 0) {
                                                     const val = Number(e.target.value.replace(/\./g, ''));
                                                     if (!isNaN(val)) setCustomFees({...customFees, [f.id]: val});
@@ -739,7 +1072,7 @@ const OnlineQuote: React.FC = () => {
                                           {g.isVinPoint ? (
                                               <span className="font-bold text-yellow-600 flex items-center gap-1"><Coins size={12}/> {formatCurrency(g.value)} điểm</span>
                                           ) : (
-                                              <span className="font-bold text-purple-600">{g.value > 0 ? formatCurrency(g.value) : 'Hiện vật'}</span>
+                                              <span className="font-bold text-purple-600">{g.value > 0 ? formatCurrency(g.value) : ''}</span>
                                           )}
                                       </div>
                                   ))}
@@ -757,9 +1090,12 @@ const OnlineQuote: React.FC = () => {
                       {selectedBank && loanAmount > 0 && (
                           <div className="bg-white rounded-xl overflow-hidden border border-blue-100">
                               <div className="bg-blue-50 p-3 flex items-center justify-between border-b border-blue-100">
-                                  <div className="flex items-center gap-2 text-blue-800 font-bold"><Landmark size={18}/> BẢNG TÍNH VAY NGÂN HÀNG</div>
+                                  <div className="flex items-center gap-2 text-blue-800 font-bold"><Landmark size={18}/> BẢNG TÍNH VAY NGÂN HÀNG ({selectedBank.name})</div>
                                   <div className="text-xs font-bold bg-white text-blue-600 px-2 py-1 rounded border border-blue-200">
-                                      {currentInterestRate > 0 ? `Lãi ${currentInterestRate}% năm đầu` : 'Chưa có lãi suất'}
+                                      {currentPackageName 
+                                          ? `${currentPackageName} (${currentInterestRate}%)`
+                                          : (currentInterestRate > 0 ? `Lãi ${currentInterestRate}% năm đầu` : 'Chưa có lãi suất')
+                                      }
                                   </div>
                               </div>
                               <div className="p-4 grid grid-cols-2 gap-6 bg-blue-50/30">

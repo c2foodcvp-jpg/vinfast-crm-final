@@ -1,15 +1,228 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createRoot } from 'react-dom/client';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { CarModel, CarVersion, QuoteConfig, BankConfig, BankPackage } from '../types';
 import { 
-  Car, Calculator, Check, ChevronDown, DollarSign, Calendar, Landmark, Download, FileText, Loader2, CheckCircle2, AlertCircle, FileImage, Gift, Crown, Coins, ShieldCheck
+  Car, Calculator, Check, ChevronDown, DollarSign, Calendar, Landmark, Download, FileText, Loader2, CheckCircle2, AlertCircle, FileImage, Gift, Crown, Coins, ShieldCheck, Phone, MapPin
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
+// --- 1. MẪU BÁO GIÁ CHUẨN (Dùng để render ẩn và chụp ảnh - Inline CSS 100%) ---
+const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
+    const { 
+        carModelName, versionName, listPrice, finalInvoicePrice, totalFees, finalRollingPrice,
+        invoiceBreakdown, feeBreakdown, rollingBreakdown, activeGifts, membershipData,
+        bankName, loanAmount, upfrontPayment, monthlyPaymentTable, userProfile, prepaidPercent
+    } = data;
+
+    const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
+    const today = new Date().toLocaleDateString('vi-VN');
+
+    // Inline Styles để đảm bảo tính nhất quán tuyệt đối khi render
+    const styles = {
+        container: {
+            width: '800px', // Cố định chiều rộng chuẩn A4
+            backgroundColor: '#ffffff',
+            padding: '40px',
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            color: '#111827',
+            position: 'relative' as const,
+            lineHeight: '1.5',
+            boxSizing: 'border-box' as const,
+        },
+        header: {
+            borderBottom: '3px solid #059669',
+            paddingBottom: '20px',
+            marginBottom: '30px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start'
+        },
+        title: {
+            fontSize: '28px',
+            fontWeight: 'bold',
+            color: '#059669',
+            margin: '0 0 5px 0',
+            textTransform: 'uppercase' as const
+        },
+        sectionTitle: {
+            fontSize: '16px',
+            fontWeight: 'bold',
+            color: '#fff',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            margin: '0 0 15px 0',
+            display: 'inline-block',
+            width: '100%',
+            boxSizing: 'border-box' as const
+        },
+        row: {
+            display: 'flex',
+            justifyContent: 'space-between',
+            padding: '8px 0',
+            borderBottom: '1px solid #f3f4f6'
+        },
+        table: {
+            width: '100%',
+            borderCollapse: 'collapse' as const,
+            fontSize: '14px',
+            marginBottom: '20px'
+        },
+        td: {
+            padding: '8px 5px',
+            borderBottom: '1px solid #e5e7eb',
+            color: '#374151'
+        },
+        tdRight: {
+            padding: '8px 5px',
+            borderBottom: '1px solid #e5e7eb',
+            textAlign: 'right' as const,
+            fontWeight: 'bold',
+            color: '#111827'
+        },
+        totalRow: {
+            backgroundColor: '#ecfdf5',
+            fontWeight: 'bold',
+            color: '#047857',
+            fontSize: '16px'
+        }
+    };
+
+    return (
+        <div id="print-template" style={styles.container}>
+            {/* HEADER */}
+            <div style={styles.header}>
+                <div>
+                    <h1 style={styles.title}>BÁO GIÁ XE VINFAST</h1>
+                    <p style={{ margin: 0, fontSize: '14px', color: '#6b7280' }}>Ngày báo giá: {today}</p>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '18px', color: '#111827' }}>{userProfile?.full_name || 'TVBH VinFast'}</div>
+                    <div style={{ fontSize: '14px', color: '#374151', marginTop: '4px' }}>{userProfile?.phone || ''}</div>
+                    <div style={{ fontSize: '14px', color: '#059669', fontWeight: 'bold', marginTop: '4px' }}>VinFast Showroom</div>
+                </div>
+            </div>
+
+            {/* SECTION 1: XE & GIÁ */}
+            <div style={{ marginBottom: '30px' }}>
+                <h2 style={{ ...styles.sectionTitle, backgroundColor: '#059669' }}>
+                    1. THÔNG TIN XE & GIÁ BÁN
+                </h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', padding: '15px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                    <div><span style={{color:'#6b7280', fontSize:'13px', display:'block'}}>Dòng xe</span> <strong style={{fontSize:'16px'}}>{carModelName}</strong></div>
+                    <div><span style={{color:'#6b7280', fontSize:'13px', display:'block'}}>Phiên bản</span> <strong style={{fontSize:'16px'}}>{versionName}</strong></div>
+                    <div style={{textAlign:'right'}}><span style={{color:'#6b7280', fontSize:'13px', display:'block'}}>Giá Niêm Yết</span> <strong style={{color:'#059669', fontSize:'18px'}}>{formatCurrency(listPrice)} VNĐ</strong></div>
+                </div>
+
+                <table style={styles.table}>
+                    <tbody>
+                        {invoiceBreakdown.map((item: any, idx: number) => (
+                            <tr key={idx}>
+                                <td style={styles.td}>• {item.name}</td>
+                                <td style={{...styles.tdRight, color: '#dc2626'}}>-{formatCurrency(item.amount)}</td>
+                            </tr>
+                        ))}
+                        <tr style={styles.totalRow}>
+                            <td style={{padding: '12px 10px'}}>GIÁ XUẤT HÓA ĐƠN</td>
+                            <td style={{padding: '12px 10px', textAlign: 'right'}}>{formatCurrency(finalInvoicePrice)} VNĐ</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            {/* SECTION 2: LĂN BÁNH */}
+            <div style={{ marginBottom: '30px' }}>
+                <h2 style={{ ...styles.sectionTitle, backgroundColor: '#374151' }}>
+                    2. CHI PHÍ LĂN BÁNH (DỰ KIẾN)
+                </h2>
+                <table style={styles.table}>
+                    <tbody>
+                        {feeBreakdown.map((item: any, idx: number) => (
+                            <tr key={idx}>
+                                <td style={styles.td}>{item.name}</td>
+                                <td style={{...styles.tdRight, fontWeight: 'normal'}}>{formatCurrency(item.amount)}</td>
+                            </tr>
+                        ))}
+                        {rollingBreakdown.map((item: any, idx: number) => (
+                            <tr key={`r-${idx}`} style={{ backgroundColor: '#fff7ed' }}>
+                                <td style={{...styles.td, color: '#ea580c', fontWeight: 'bold'}}>• {item.name} (Ưu đãi)</td>
+                                <td style={{...styles.tdRight, color: '#ea580c'}}>-{formatCurrency(item.amount)}</td>
+                            </tr>
+                        ))}
+                        <tr style={{ borderTop: '2px solid #374151' }}>
+                            <td style={{ padding: '15px 5px', fontWeight: 'bold', fontSize: '16px' }}>TỔNG CỘNG LĂN BÁNH</td>
+                            <td style={{ padding: '15px 5px', textAlign: 'right', fontWeight: 'bold', fontSize: '24px', color: '#dc2626' }}>{formatCurrency(finalRollingPrice)} VNĐ</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            {/* SECTION 3: QUÀ TẶNG */}
+            {(activeGifts.length > 0 || membershipData.giftValue > 0) && (
+                <div style={{ marginBottom: '30px' }}>
+                    <h2 style={{ ...styles.sectionTitle, backgroundColor: '#8b5cf6' }}>
+                        3. QUÀ TẶNG & ƯU ĐÃI KHÁC
+                    </h2>
+                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px', color: '#374151', lineHeight: '1.8' }}>
+                        {activeGifts.map((g: any, idx: number) => (
+                            <li key={idx}>
+                                <strong>{g.label}:</strong> {g.isVinPoint ? `${formatCurrency(g.value)} điểm VinPoint` : (g.value > 0 ? formatCurrency(g.value) : 'Hiện vật')}
+                            </li>
+                        ))}
+                        {membershipData.giftValue > 0 && (
+                            <li>
+                                <strong>Ưu đãi {membershipData.name}:</strong> Tặng thêm {formatCurrency(membershipData.giftValue)} (Voucher/Quà)
+                            </li>
+                        )}
+                    </ul>
+                </div>
+            )}
+
+            {/* SECTION 4: NGÂN HÀNG */}
+            {bankName && loanAmount > 0 && (
+                <div style={{ marginBottom: '30px', pageBreakInside: 'avoid' }}>
+                    <h2 style={{ ...styles.sectionTitle, backgroundColor: '#2563eb' }}>
+                        4. DỰ TÍNH TRẢ GÓP ({bankName})
+                    </h2>
+                    <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+                        <div style={{ flex: 1, backgroundColor: '#eff6ff', padding: '15px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                            <p style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Thanh toán đối ứng</p>
+                            <p style={{ fontSize: '22px', fontWeight: 'bold', color: '#1e3a8a', margin: '5px 0 0 0' }}>{formatCurrency(upfrontPayment)}</p>
+                            <p style={{ fontSize: '11px', color: '#60a5fa', margin: '2px 0 0 0' }}>(Lăn bánh - Vay)</p>
+                        </div>
+                        <div style={{ flex: 1, backgroundColor: '#eff6ff', padding: '15px', borderRadius: '8px', border: '1px solid #bfdbfe', textAlign: 'right' }}>
+                            <p style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Số tiền vay ({100-prepaidPercent}%)</p>
+                            <p style={{ fontSize: '22px', fontWeight: 'bold', color: '#1e3a8a', margin: '5px 0 0 0' }}>{formatCurrency(loanAmount)}</p>
+                        </div>
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                        {monthlyPaymentTable.map((row: any) => (
+                            <div key={row.year} style={{ padding: '10px', border: '1px solid #e5e7eb', borderRadius: '6px', textAlign: 'center', backgroundColor: '#f9fafb' }}>
+                                <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#6b7280', margin: 0 }}>Vay {row.year} Năm</p>
+                                <p style={{ fontSize: '15px', fontWeight: 'bold', color: '#2563eb', margin: '4px 0 0 0' }}>{formatCurrency(row.monthly)}/tháng</p>
+                            </div>
+                        ))}
+                    </div>
+                    <p style={{ fontSize: '11px', fontStyle: 'italic', color: '#9ca3af', marginTop: '10px', textAlign: 'center' }}>
+                        * Số tiền trả góp tính theo dư nợ giảm dần (Gốc + Lãi tháng đầu). Lãi suất thực tế tuỳ thuộc chính sách ngân hàng tại thời điểm vay.
+                    </p>
+                </div>
+            )}
+
+            <div style={{ marginTop: '40px', borderTop: '1px dashed #d1d5db', paddingTop: '20px', textAlign: 'center', fontSize: '12px', color: '#6b7280' }}>
+                <p>Bảng báo giá có giá trị tham khảo. Vui lòng liên hệ trực tiếp TVBH để được tư vấn chương trình khuyến mãi chính xác nhất.</p>
+                <p style={{ fontWeight: 'bold', marginTop: '5px', fontSize: '14px', color: '#111827' }}>Hotline Kinh Doanh: {userProfile?.phone || '...'}</p>
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN COMPONENT ---
 const OnlineQuote: React.FC = () => {
   const { userProfile } = useAuth();
   const quoteRef = useRef<HTMLDivElement>(null);
@@ -29,7 +242,7 @@ const OnlineQuote: React.FC = () => {
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [selectedVersionId, setSelectedVersionId] = useState<string>('');
   const [selectedBankId, setSelectedBankId] = useState<string>('');
-  const [selectedMembershipId, setSelectedMembershipId] = useState<string>(''); // For Membership Selection
+  const [selectedMembershipId, setSelectedMembershipId] = useState<string>(''); 
   
   // Bank Package Selection
   const [selectedPackageIndex, setSelectedPackageIndex] = useState<number>(0);
@@ -334,10 +547,10 @@ const OnlineQuote: React.FC = () => {
 
   const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
 
-  const handleExportQuote = (type: 'excel' | 'pdf' | 'image') => {
+  // --- UPDATED EXPORT LOGIC: GHOST RENDER STRATEGY ---
+  const handleExportQuote = async (type: 'excel' | 'pdf' | 'image') => {
       if (type === 'excel') {
-          // EXCEL EXPORT LOGIC
-          // Note: Excel export is simplified, image export is WYSIWYG
+          // Keep existing Excel logic
           const data = [
               ["BÁO GIÁ XE VINFAST", ""],
               ["Dòng xe", `${selectedVersion?.name || ''} (${carModels.find(m=>m.id===selectedModelId)?.name})`],
@@ -370,27 +583,90 @@ const OnlineQuote: React.FC = () => {
           const wb = XLSX.utils.book_new();
           XLSX.utils.book_append_sheet(wb, ws, "BaoGia");
           XLSX.writeFile(wb, "Bao_Gia_VinFast.xlsx");
-      } else if (type === 'image' || type === 'pdf') {
-          if (!quoteRef.current) return;
-          const element = quoteRef.current;
-          
-          html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff' }).then((canvas) => {
-              const imgData = canvas.toDataURL('image/jpeg', 1.0);
-              
-              if (type === 'image') {
-                  const link = document.createElement('a');
-                  link.download = `BaoGia_VinFast_${new Date().getTime()}.jpg`;
-                  link.href = imgData;
-                  link.click();
-              } else {
-                  const pdf = new jsPDF('p', 'mm', 'a4');
-                  const pdfWidth = pdf.internal.pageSize.getWidth();
-                  const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                  
-                  pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-                  pdf.save(`BaoGia_VinFast_${new Date().getTime()}.pdf`);
-              }
+          return;
+      }
+
+      // --- NEW GHOST RENDER LOGIC FOR IMAGE/PDF (Using PrintableQuoteTemplate) ---
+      
+      // 1. Prepare Data for the Template
+      const quoteData = {
+          carModelName: carModels.find(m => m.id === selectedModelId)?.name || 'VinFast',
+          versionName: selectedVersion?.name || '',
+          listPrice,
+          finalInvoicePrice,
+          totalFees,
+          finalRollingPrice,
+          invoiceBreakdown: invoicePromoCalculation.breakdown,
+          feeBreakdown: feeCalculation.breakdown,
+          rollingBreakdown: rollingPromoCalculation.breakdown,
+          activeGifts,
+          membershipData: membershipCalculation,
+          bankName: selectedBank?.name,
+          loanAmount,
+          upfrontPayment,
+          monthlyPaymentTable,
+          userProfile,
+          prepaidPercent
+      };
+
+      // 2. Create a hidden container attached to body
+      const container = document.createElement('div');
+      container.style.position = 'absolute';
+      container.style.top = '-10000px';
+      container.style.left = '0';
+      container.style.zIndex = '-1000';
+      document.body.appendChild(container);
+
+      // 3. Render the PrintableQuoteTemplate into the container using createRoot
+      const root = createRoot(container);
+      root.render(<PrintableQuoteTemplate data={quoteData} />);
+
+      // 4. Wait for React to render and DOM to settle
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // 5. Find the rendered template div
+      const element = document.getElementById('print-template');
+      if (!element) {
+          document.body.removeChild(container);
+          alert("Lỗi tạo mẫu in.");
+          return;
+      }
+
+      try {
+          // 6. Capture with html2canvas
+          const canvas = await html2canvas(element, { 
+              scale: 2, // High resolution
+              useCORS: true,
+              backgroundColor: '#ffffff'
           });
+          
+          const imgData = canvas.toDataURL('image/jpeg', 1.0);
+          
+          if (type === 'image') {
+              const link = document.createElement('a');
+              link.download = `BaoGia_VinFast_${new Date().getTime()}.jpg`;
+              link.href = imgData;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+          } else {
+              // PDF Logic: Scale image to fit A4 width
+              const pdf = new jsPDF('p', 'mm', 'a4');
+              const pdfWidth = pdf.internal.pageSize.getWidth();
+              const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+              
+              pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+              pdf.save(`BaoGia_VinFast_${new Date().getTime()}.pdf`);
+          }
+      } catch (err) {
+          console.error("Export failed", err);
+          alert("Lỗi khi xuất file. Vui lòng thử lại.");
+      } finally {
+          // Cleanup
+          setTimeout(() => {
+              root.unmount();
+              document.body.removeChild(container);
+          }, 100);
       }
   };
 

@@ -26,6 +26,8 @@ const CustomerList: React.FC = () => {
   
   // Initialize States
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(''); // NEW: For performance
+  
   const [selectedRep, setSelectedRep] = useState<string>('all');
   const [selectedTeam, setSelectedTeam] = useState<string>('all'); 
   const [timeFilter, setTimeFilter] = useState<'today' | 'this_month' | 'last_month' | 'quarter' | 'year' | 'all'>('all');
@@ -72,6 +74,14 @@ const CustomerList: React.FC = () => {
   
   const [formData, setFormData] = useState(initialFormState);
 
+  // --- OPTIMIZATION: Debounce Search Term ---
+  useEffect(() => {
+      const handler = setTimeout(() => {
+          setDebouncedSearchTerm(searchTerm);
+      }, 400); // Wait 400ms after typing stops
+      return () => clearTimeout(handler);
+  }, [searchTerm]);
+
   // --- RESTORE STATE LOGIC (SessionStorage) ---
   useEffect(() => {
     // 1. If explicit navigation from Dashboard (Alerts), use location.state
@@ -101,7 +111,7 @@ const CustomerList: React.FC = () => {
           const parsed = JSON.parse(savedState);
           // Only restore if valid
           if (parsed.activeTab) setActiveTab(parsed.activeTab);
-          if (parsed.searchTerm) setSearchTerm(parsed.searchTerm);
+          // Note: We don't restore searchTerm automatically to avoid confusion
           if (parsed.selectedRep) setSelectedRep(parsed.selectedRep);
           if (parsed.selectedTeam) setSelectedTeam(parsed.selectedTeam);
           if (parsed.timeFilter) setTimeFilter(parsed.timeFilter);
@@ -118,7 +128,7 @@ const CustomerList: React.FC = () => {
   useEffect(() => {
     const stateToSave = {
       activeTab,
-      searchTerm,
+      searchTerm: debouncedSearchTerm, // Save the actual applied term
       selectedRep,
       selectedTeam,
       timeFilter,
@@ -126,12 +136,12 @@ const CustomerList: React.FC = () => {
       isExpiredLongTermFilter
     };
     sessionStorage.setItem('crm_customer_view_state', JSON.stringify(stateToSave));
-  }, [activeTab, searchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter]);
+  }, [activeTab, debouncedSearchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, activeTab]);
+  }, [debouncedSearchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, activeTab]);
 
   useEffect(() => {
     fetchCustomersWithIsolation();
@@ -190,9 +200,16 @@ const CustomerList: React.FC = () => {
       }
 
       // 2. Fetch Customers (OWNED + TEAM + GLOBAL DELEGATION)
+      // OPTIMIZATION: ONLY SELECT COLUMNS NEEDED FOR LIST VIEW
+      // Excludes: deal_details (heavy json), stop_reason (text)
       let query = supabase
         .from('customers')
-        .select('*')
+        .select(`
+            id, name, phone, secondary_phone, location, status, source, interest, 
+            sales_rep, creator_id, classification, recare_date, is_special_care, 
+            is_long_term, deal_status, pending_transfer_to, is_acknowledged, 
+            created_at, updated_at
+        `)
         .order('created_at', { ascending: false });
 
       if (!isAdmin) {
@@ -240,7 +257,12 @@ const CustomerList: React.FC = () => {
           if (sharedInIds.length > 0) {
               const { data: sharedCustomerData } = await supabase
                   .from('customers')
-                  .select('*')
+                  .select(`
+                      id, name, phone, secondary_phone, location, status, source, interest, 
+                      sales_rep, creator_id, classification, recare_date, is_special_care, 
+                      is_long_term, deal_status, pending_transfer_to, is_acknowledged, 
+                      created_at, updated_at
+                  `)
                   .in('id', sharedInIds);
               
               if (sharedCustomerData) {
@@ -314,7 +336,7 @@ const CustomerList: React.FC = () => {
     setIsDuplicateModalOpen(true);
     setDuplicateGroups([]);
     try {
-        const { data, error } = await supabase.from('customers').select('*');
+        const { data, error } = await supabase.from('customers').select('id, name, phone, created_at, sales_rep, status');
         if (error) throw error;
         const allCust = data as Customer[];
         const groups: Record<string, Customer[]> = {};
@@ -476,8 +498,9 @@ const CustomerList: React.FC = () => {
 
   // Base list filtered by Search/Rep/Date (Not Tabs)
   const baseFilteredCustomers = useMemo(() => {
-      const normalizedSearch = searchTerm.replace(/\s+/g, '');
-      const lowerSearchTerm = searchTerm.toLowerCase();
+      // Use Debounced Term for Filtering
+      const normalizedSearch = debouncedSearchTerm.replace(/\s+/g, '');
+      const lowerSearchTerm = debouncedSearchTerm.toLowerCase();
 
       let filtered = customers.filter(c => {
         const normalizedPhone = c.phone ? c.phone.replace(/\s+/g, '') : '';
@@ -547,7 +570,7 @@ const CustomerList: React.FC = () => {
       }
 
       return filtered;
-  }, [customers, searchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, isAdmin, isMod, todayStr, employees]);
+  }, [customers, debouncedSearchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, isAdmin, isMod, todayStr, employees]);
 
   // Tab Filtering logic applied to base list
   const filteredList = useMemo(() => {
