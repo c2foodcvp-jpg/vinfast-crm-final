@@ -460,7 +460,8 @@ const OnlineQuote: React.FC = () => {
       });
       
       if (includeInsurance) {
-          const insuranceAmount = listPrice * (insuranceRate / 100);
+          // --- CHANGED: Calculate insurance based on FINAL INVOICE PRICE (XHĐ), not List Price ---
+          const insuranceAmount = finalInvoicePrice * (insuranceRate / 100);
           totalFees += insuranceAmount;
           breakdown.push({ name: `Bảo hiểm thân vỏ (${insuranceRate}%)`, amount: insuranceAmount, originalId: 'hull_insurance' });
       }
@@ -472,7 +473,7 @@ const OnlineQuote: React.FC = () => {
       }
 
       return { totalFees, breakdown };
-  }, [fees, customFees, feeOptions, listPrice, manualServiceFee, includeInsurance, insuranceRate]);
+  }, [fees, customFees, feeOptions, listPrice, finalInvoicePrice, manualServiceFee, includeInsurance, insuranceRate]);
 
   const totalFees = feeCalculation.totalFees;
 
