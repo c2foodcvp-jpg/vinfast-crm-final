@@ -72,6 +72,9 @@ export interface QuoteConfig {
   // NEW: Gift Ratio for Membership (% Tặng thêm)
   gift_ratio?: number;
 
+  // NEW: Apply to specific regions (e.g. ['HCM', 'HN'])
+  apply_to_regions?: string[];
+
   manager_id?: string;
 }
 

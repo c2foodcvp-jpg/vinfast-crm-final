@@ -13,12 +13,15 @@ import jsPDF from 'jspdf';
 
 // --- DATA: BẢNG GIÁ DỊCH VỤ ĐĂNG KÝ 2025 ---
 const REGISTRATION_SERVICES = [
+    { label: '[Hà Nội] VNEID TOÀN TRÌNH', value: 3000000 },
+    { label: '[Hà Nội] VNEID - TRUYỀN THỐNG', value: 3000000 },
+    { label: '[Hà Nội] PHÍ CÀ VẸT NHANH', value: 1500000 },
     { label: '[HCM] VNEID TOÀN TRÌNH - KHÔNG XE', value: 3000000 },
     { label: '[HCM] VNEID - TRUYỀN THỐNG (KHÔNG XE)', value: 3000000 },
     { label: '[HCM] PHÍ CÀ VẸT NHANH', value: 1500000 },
     { label: '[Bình Dương] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3000000 },
     { label: '[Bình Dương] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3100000 },
-    { label: '[Bình Dương] PHÍ CÀ VẸT NHANH', value: 1500000 }, // Assumed standard
+    { label: '[Bình Dương] PHÍ CÀ VẸT NHANH', value: 1500000 },
     { label: '[Đồng Nai] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3200000 },
     { label: '[Đồng Nai] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3400000 },
     { label: '[Đồng Nai] PHÍ CÀ VẸT NHANH', value: 1500000 },
@@ -31,92 +34,13 @@ const REGISTRATION_SERVICES = [
     { label: '[Tây Ninh] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3500000 },
     { label: '[Tây Ninh] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
     { label: '[Tây Ninh] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Đắk Lắk] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Đắk Lắk] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6000000 },
-    { label: '[Đắk Lắk] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Quy Nhơn] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6000000 },
-    { label: '[Quy Nhơn] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6500000 },
-    { label: '[Quy Nhơn] PHÍ CÀ VẸT NHANH', value: 1000000 },
-    { label: '[Đắk Nông] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6500000 },
-    { label: '[Đắk Nông] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6800000 },
-    { label: '[Đắk Nông] PHÍ CÀ VẸT NHANH', value: 1000000 },
-    { label: '[Gia Lai] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6500000 },
-    { label: '[Gia Lai] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 7500000 },
-    { label: '[Gia Lai] PHÍ CÀ VẸT NHANH', value: 1000000 },
-    { label: '[Cần Thơ] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
-    { label: '[Cần Thơ] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
-    { label: '[Cần Thơ] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Kon Tum] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 7000000 },
-    { label: '[Kon Tum] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 8000000 },
-    // Lâm Đồng Special Case handled generic or range max
-    { label: '[Lâm Đồng] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5200000 },
-    { label: '[Lâm Đồng] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5700000 },
-    { label: '[Lâm Đồng] PHÍ CÀ VẸT NHANH', value: 2000000 }, 
-    { label: '[An Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
-    { label: '[An Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
-    { label: '[An Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Bạc Liêu] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Bạc Liêu] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5300000 },
-    { label: '[Bạc Liêu] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Bến Tre] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3700000 },
-    { label: '[Bến Tre] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
-    { label: '[Bến Tre] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Cà Mau] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Cà Mau] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5500000 },
-    { label: '[Cà Mau] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Long An] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3500000 },
-    { label: '[Long An] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
-    { label: '[Long An] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Sóc Trăng] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
-    { label: '[Sóc Trăng] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
-    { label: '[Sóc Trăng] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Quảng Trị] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 9000000 },
-    { label: '[Quảng Trị] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 9000000 },
-    { label: '[Quảng Trị] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Tiền Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3500000 },
-    { label: '[Tiền Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
-    { label: '[Tiền Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Vĩnh Long] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3800000 },
-    { label: '[Vĩnh Long] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4100000 },
-    { label: '[Vĩnh Long] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    // Bình Định - Hỏi lại (Set 0 or placeholder) -> Skipping "Hỏi lại" or setting 0
-    { label: '[Bình Thuận] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Bình Thuận] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5200000 },
-    { label: '[Bình Thuận] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Đà Nẵng] Các Quận', value: 11000000 },
-    { label: '[Nha Trang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6200000 },
-    { label: '[Nha Trang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 7500000 },
-    { label: '[Nha Trang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Ninh Thuận] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5700000 },
-    { label: '[Ninh Thuận] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6200000 },
-    { label: '[Ninh Thuận] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Phú Yên] TP Tuy Hòa / Sông Cầu / Đông Hòa...', value: 8000000 },
-    { label: '[Quảng Nam] Hội An / Tam Kỳ...', value: 11000000 },
-    { label: '[Quảng Ngãi] TP Quảng Ngãi / Bình Sơn...', value: 11000000 },
-    { label: '[Kiên Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Kiên Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5300000 },
-    { label: '[Kiên Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Đồng Tháp] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3800000 },
-    { label: '[Đồng Tháp] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4000000 },
-    { label: '[Đồng Tháp] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Hà Tĩnh] Hưng Khê / Nghi Lộc', value: 10000000 },
-    { label: '[Hà Tĩnh] Huyện khác', value: 8000000 },
-    { label: '[Hậu Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
-    { label: '[Hậu Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
-    { label: '[Hậu Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Huế] Thành Phố Huế', value: 12000000 },
-    { label: '[Trà Vinh] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4100000 },
-    { label: '[Trà Vinh] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4300000 },
-    { label: '[Trà Vinh] PHÍ CÀ VẸT NHANH', value: 1500000 },
 ];
 
 // --- HELPER: WARRANTY TEXT LOGIC ---
 const getWarrantyText = (modelName: string) => {
-    const tenYearModels = ['VF 7', 'VF 8', 'VF 9', 'VF7', 'VF8', 'VF9', 'Lạc Hồng', 'Dragon'];
-    // Check if model name contains any of the 10-year keywords
-    const isTenYear = tenYearModels.some(m => modelName.toUpperCase().includes(m.toUpperCase()));
-    
-    if (isTenYear) {
+    const name = modelName ? modelName.toUpperCase() : '';
+    const tenYearModels = ['VF 7', 'VF 8', 'VF 9', 'VF7', 'VF8', 'VF9', 'LẠC HỒNG', 'DRAGON'];
+    if (tenYearModels.some(m => name.includes(m))) {
         return "Bảo hành 10 năm - Không giới hạn Km";
     }
     return "Bảo hành 07 năm hoặc 160.000 Km";
@@ -127,7 +51,8 @@ const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
     const { 
         carModelName, versionName, listPrice, finalInvoicePrice, totalFees, finalRollingPrice,
         invoiceBreakdown, feeBreakdown, rollingBreakdown, activeGifts, membershipData,
-        bankName, loanAmount, upfrontPayment, monthlyPaymentTable, userProfile, prepaidPercent
+        bankName, loanAmount, upfrontPayment, monthlyPaymentTable, userProfile, prepaidPercent,
+        isRegistrationFree 
     } = data;
 
     const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
@@ -214,9 +139,9 @@ const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
                     <p style={{ margin: 0, fontSize: '14px', color: '#6b7280' }}>Ngày báo giá: {today}</p>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '14px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>CHÍNH SÁCH BẢO HÀNH</div>
-                    <div style={{ fontWeight: 'bold', fontSize: '16px', color: '#111827', marginTop: '4px' }}>{warrantyText}</div>
-                    <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>Cứu hộ 24/7 miễn phí</div>
+                    <div style={{ fontSize: '22px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>VINFAST AUTO</div>
+                    <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#111827', marginBottom: '4px' }}>{warrantyText}</div>
+                    <div style={{ fontSize: '14px', color: '#374151', fontStyle: 'italic' }}>Cứu hộ miễn phí 24/7</div>
                 </div>
             </div>
 
@@ -260,6 +185,12 @@ const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
                                 <td style={{...styles.tdRight, fontWeight: 'normal'}}>{formatCurrency(item.amount)}</td>
                             </tr>
                         ))}
+                        {isRegistrationFree && (
+                            <tr style={{ backgroundColor: '#f0fdf4' }}>
+                                <td style={{...styles.td, color: '#166534', fontWeight: 'bold'}}>• Tặng 100% Phí Đăng ký</td>
+                                <td style={{...styles.tdRight, color: '#166534'}}>-{formatCurrency(totalFees)}</td>
+                            </tr>
+                        )}
                         {rollingBreakdown.map((item: any, idx: number) => (
                             <tr key={`r-${idx}`} style={{ backgroundColor: '#fff7ed' }}>
                                 <td style={{...styles.td, color: '#ea580c', fontWeight: 'bold'}}>• {item.name} (Ưu đãi)</td>
@@ -329,7 +260,6 @@ const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
 
             <div style={{ marginTop: '40px', borderTop: '1px dashed #d1d5db', paddingTop: '20px', textAlign: 'center', fontSize: '12px', color: '#6b7280' }}>
                 <p>Bảng báo giá có giá trị tham khảo. Vui lòng liên hệ trực tiếp TVBH để được tư vấn chương trình khuyến mãi chính xác nhất.</p>
-                <p style={{ fontWeight: 'bold', marginTop: '5px', fontSize: '14px', color: '#111827' }}>Hotline Kinh Doanh: {userProfile?.phone || '...'}</p>
             </div>
         </div>
     );
@@ -375,6 +305,9 @@ const OnlineQuote: React.FC = () => {
   const [insuranceRate, setInsuranceRate] = useState<number>(1.2); // Default 1.2%
   const [feeSearch, setFeeSearch] = useState('');
   const [showFeeList, setShowFeeList] = useState(false);
+  
+  // NEW: FREE REGISTRATION FLAG
+  const [isRegistrationFree, setIsRegistrationFree] = useState(false);
 
   useEffect(() => {
     fetchQuoteData();
@@ -451,7 +384,6 @@ const OnlineQuote: React.FC = () => {
 
   const selectedVersion = carVersions.find(v => v.id === selectedVersionId);
   const selectedBank = banks.find(b => b.id === selectedBankId);
-  const selectedModel = carModels.find(m => m.id === selectedModelId);
 
   // Warranty Logic Helper - Updated to use Config
   const getWarrantyPeriod = (modelId: string) => {
@@ -471,18 +403,29 @@ const OnlineQuote: React.FC = () => {
       return selectedBank.interest_rate_1y || 0;
   }, [selectedBank, selectedPackageIndex]);
 
-  // --- NEW: Helper to get package name ---
-  const currentPackageName = useMemo(() => {
-      if (!selectedBank || !selectedBank.packages || selectedBank.packages.length === 0) return '';
-      return selectedBank.packages[selectedPackageIndex]?.name || '';
-  }, [selectedBank, selectedPackageIndex]);
-
   // Filtered Reg Fees for Search
   const filteredRegFees = useMemo(() => {
       if (!feeSearch) return [];
       const lower = feeSearch.toLowerCase();
       return REGISTRATION_SERVICES.filter(s => s.label.toLowerCase().includes(lower));
   }, [feeSearch]);
+
+  // --- REGION DETECTION LOGIC ---
+  const currentRegion = useMemo(() => {
+      const feeWithOptions = fees.find(f => f.options && f.options.length > 0);
+      if (!feeWithOptions) return 'Tỉnh'; // Default fallback
+
+      const selectedVal = feeOptions[feeWithOptions.id];
+      const selectedOption = feeWithOptions.options?.find(o => o.value === selectedVal);
+      
+      if (!selectedOption) return 'Tỉnh';
+      
+      const label = selectedOption.label.toLowerCase();
+      if (label.includes('hcm') || label.includes('hồ chí minh') || label.includes('sài gòn')) return 'HCM';
+      if (label.includes('hà nội') || label.includes('hn') || label.includes('ha noi')) return 'HN';
+      
+      return 'Tỉnh';
+  }, [fees, feeOptions]);
 
   // --- CALCULATIONS ---
   const listPrice = selectedVersion?.price || 0;
@@ -568,10 +511,9 @@ const OnlineQuote: React.FC = () => {
       });
       
       if (includeInsurance) {
-          // --- CHANGED: Calculate insurance based on FINAL INVOICE PRICE (XHĐ), not List Price ---
           const insuranceAmount = finalInvoicePrice * (insuranceRate / 100);
           totalFees += insuranceAmount;
-          breakdown.push({ name: `Bảo hiểm thân vỏ (${insuranceRate}%)`, amount: insuranceAmount, originalId: 'hull_insurance' });
+          breakdown.push({ name: `Bảo hiểm 2 chiều (${insuranceRate}%)`, amount: insuranceAmount, originalId: 'hull_insurance' });
       }
       
       const serviceFee = Number(manualServiceFee.replace(/\D/g, ''));
@@ -623,7 +565,8 @@ const OnlineQuote: React.FC = () => {
       return { totalDiscount, breakdown };
   }, [promotions, appliedPromos, selectedModelId, selectedVersionId, listPrice, manualDiscount]);
 
-  const preRollingPrice = finalInvoicePrice + totalFees;
+  // NEW: Calculate Rolling Price logic (Handle Free Registration)
+  const preRollingPrice = finalInvoicePrice + (isRegistrationFree ? 0 : totalFees);
   const finalRollingPrice = Math.max(0, preRollingPrice - rollingPromoCalculation.totalDiscount);
 
   // 4. Payment & Loan
@@ -664,15 +607,24 @@ const OnlineQuote: React.FC = () => {
       return result;
   }, [loanAmount, selectedBank, currentInterestRate]);
 
-  // Helper to check if gift is VinPoint
+  // Helper to check if gift is VinPoint or Region restricted
   const getGiftDetails = (g: QuoteConfig) => {
+      // 1. Check Region Restriction
+      if (g.apply_to_regions && g.apply_to_regions.length > 0) {
+          // If current region is not in the list, skip this gift
+          if (!g.apply_to_regions.includes(currentRegion)) return null;
+      }
+
+      // 2. Check VinPoint Model Mapping
       if (g.options && g.options.length > 0) {
           const mapped = g.options.find(opt => opt.model_id === selectedModelId);
           if (mapped) {
               return { isVinPoint: true, value: mapped.value, label: `${g.name} (Tích điểm)` };
           }
-          return null;
+          return null; // Gift configured with options but no match for this model
       }
+      
+      // 3. Standard Gift
       return { isVinPoint: false, value: g.value, label: g.name };
   };
 
@@ -693,7 +645,10 @@ const OnlineQuote: React.FC = () => {
               ["", ""],
               ["CHI PHÍ LĂN BÁNH", ""],
               ...feeCalculation.breakdown.map(f => [f.name, formatCurrency(f.amount)]),
-              ["TỔNG PHÍ", formatCurrency(totalFees)],
+              // If free registration, show negative line
+              ...(isRegistrationFree ? [["Tặng 100% Phí Đăng ký", `-${formatCurrency(totalFees)}`]] : []),
+              
+              ["TỔNG PHÍ", formatCurrency(isRegistrationFree ? 0 : totalFees)],
               ["", ""],
               ["ƯU ĐÃI LĂN BÁNH", ""],
               ...rollingPromoCalculation.breakdown.map(p => [p.name, `-${formatCurrency(p.amount)}`]),
@@ -738,7 +693,8 @@ const OnlineQuote: React.FC = () => {
           upfrontPayment,
           monthlyPaymentTable,
           userProfile,
-          prepaidPercent
+          prepaidPercent,
+          isRegistrationFree // Pass this flag to print template
       };
 
       const container = document.createElement('div');
@@ -815,9 +771,6 @@ const OnlineQuote: React.FC = () => {
           <div className="flex gap-2">
               <button onClick={() => handleExportQuote('image')} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg text-sm">
                   <FileImage size={16}/> Lưu Ảnh
-              </button>
-              <button onClick={() => handleExportQuote('pdf')} className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-lg text-sm">
-                  <FileText size={16}/> Xuất PDF
               </button>
               <button onClick={() => handleExportQuote('excel')} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 shadow-lg text-sm">
                   <Download size={16}/> Excel
@@ -954,6 +907,43 @@ const OnlineQuote: React.FC = () => {
                   </div>
               </div>
 
+              {/* FEE OPTIONS (Plate, TNDS...) */}
+              {fees.some(f => f.options && f.options.length > 0) && (
+                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                      <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><MapPin size={18}/> Khu vực & Phí khác</h3>
+                      <div className="space-y-4">
+                          {fees.filter(f => f.options && f.options.length > 0).map(f => (
+                              <div key={f.id}>
+                                  <label className="block text-sm font-bold text-gray-600 mb-1">{f.name}</label>
+                                  <select 
+                                      className="w-full border border-gray-300 rounded-xl px-3 py-2.5 outline-none focus:border-emerald-500 font-medium"
+                                      value={feeOptions[f.id] || (f.options && f.options[0]?.value)}
+                                      onChange={(e) => setFeeOptions({...feeOptions, [f.id]: Number(e.target.value)})}
+                                  >
+                                      {f.options?.map((opt, idx) => (
+                                          <option key={idx} value={opt.value}>{opt.label}</option>
+                                      ))}
+                                  </select>
+                              </div>
+                          ))}
+                      </div>
+                      
+                      {/* FREE REGISTRATION CHECKBOX */}
+                      <div className="mt-4 pt-4 border-t border-gray-100">
+                          <label className="flex items-center gap-2 cursor-pointer bg-green-50 p-2 rounded-lg border border-green-100 hover:bg-green-100 transition-colors">
+                              <input 
+                                  type="checkbox" 
+                                  checked={isRegistrationFree} 
+                                  onChange={(e) => setIsRegistrationFree(e.target.checked)} 
+                                  className="w-5 h-5 text-green-600 rounded focus:ring-green-500"
+                              />
+                              <span className="text-sm font-bold text-green-800 flex-1">Tặng 100% Phí đăng ký</span>
+                              {isRegistrationFree && <span className="text-xs font-bold text-green-600 bg-white px-2 py-0.5 rounded">Đã áp dụng</span>}
+                          </label>
+                      </div>
+                  </div>
+              )}
+
               {/* Promotions */}
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
                   <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><DollarSign size={18}/> Khuyến mãi áp dụng</h3>
@@ -1063,7 +1053,7 @@ const OnlineQuote: React.FC = () => {
                   {/* Header Image Area */}
                   <div className="bg-gradient-to-r from-emerald-600 to-teal-500 p-6 text-white relative overflow-hidden">
                       <div className="relative z-10">
-                          <h2 className="text-3xl font-extrabold uppercase tracking-tight">Báo Giá Xe {selectedModel?.name || 'VinFast'}</h2>
+                          <h2 className="text-3xl font-extrabold uppercase tracking-tight">Báo Giá Xe {carModels.find(m=>m.id===selectedModelId)?.name || 'VinFast'}</h2>
                           <p className="text-emerald-100 font-medium text-lg mt-1">{selectedVersion?.name || 'Vui lòng chọn phiên bản'}</p>
                           
                           {/* Specs Summary */}
@@ -1107,29 +1097,11 @@ const OnlineQuote: React.FC = () => {
                               <span className="text-sm font-bold text-gray-500 uppercase">Chi phí lăn bánh (Dự kiến)</span>
                           </div>
                           <div className="space-y-2 text-sm">
-                              {feeCalculation.breakdown.filter(item => item.originalId !== 'manual_service').map((item, idx) => (
-                                  <div key={idx} className="flex justify-between items-center group">
-                                      <span className="text-gray-700 font-medium">{item.name}</span>
-                                      <div className="flex items-center gap-2">
-                                          {/* Check if this is a configurable fee or calculated one (like insurance) */}
-                                          {item.originalId && fees.find(f => f.id === item.originalId) ? (
-                                              <>
-                                                  {/* Standard Fee Logic */}
-                                                  <span className="font-bold">{formatCurrency(item.amount)}</span>
-                                              </>
-                                          ) : (
-                                              <span className="font-bold">{formatCurrency(item.amount)}</span>
-                                          )}
-                                          <span className="text-gray-500 text-xs">VNĐ</span>
-                                      </div>
-                                  </div>
-                              ))}
-
-                              {/* Configurable Fees Rendering (Re-using old logic to allow edit) */}
-                              {fees.filter(f => !feeCalculation.breakdown.find(b => b.originalId === f.id)).map((f) => (
+                              {fees.map((f) => (
                                   <div key={f.id} className="flex justify-between items-center group">
                                       <div className="flex items-center gap-2">
                                           <span className="text-gray-700 font-medium">{f.name}</span>
+                                          {/* Show Dropdown if Options exist */}
                                           {f.options && f.options.length > 0 && (
                                               <select 
                                                   className="bg-gray-50 border border-gray-300 text-gray-800 text-xs rounded p-1 outline-none font-bold"
@@ -1143,12 +1115,14 @@ const OnlineQuote: React.FC = () => {
                                           )}
                                       </div>
                                       <div className="flex items-center gap-2">
+                                          {/* Editable Fee if no options */}
                                           <input 
                                             className="text-right font-bold text-gray-800 bg-transparent border-b border-transparent focus:border-emerald-500 focus:bg-white w-28 outline-none transition-all"
                                             value={formatCurrency(
                                                 (f.options && f.options.length > 0) ? (feeOptions[f.id] || 0) : (customFees[f.id] !== undefined ? customFees[f.id] : f.value)
                                             )}
                                             onChange={(e) => {
+                                                // Only allow manual edit if NOT options based
                                                 if (!f.options || f.options.length === 0) {
                                                     const val = Number(e.target.value.replace(/\./g, ''));
                                                     if (!isNaN(val)) setCustomFees({...customFees, [f.id]: val});
@@ -1177,6 +1151,17 @@ const OnlineQuote: React.FC = () => {
                                       <span className="text-gray-500 text-xs">VNĐ</span>
                                   </div>
                               </div>
+                              
+                              {/* NEW: Insurance Line Visible in Preview when Checked */}
+                              {includeInsurance && (
+                                  <div className="flex justify-between items-center group pt-1">
+                                      <span className="text-gray-700 font-medium">Bảo hiểm 2 chiều ({insuranceRate}%)</span>
+                                      <div className="flex items-center gap-2">
+                                          <span className="text-right font-bold text-gray-800 w-28">{formatCurrency(finalInvoicePrice * (insuranceRate / 100))}</span>
+                                          <span className="text-gray-500 text-xs">VNĐ</span>
+                                      </div>
+                                  </div>
+                              )}
 
                               <div className="flex justify-between pt-2 mt-2 border-t border-gray-200">
                                   <span className="font-bold text-gray-600 uppercase">TỔNG PHÍ ĐĂNG KÝ</span>
@@ -1186,12 +1171,18 @@ const OnlineQuote: React.FC = () => {
                       </div>
 
                       {/* 3. ROLLING PROMOS */}
-                      {rollingPromoCalculation.totalDiscount > 0 && (
+                      {(rollingPromoCalculation.totalDiscount > 0 || isRegistrationFree) && (
                           <div>
                               <div className="flex justify-between items-end mb-2 border-b border-emerald-200 pb-1">
                                   <span className="text-sm font-bold text-gray-500 uppercase">Ưu đãi Lăn bánh / Giảm thêm</span>
                               </div>
                               <div className="space-y-2">
+                                  {isRegistrationFree && (
+                                      <div className="flex justify-between text-sm text-gray-600 pl-2 border-l-2 border-green-500 bg-green-50/50 p-1 rounded-r">
+                                          <span>• Tặng 100% Phí Đăng ký</span>
+                                          <span className="font-bold text-green-600">-{formatCurrency(totalFees)}</span>
+                                      </div>
+                                  )}
                                   {rollingPromoCalculation.breakdown.map((p, idx) => (
                                       <div key={idx} className="flex justify-between text-sm text-gray-600 pl-2 border-l-2 border-orange-300">
                                           <span>• {p.name}</span>
@@ -1222,7 +1213,7 @@ const OnlineQuote: React.FC = () => {
                                           {g.isVinPoint ? (
                                               <span className="font-bold text-yellow-600 flex items-center gap-1"><Coins size={12}/> {formatCurrency(g.value)} điểm</span>
                                           ) : (
-                                              <span className="font-bold text-purple-600">{g.value > 0 ? formatCurrency(g.value) : ''}</span>
+                                              <span className="font-bold text-purple-600">{g.value > 0 ? formatCurrency(g.value) : 'Hiện vật'}</span>
                                           )}
                                       </div>
                                   ))}
@@ -1240,12 +1231,9 @@ const OnlineQuote: React.FC = () => {
                       {selectedBank && loanAmount > 0 && (
                           <div className="bg-white rounded-xl overflow-hidden border border-blue-100">
                               <div className="bg-blue-50 p-3 flex items-center justify-between border-b border-blue-100">
-                                  <div className="flex items-center gap-2 text-blue-800 font-bold"><Landmark size={18}/> BẢNG TÍNH VAY NGÂN HÀNG ({selectedBank.name})</div>
+                                  <div className="flex items-center gap-2 text-blue-800 font-bold"><Landmark size={18}/> BẢNG TÍNH VAY NGÂN HÀNG</div>
                                   <div className="text-xs font-bold bg-white text-blue-600 px-2 py-1 rounded border border-blue-200">
-                                      {currentPackageName 
-                                          ? `${currentPackageName} (${currentInterestRate}%)`
-                                          : (currentInterestRate > 0 ? `Lãi ${currentInterestRate}% năm đầu` : 'Chưa có lãi suất')
-                                      }
+                                      {currentInterestRate > 0 ? `Lãi ${currentInterestRate}% năm đầu` : 'Chưa có lãi suất'}
                                   </div>
                               </div>
                               <div className="p-4 grid grid-cols-2 gap-6 bg-blue-50/30">
