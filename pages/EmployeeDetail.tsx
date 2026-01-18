@@ -20,8 +20,12 @@ const EmployeeDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   
   // KPI Logic
-  const [currentMonthKPI, setCurrentMonthKPI] = useState<number>(0);
+  const [viewedKPI, setViewedKPI] = useState<number>(0);
   
+  // Date Filters
+  const [filterMonth, setFilterMonth] = useState<number>(new Date().getMonth() + 1);
+  const [filterYear, setFilterYear] = useState<number>(new Date().getFullYear());
+
   // KPI Modal
   const [showKpiModal, setShowKpiModal] = useState(false);
   const [kpiForm, setKpiForm] = useState({ 
@@ -51,7 +55,7 @@ const EmployeeDetail: React.FC = () => {
         return;
     }
     fetchData();
-  }, [id, isAdmin, isMod]);
+  }, [id, isAdmin, isMod, filterMonth, filterYear]);
 
   const fetchData = async () => {
     try {
@@ -62,7 +66,7 @@ const EmployeeDetail: React.FC = () => {
       if (empError) throw empError;
       setEmployee(empData as UserProfile);
 
-      // 2. Fetch Customers
+      // 2. Fetch Customers (Global list for this user, filtered in UI)
       const { data: custData, error: custError } = await supabase.from('customers').select('*').eq('creator_id', id).order('created_at', { ascending: false });
       if (custError) throw custError;
       setCustomers(custData as Customer[]);
@@ -72,31 +76,31 @@ const EmployeeDetail: React.FC = () => {
       if (transError) throw transError;
       setTransactions(transData as Transaction[]);
 
-      // 4. Fetch Current Month KPI
-      const currentMonth = new Date().getMonth() + 1;
-      const currentYear = new Date().getFullYear();
+      // 4. Fetch Specific Month KPI
       try {
           const { data: kpiData, error: kpiError } = await supabase.from('employee_kpis')
               .select('target')
               .eq('user_id', id)
-              .eq('month', currentMonth)
-              .eq('year', currentYear)
+              .eq('month', filterMonth)
+              .eq('year', filterYear)
               .maybeSingle();
           
           if (kpiError) {
               // Check for table missing error (42P01 or 404 from REST)
               if (kpiError.code === '42P01' || kpiError.message?.includes('404')) {
                   setShowSql(true);
-                  setCurrentMonthKPI(empData.kpi_target || 0); // Fallback to old field
+                  setViewedKPI(empData.kpi_target || 0); // Fallback to old field
               } else {
                   console.error(kpiError);
+                  setViewedKPI(0);
               }
           } else {
-              setCurrentMonthKPI(kpiData ? kpiData.target : (empData.kpi_target || 0));
+              // Use fetched target or 0 if no record exists for this specific month
+              setViewedKPI(kpiData ? kpiData.target : 0);
           }
       } catch (e) {
           // Fallback if table fetch fails completely
-          setCurrentMonthKPI(empData.kpi_target || 0);
+          setViewedKPI(empData.kpi_target || 0);
       }
 
     } catch (err) {
@@ -119,19 +123,20 @@ const EmployeeDetail: React.FC = () => {
               year: kpiForm.year,
               target: target,
               updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id, month, year' });
+          }, { onConflict: 'user_id,month,year' });
 
           if (error) throw error;
           
-          // Refresh if setting for current month
-          const currentMonth = new Date().getMonth() + 1;
-          const currentYear = new Date().getFullYear();
-          if (kpiForm.month === currentMonth && kpiForm.year === currentYear) {
-              setCurrentMonthKPI(target);
+          // Refresh if setting for currently viewed month
+          if (kpiForm.month === filterMonth && kpiForm.year === filterYear) {
+              setViewedKPI(target);
           }
 
           setShowKpiModal(false);
-          alert(`Đã cập nhật KPI tháng ${kpiForm.month}/${kpiForm.year}!`);
+          alert(`Đã cập nhật KPI tháng ${kpiForm.month}/${kpiForm.year} thành công!`);
+          
+          // Refresh all data
+          fetchData();
       } catch (e: any) {
           console.error(e);
           // Check for table missing (404 Not Found usually implies table doesn't exist in Supabase REST)
@@ -172,6 +177,9 @@ create policy "Write KPIs" on public.employee_kpis for all using (
 
   // --- STATS CALCULATION ---
   const stats = useMemo(() => {
+      // Filter stats based on selected Month/Year if needed, or keep global stats?
+      // Usually "Total Customers" means lifetime. 
+      // Let's keep lifetime stats here, KPI logic handles specific month.
       const total = customers.length;
       const won = customers.filter(c => c.status === CustomerStatus.WON).length;
       const lost = customers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING).length;
@@ -182,24 +190,24 @@ create policy "Write KPIs" on public.employee_kpis for all using (
       return { total, won, lost, active, potentialHot, conversionRate, unacknowledged };
   }, [customers]);
 
-  // --- KPI LOGIC (Current Month) ---
+  // --- KPI LOGIC (Based on Filter) ---
   const kpiData = useMemo(() => {
-      const currentMonth = new Date().getMonth() + 1;
-      const currentYear = new Date().getFullYear();
-      
-      const wonThisMonth = customers.filter(c => {
+      // Calculate Won deals strictly in the filtered month/year
+      const wonInPeriod = customers.filter(c => {
           if (c.status !== CustomerStatus.WON) return false;
+          // Logic: Deal Date (updated_at) or Creation Date? Usually Closing Date.
           const d = new Date(c.updated_at || c.created_at);
-          return d.getMonth() + 1 === currentMonth && d.getFullYear() === currentYear;
+          return d.getMonth() + 1 === filterMonth && d.getFullYear() === filterYear;
       }).length;
 
-      const target = currentMonthKPI || 0;
-      const percentage = target > 0 ? Math.min(100, Math.round((wonThisMonth / target) * 100)) : 0;
+      const target = viewedKPI || 0;
+      const percentage = target > 0 ? Math.min(100, Math.round((wonInPeriod / target) * 100)) : 0;
       
-      return { wonThisMonth, target, percentage };
-  }, [customers, currentMonthKPI]);
+      return { wonInPeriod, target, percentage };
+  }, [customers, viewedKPI, filterMonth, filterYear]);
 
-  // --- FINANCIAL CHART DATA (Monthly) ---
+  // --- FINANCIAL CHART DATA (Monthly - Last 6 Months) ---
+  // Keeps existing logic for the chart to show trend
   const financialData = useMemo(() => {
       const last6Months = [];
       const now = new Date();
@@ -242,12 +250,21 @@ create policy "Write KPIs" on public.employee_kpis for all using (
       return last6Months.map(m => ({ ...m, net: m.revenue - m.expense }));
   }, [transactions, customers]);
 
-  // --- PART TIME INCOME CALCULATION (30% of NET) ---
-  const totalNetRevenue = useMemo(() => {
-      return financialData.reduce((sum, item) => sum + item.net, 0);
-  }, [financialData]);
-  
-  const partTimeIncome = totalNetRevenue > 0 ? totalNetRevenue * 0.3 : 0;
+  // --- PART TIME INCOME CALCULATION (30% of NET - Filtered by Month) ---
+  const partTimeIncome = useMemo(() => {
+      // Calculate Net Revenue for the specific filtered month
+      const transInMonth = transactions.filter(t => {
+          if (t.status !== 'approved') return false;
+          const d = new Date(t.created_at);
+          return d.getMonth() + 1 === filterMonth && d.getFullYear() === filterYear;
+      });
+
+      const revenue = transInMonth.filter(t => ['revenue', 'deposit', 'repayment'].includes(t.type)).reduce((sum, t) => sum + t.amount, 0);
+      const expense = transInMonth.filter(t => ['expense', 'advance'].includes(t.type)).reduce((sum, t) => sum + t.amount, 0);
+      const net = revenue - expense;
+      
+      return net > 0 ? net * 0.3 : 0;
+  }, [transactions, filterMonth, filterYear]);
 
   // --- CUSTOMER FILTER LOGIC ---
   const filteredCustomers = useMemo(() => {
@@ -270,7 +287,7 @@ create policy "Write KPIs" on public.employee_kpis for all using (
   return (
     <div className="space-y-6 pb-20">
       {/* Header */}
-      <div className="flex flex-col md:flex-row items-center gap-4">
+      <div className="flex flex-col md:flex-row items-center gap-4 justify-between">
           <div className="flex items-center gap-4 w-full md:w-auto">
               <button onClick={() => navigate('/employees')} className="p-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
                   <ArrowLeft size={20} className="text-gray-600" />
@@ -283,10 +300,34 @@ create policy "Write KPIs" on public.employee_kpis for all using (
                   <p className="text-gray-500 text-sm">{employee.email} • {employee.phone}</p>
               </div>
           </div>
-          <div className="ml-auto flex items-center gap-3">
-              <div className="px-3 py-1 bg-primary-50 text-primary-700 rounded-lg text-xs font-bold uppercase">{employee.role}</div>
+          
+          <div className="flex items-center gap-3">
+              {/* Date Filter */}
+              <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-2 py-1 shadow-sm h-10">
+                  <Calendar size={16} className="text-gray-500 ml-1" />
+                  <select 
+                      value={filterMonth} 
+                      onChange={(e) => setFilterMonth(parseInt(e.target.value))}
+                      className="bg-transparent text-sm font-bold text-gray-700 outline-none cursor-pointer border-r border-gray-200 pr-2 mr-2"
+                  >
+                      {Array.from({length: 12}, (_, i) => i + 1).map(m => (
+                          <option key={m} value={m}>Tháng {m}</option>
+                      ))}
+                  </select>
+                  <select 
+                      value={filterYear} 
+                      onChange={(e) => setFilterYear(parseInt(e.target.value))}
+                      className="bg-transparent text-sm font-bold text-gray-700 outline-none cursor-pointer"
+                  >
+                      {[2024, 2025, 2026].map(y => (<option key={y} value={y}>{y}</option>))}
+                  </select>
+              </div>
+
+              <div className="px-3 py-1 bg-primary-50 text-primary-700 rounded-lg text-xs font-bold uppercase h-10 flex items-center">{employee.role}</div>
               {!employee.is_part_time && (
-                  <button onClick={() => { setKpiForm({target: currentMonthKPI.toString(), month: new Date().getMonth()+1, year: new Date().getFullYear()}); setShowKpiModal(true); }} className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-purple-700"><Target size={14}/> Set KPI</button>
+                  <button onClick={() => { setKpiForm({target: viewedKPI.toString(), month: filterMonth, year: filterYear}); setShowKpiModal(true); }} className="px-3 h-10 bg-purple-600 text-white rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-purple-700 shadow-md">
+                      <Target size={14}/> Set KPI
+                  </button>
               )}
           </div>
       </div>
@@ -314,7 +355,7 @@ create policy "Write KPIs" on public.employee_kpis for all using (
               <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-5 rounded-2xl border border-orange-200 shadow-sm flex flex-col justify-between relative overflow-hidden">
                   <div className="flex justify-between items-start z-10">
                       <div>
-                          <p className="text-orange-800 text-xs font-bold uppercase flex items-center gap-1"><Wallet size={14}/> Thu nhập Part-time</p>
+                          <p className="text-orange-800 text-xs font-bold uppercase flex items-center gap-1"><Wallet size={14}/> Thu nhập Tháng {filterMonth}/{filterYear}</p>
                           <h3 className="text-2xl font-bold text-gray-900 mt-1">{formatCurrency(partTimeIncome)} <span className="text-sm font-normal text-gray-500">VNĐ</span></h3>
                       </div>
                       <div className="text-right">
@@ -323,7 +364,7 @@ create policy "Write KPIs" on public.employee_kpis for all using (
                       </div>
                   </div>
                   <div className="mt-4 pt-4 border-t border-orange-200">
-                      <p className="text-xs text-orange-700 font-medium flex justify-between"><span>Doanh thu Net (6 tháng):</span> <span>{formatCurrency(totalNetRevenue)} VNĐ</span></p>
+                      <p className="text-xs text-orange-700 font-medium">Doanh thu Net tháng này: {formatCurrency(partTimeIncome / 0.3)} VNĐ</p>
                   </div>
                   <div className="absolute -right-6 -bottom-6 text-orange-200 opacity-50 pointer-events-none"><Briefcase size={100} /></div>
               </div>
@@ -331,8 +372,8 @@ create policy "Write KPIs" on public.employee_kpis for all using (
               <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between relative overflow-hidden">
                   <div className="flex justify-between items-start z-10">
                       <div>
-                          <p className="text-gray-500 text-xs font-bold uppercase flex items-center gap-1"><Trophy size={14} className="text-yellow-500"/> KPI Tháng {new Date().getMonth()+1}</p>
-                          <h3 className="text-2xl font-bold text-gray-900 mt-1">{kpiData.wonThisMonth} / {kpiData.target} <span className="text-sm font-normal text-gray-500">xe</span></h3>
+                          <p className="text-gray-500 text-xs font-bold uppercase flex items-center gap-1"><Trophy size={14} className="text-yellow-500"/> KPI Tháng {filterMonth}/{filterYear}</p>
+                          <h3 className="text-2xl font-bold text-gray-900 mt-1">{kpiData.wonInPeriod} / {kpiData.target} <span className="text-sm font-normal text-gray-500">xe</span></h3>
                       </div>
                       <div className="text-right">
                           <p className={`text-lg font-bold ${kpiData.percentage >= 100 ? 'text-green-600' : 'text-blue-600'}`}>{kpiData.percentage}%</p>
@@ -350,12 +391,12 @@ create policy "Write KPIs" on public.employee_kpis for all using (
           <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center">
                     <div className="p-2 bg-blue-50 text-blue-600 rounded-full mb-2"><Users size={20} /></div>
-                    <p className="text-gray-500 text-[10px] font-bold uppercase">Tổng Khách</p>
+                    <p className="text-gray-500 text-[10px] font-bold uppercase">Tổng Khách (Tất cả)</p>
                     <p className="text-xl font-bold text-gray-900">{stats.total}</p>
                 </div>
                 <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center">
                     <div className="p-2 bg-green-50 text-green-600 rounded-full mb-2"><CheckCircle size={20} /></div>
-                    <p className="text-gray-500 text-[10px] font-bold uppercase">Đã chốt</p>
+                    <p className="text-gray-500 text-[10px] font-bold uppercase">Đã chốt (Tất cả)</p>
                     <p className="text-xl font-bold text-gray-900">{stats.won}</p>
                 </div>
                 <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center">
@@ -374,7 +415,7 @@ create policy "Write KPIs" on public.employee_kpis for all using (
       {/* CHARTS ROW */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-              <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><BadgeDollarSign className="text-green-600"/> Hiệu quả Kinh doanh (Net)</h3>
+              <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><BadgeDollarSign className="text-green-600"/> Hiệu quả Kinh doanh (Net - 6 Tháng gần nhất)</h3>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={financialData}>

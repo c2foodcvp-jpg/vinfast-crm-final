@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import { Transaction, UserProfile, Customer, CustomerStatus, TransactionType, ProfitExclusion } from '../types';
+import { Transaction, UserProfile, Customer, CustomerStatus, TransactionType, ProfitExclusion, EmployeeKPI } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { 
   PiggyBank, Plus, CheckCircle2, AlertOctagon, History, User, Filter, 
@@ -46,6 +46,7 @@ const Finance: React.FC = () => {
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
   const [allProfiles, setAllProfiles] = useState<UserProfile[]>([]);
   const [profitExclusions, setProfitExclusions] = useState<ProfitExclusion[]>([]);
+  const [allKPIs, setAllKPIs] = useState<EmployeeKPI[]>([]); // NEW: Store all KPIs
   
   // Filter States
   const [selectedTeam, setSelectedTeam] = useState<string>('all');
@@ -129,6 +130,10 @@ const Finance: React.FC = () => {
           const { data: exclusions } = await supabase.from('profit_exclusions').select('*');
           if (exclusions) setProfitExclusions(exclusions as ProfitExclusion[]);
 
+          // NEW: Fetch all KPIs to link dynamically
+          const { data: kpis } = await supabase.from('employee_kpis').select('*');
+          if (kpis) setAllKPIs(kpis as EmployeeKPI[]);
+
           const extendedTrans: ExtendedTransaction[] = transList.map(t => {
               const customer = t.customer_id ? custList.find(c => c.id === t.customer_id) : null;
               const creator = profiles?.find(p => p.id === t.user_id);
@@ -178,16 +183,16 @@ const Finance: React.FC = () => {
 
   const handleSaveQr = async () => {
       setIsSavingQr(true);
-      try { await supabase.from('app_settings').upsert({ key: 'qr_code_url', value: newQrUrl }); setQrCodeUrl(newQrUrl); setShowConfigModal(false); showToast("Đã lưu QR Code!", 'success'); } catch (e) { showToast("Lỗi lưu QR.", 'error'); } finally { setIsSavingQr(false); }
+      try { await supabase.from('app_settings').upsert({ key: 'qr_code_url', value: newQrUrl }); setQrCodeUrl(newQrUrl); setShowConfigModal(false); showToast("Đã lưu QR Code!", 'success'); } catch (e: any) { showToast("Lỗi lưu QR.", 'error'); } finally { setIsSavingQr(false); }
   };
 
   const handleApprove = async (t: Transaction, approve: boolean) => {
-      try { await supabase.from('transactions').update({ status: approve ? 'approved' : 'rejected', approved_by: userProfile?.id }).eq('id', t.id); fetchDataWithIsolation(); showToast(approve ? "Đã duyệt!" : "Đã từ chối!", 'success'); } catch (e) { showToast("Lỗi xử lý.", 'error'); }
+      try { await supabase.from('transactions').update({ status: approve ? 'approved' : 'rejected', approved_by: userProfile?.id }).eq('id', t.id); fetchDataWithIsolation(); showToast(approve ? "Đã duyệt!" : "Đã từ chối!", 'success'); } catch (e: any) { showToast("Lỗi xử lý.", 'error'); }
   };
 
   const confirmDeleteTransaction = async () => {
       if (!transactionToDelete) return;
-      try { await supabase.from('transactions').delete().eq('id', transactionToDelete.id); setTransactionToDelete(null); fetchDataWithIsolation(); showToast("Đã xóa giao dịch!", 'success'); } catch (e) { showToast("Lỗi xóa.", 'error'); }
+      try { await supabase.from('transactions').delete().eq('id', transactionToDelete.id); setTransactionToDelete(null); fetchDataWithIsolation(); showToast("Đã xóa giao dịch!", 'success'); } catch (e: any) { showToast("Lỗi xóa.", 'error'); }
   };
 
   const executeResetFinance = async () => {
@@ -266,7 +271,7 @@ const Finance: React.FC = () => {
           setShowDealerDebtModal(false);
           setDealerDebtForm({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền' });
           showToast("Đã tạo khoản nợ!");
-      } catch (e) { showToast("Lỗi tạo khoản nợ", 'error'); }
+      } catch (e: any) { showToast("Lỗi tạo khoản nợ", 'error'); }
   };
 
   const executeDealerDebtPaid = async () => {
@@ -292,7 +297,7 @@ const Finance: React.FC = () => {
           setEditingRatioId(null);
           fetchDataWithIsolation();
           showToast("Đã cập nhật tỉ lệ!");
-      } catch (e) { showToast("Lỗi cập nhật", 'error'); }
+      } catch (e: any) { showToast("Lỗi cập nhật", 'error'); }
   };
 
   const handleToggleExclusion = async (customerId: string) => {
@@ -305,7 +310,7 @@ const Finance: React.FC = () => {
               await supabase.from('profit_exclusions').insert([{ user_id: targetUserForExclusion.id, customer_id: customerId }]);
           }
           fetchDataWithIsolation(); 
-      } catch (e) { console.error(e); }
+      } catch (e: any) { console.error(e); }
   };
 
   // --- LOGIC ---
@@ -460,7 +465,10 @@ const Finance: React.FC = () => {
       const rows = eligibleProfiles.map(emp => {
           const baseRatio = emp.profit_share_ratio !== null && emp.profit_share_ratio !== undefined ? emp.profit_share_ratio : defaultShare;
           
-          const kpiTarget = emp.kpi_target || 0;
+          // UPDATED: Find KPI for the SELECTED Month/Year
+          const specificKPI = allKPIs.find(k => k.user_id === emp.id && k.month === selectedMonth && k.year === selectedYear);
+          const kpiTarget = specificKPI ? specificKPI.target : (emp.kpi_target || 0); // Fallback if no specific record found
+
           const kpiActual = allCustomers.filter(c => {
               if (c.creator_id !== emp.id || c.status !== CustomerStatus.WON) return false;
               if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false; 
@@ -540,7 +548,7 @@ const Finance: React.FC = () => {
       });
 
       return rows;
-  }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, pnlNet, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile]);
+  }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, pnlNet, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, allKPIs]);
 
 
   const expenses = filteredTransactions.filter(t => t.type === 'expense' || t.type === 'advance');
@@ -840,7 +848,7 @@ const Finance: React.FC = () => {
                                       {pendingRepayment && (isAdmin || isMod) && (<button onClick={(e) => { e.stopPropagation(); handleApprove(pendingRepayment, true); }} className="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 flex items-center gap-1 animate-pulse shadow-sm"><CheckCircle2 size={12}/> Duyệt nhận tiền</button>)}
                                       {t.status === 'approved' && !finalPaid && !pendingRepayment && (isAdmin || isMod) && (<button onClick={(e) => { e.stopPropagation(); setAdvanceToRepay(t); }} className="px-2 py-1 bg-white border border-green-200 text-green-700 rounded text-xs font-bold hover:bg-green-50 flex items-center gap-1"><Undo2 size={12}/> Thu tiền mặt</button>)}
                                       {t.status === 'pending' && (isAdmin || isMod) && (<><button onClick={(e) => { e.stopPropagation(); handleApprove(t, true); }} className="p-1 bg-green-100 text-green-600 rounded hover:bg-green-200"><CheckCircle2 size={16}/></button><button onClick={(e) => { e.stopPropagation(); handleApprove(t, false); }} className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"><XCircle size={16}/></button></>)}
-                                      {(isAdmin || isMod) && (<button onClick={(e) => { e.stopPropagation(); setTransactionToDelete(t); }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={14}/></button>)}
+                                      {(isAdmin || isMod) && (<button onClick={() => { e.stopPropagation(); setTransactionToDelete(t); }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={14}/></button>)}
                                   </div>
                               </div>
                           );

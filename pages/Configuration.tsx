@@ -3,19 +3,19 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { Distributor, CarModel, UserRole, DemoCar, UserProfile, CarVersion, QuoteConfig, BankConfig, QuoteConfigOption, BankPackage } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Trash2, Edit2, X, MapPin, Building2, Loader2, Copy, Terminal, Database, AlertCircle, Car, Settings, CheckCircle2, AlertTriangle, Key, Filter, ChevronDown, List, Percent, Landmark, Wallet, Layers, GripVertical, Gift, Crown } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, MapPin, Building2, Loader2, Copy, Terminal, Database, AlertCircle, Car, Settings, CheckCircle2, AlertTriangle, Key, Filter, ChevronDown, List, Percent, Landmark, Wallet, Layers, GripVertical, Gift, Crown, Coins, ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const Configuration: React.FC = () => {
   const { userProfile, isAdmin, isMod } = useAuth();
   const navigate = useNavigate();
   // Enhanced tabs
-  const [activeTab, setActiveTab] = useState<'distributors' | 'cars' | 'versions' | 'promos' | 'fees' | 'banks' | 'demo_cars' | 'gifts' | 'membership'>('distributors');
+  const [activeTab, setActiveTab] = useState<'distributors' | 'cars' | 'versions' | 'promos' | 'fees' | 'banks' | 'demo_cars' | 'gifts' | 'membership' | 'warranties'>('distributors');
   
   const [distributors, setDistributors] = useState<Distributor[]>([]);
   const [carModels, setCarModels] = useState<CarModel[]>([]);
   const [carVersions, setCarVersions] = useState<CarVersion[]>([]);
-  const [quoteConfigs, setQuoteConfigs] = useState<QuoteConfig[]>([]); // Promos, Fees, Gifts, Membership
+  const [quoteConfigs, setQuoteConfigs] = useState<QuoteConfig[]>([]); // Promos, Fees, Gifts, Membership, Warranty
   const [banks, setBanks] = useState<BankConfig[]>([]);
   const [demoCars, setDemoCars] = useState<DemoCar[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
@@ -33,9 +33,13 @@ const Configuration: React.FC = () => {
   const [formData, setFormData] = useState<any>({}); 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Options State for Fees
+  // Options State for Fees/VinPoint
   const [isMultiOption, setIsMultiOption] = useState(false);
   const [feeOptions, setFeeOptions] = useState<QuoteConfigOption[]>([]);
+  
+  // VinPoint State
+  const [isVinPoint, setIsVinPoint] = useState(false);
+  const [vinPointMap, setVinPointMap] = useState<Record<string, number>>({});
 
   // Bank Packages State
   const [bankPackages, setBankPackages] = useState<BankPackage[]>([]);
@@ -140,6 +144,10 @@ const Configuration: React.FC = () => {
             const { data, error } = await getQuery('quote_configs').eq('type', 'membership').order('priority', {ascending: true});
             if (error) throw error;
             setQuoteConfigs(data as QuoteConfig[]);
+        } else if (activeTab === 'warranties') {
+            const { data, error } = await getQuery('quote_configs').eq('type', 'warranty').order('created_at', {ascending: false});
+            if (error) throw error;
+            setQuoteConfigs(data as QuoteConfig[]);
         } else if (activeTab === 'banks') {
             const { data, error } = await getQuery('banks');
             if (error) throw error;
@@ -173,6 +181,22 @@ const Configuration: React.FC = () => {
           } else {
               setIsMultiOption(false);
               setFeeOptions([{ label: 'Mặc định', value: 0 }]);
+          }
+      }
+
+      // Gifts Logic (VinPoint)
+      if (activeTab === 'gifts') {
+          if (item && item.options && item.options.length > 0) {
+              setIsVinPoint(true);
+              // Map back to vinPointMap
+              const map: Record<string, number> = {};
+              item.options.forEach((opt: QuoteConfigOption) => {
+                  if (opt.model_id) map[opt.model_id] = opt.value;
+              });
+              setVinPointMap(map);
+          } else {
+              setIsVinPoint(false);
+              setVinPointMap({});
           }
       }
 
@@ -265,15 +289,49 @@ const Configuration: React.FC = () => {
           else if (activeTab === 'gifts') {
               table = 'quote_configs';
               payload.type = 'gift';
-              payload.value = Number(String(payload.value).replace(/\D/g, ''));
-              payload.value_type = 'fixed'; // Usually gifts are fixed value
+              if (isVinPoint) {
+                  payload.value = 0;
+                  payload.value_type = 'fixed';
+                  // Map vinPointMap to options array
+                  const options = Object.entries(vinPointMap).map(([mId, pts]) => {
+                      const mName = carModels.find(m => m.id === mId)?.name || 'Unknown';
+                      return { label: mName, value: pts, model_id: mId };
+                  });
+                  payload.options = options;
+              } else {
+                  payload.value = Number(String(payload.value).replace(/\D/g, ''));
+                  payload.value_type = 'fixed'; 
+                  payload.options = null;
+              }
           }
           else if (activeTab === 'membership') {
               table = 'quote_configs';
               payload.type = 'membership';
-              payload.value = Number(String(payload.value).replace(/\D/g, '')); // Discount %
-              payload.gift_ratio = Number(String(payload.gift_ratio).replace(/\D/g, '')); // Gift %
+              
+              // FIX: Robust Decimal Parsing logic.
+              const parseDecimal = (val: any) => {
+                  if (!val) return 0;
+                  let s = String(val);
+                  s = s.replace(/,/g, '.'); // Swap comma to dot
+                  // Keep digits and dots only
+                  s = s.replace(/[^0-9.]/g, ''); 
+                  const num = parseFloat(s);
+                  return isNaN(num) ? 0 : num;
+              };
+
+              // Use the parser instead of stripping non-digits
+              payload.value = parseDecimal(formData.value); 
+              payload.gift_ratio = parseDecimal(formData.gift_ratio); 
+
               payload.value_type = 'percent';
+          }
+          else if (activeTab === 'warranties') {
+              table = 'quote_configs';
+              payload.type = 'warranty';
+              payload.value = 0; 
+              payload.value_type = 'fixed';
+              // Sanitize arrays
+              if (!payload.apply_to_model_ids || payload.apply_to_model_ids.length === 0) payload.apply_to_model_ids = null;
           }
           else if (activeTab === 'banks') { 
               table = 'banks'; 
@@ -339,7 +397,7 @@ const Configuration: React.FC = () => {
 
 -- Bổ sung cột cho bảng quote_configs
 alter table public.quote_configs drop constraint if exists quote_configs_type_check;
-alter table public.quote_configs add constraint quote_configs_type_check check (type in ('promotion', 'fee', 'gift', 'membership'));
+alter table public.quote_configs add constraint quote_configs_type_check check (type in ('promotion', 'fee', 'gift', 'membership', 'warranty'));
 alter table public.quote_configs add column if not exists gift_ratio numeric default 0;
 
 alter table public.quote_configs add column if not exists target_type text check (target_type in ('invoice', 'rolling')) default 'invoice';
@@ -396,6 +454,9 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
           </button>
           <button onClick={() => setActiveTab('membership')} className={`px-4 py-3 font-bold text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === 'membership' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               <Crown size={18}/> Hạng thành viên
+          </button>
+          <button onClick={() => setActiveTab('warranties')} className={`px-4 py-3 font-bold text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === 'warranties' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              <ShieldCheck size={18}/> Bảo hành
           </button>
           <button onClick={() => setActiveTab('fees')} className={`px-4 py-3 font-bold text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === 'fees' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               <Wallet size={18}/> Các loại phí
@@ -521,7 +582,17 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                                   {!conf.is_active && <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-0.5 rounded">Ẩn</span>}
                               </div>
                               <h3 className="font-bold text-gray-900 mt-1 flex items-center gap-2"><Gift size={16} className="text-purple-500"/> {conf.name}</h3>
-                              <p className="text-gray-500 text-sm mt-1">Giá trị: {conf.value > 0 ? `${conf.value.toLocaleString()} VNĐ` : 'Hiện vật'}</p>
+                              {/* VinPoint Check */}
+                              {conf.options && conf.options.length > 0 ? (
+                                  <div className="mt-1">
+                                      <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded font-bold flex items-center gap-1 w-fit"><Coins size={10}/> VinPoint</span>
+                                      <p className="text-xs text-gray-500 mt-1">
+                                          Tích điểm tùy dòng xe ({conf.options.length} dòng xe)
+                                      </p>
+                                  </div>
+                              ) : (
+                                  <p className="text-gray-500 text-sm mt-1">Giá trị: {conf.value > 0 ? `${conf.value.toLocaleString()} VNĐ` : 'Hiện vật'}</p>
+                              )}
                           </div>
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button onClick={() => handleOpenModal(conf)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 size={16} /></button>
@@ -544,6 +615,30 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                               <div className="mt-2 space-y-1">
                                   <p className="text-blue-600 text-sm font-bold">Giảm giá: {conf.value}%</p>
                                   <p className="text-green-600 text-sm font-bold">Tặng thêm: {conf.gift_ratio || 0}%</p>
+                              </div>
+                          </div>
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => handleOpenModal(conf)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 size={16} /></button>
+                              <button onClick={() => handleDeleteClick(conf, 'quote_configs')} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                          </div>
+                      </div>
+                  </div>
+              ))}
+
+              {/* Warranty Display (NEW) */}
+              {activeTab === 'warranties' && quoteConfigs.map(conf => (
+                  <div key={conf.id} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all group relative">
+                      <div className="flex justify-between items-start">
+                          <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                  {!conf.is_active && <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-0.5 rounded">Ẩn</span>}
+                              </div>
+                              <h3 className="font-bold text-gray-900 mt-1 flex items-center gap-2"><ShieldCheck size={16} className="text-green-600"/> {conf.name}</h3>
+                              {/* Display Scope */}
+                              <div className="mt-2 text-xs text-gray-500">
+                                  {conf.apply_to_model_ids && conf.apply_to_model_ids.length > 0 ? (
+                                      <p>Dòng xe: {conf.apply_to_model_ids.map(id => carModels.find(m => m.id === id)?.name).join(', ')}</p>
+                                  ) : <p>Tất cả dòng xe</p>}
                               </div>
                           </div>
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -734,7 +829,50 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
 
                   {activeTab === 'gifts' && (
                       <>
-                          <div><label className="block text-sm font-bold text-gray-700 mb-1">Giá trị (nếu có)</label><input type="text" value={formData.value ? Number(formData.value).toLocaleString() : ''} onChange={e => setFormData({...formData, value: e.target.value.replace(/\D/g, '')})} className="w-full border border-gray-300 rounded-xl px-3 py-2 font-bold text-gray-900 outline-none" placeholder="VD: 2.000.000"/></div>
+                          {/* VinPoint Toggle */}
+                          <div className="flex items-center gap-2 mb-4 p-2 bg-yellow-50 rounded-lg border border-yellow-100">
+                              <input 
+                                  type="checkbox" 
+                                  id="isVinPoint" 
+                                  checked={isVinPoint} 
+                                  onChange={(e) => setIsVinPoint(e.target.checked)} 
+                                  className="w-5 h-5 text-yellow-600 rounded"
+                              />
+                              <label htmlFor="isVinPoint" className="text-sm font-bold text-gray-800 cursor-pointer select-none flex items-center gap-2">
+                                  <Coins size={16} className="text-yellow-600"/>
+                                  Cấu hình VinPoint (Điểm thưởng theo dòng xe)
+                              </label>
+                          </div>
+
+                          {isVinPoint ? (
+                              <div className="space-y-2 mb-4 border border-gray-200 rounded-xl p-3 max-h-60 overflow-y-auto">
+                                  <p className="text-xs font-bold text-gray-500 uppercase mb-2">Nhập điểm cho từng dòng xe</p>
+                                  {carModels.map(model => (
+                                      <div key={model.id} className="flex justify-between items-center bg-gray-50 p-2 rounded-lg">
+                                          <span className="text-sm font-medium text-gray-700">{model.name}</span>
+                                          <div className="flex items-center gap-2">
+                                              <input 
+                                                  type="text"
+                                                  className="w-24 border border-gray-300 rounded-lg px-2 py-1 text-right font-bold text-gray-900 outline-none focus:border-yellow-500"
+                                                  placeholder="0"
+                                                  value={vinPointMap[model.id] ? vinPointMap[model.id].toLocaleString('vi-VN') : ''}
+                                                  onChange={(e) => {
+                                                      const val = Number(e.target.value.replace(/\D/g, ''));
+                                                      setVinPointMap({...vinPointMap, [model.id]: val});
+                                                  }}
+                                              />
+                                              <span className="text-xs text-gray-500 font-bold">điểm</span>
+                                          </div>
+                                      </div>
+                                  ))}
+                              </div>
+                          ) : (
+                              <div>
+                                  <label className="block text-sm font-bold text-gray-700 mb-1">Giá trị (VNĐ) hoặc Tên quà</label>
+                                  <input type="text" value={formData.value ? Number(formData.value).toLocaleString() : ''} onChange={e => setFormData({...formData, value: e.target.value.replace(/\D/g, '')})} className="w-full border border-gray-300 rounded-xl px-3 py-2 font-bold text-gray-900 outline-none" placeholder="VD: 2.000.000"/>
+                              </div>
+                          )}
+
                           <div><label className="block text-sm font-bold text-gray-700 mb-1">Thứ tự ưu tiên (Hiển thị)</label><input type="number" value={formData.priority || 0} onChange={e => setFormData({...formData, priority: parseInt(e.target.value)})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none"/></div>
                           <div className="flex items-center gap-2 mt-2"><input type="checkbox" checked={formData.is_active !== false} onChange={e => setFormData({...formData, is_active: e.target.checked})} className="w-4 h-4"/><label className="text-sm">Đang kích hoạt</label></div>
                       </>
@@ -742,9 +880,64 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
 
                   {activeTab === 'membership' && (
                       <>
-                          <div><label className="block text-sm font-bold text-gray-700 mb-1">Giảm giá (%)</label><input type="number" step="0.1" value={formData.value || ''} onChange={e => setFormData({...formData, value: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 font-bold text-blue-600 outline-none" placeholder="VD: 0.5"/></div>
-                          <div><label className="block text-sm font-bold text-gray-700 mb-1">Tặng thêm (% giá trị xe)</label><input type="number" step="0.1" value={formData.gift_ratio || ''} onChange={e => setFormData({...formData, gift_ratio: e.target.value})} className="w-full border border-gray-300 rounded-xl px-3 py-2 font-bold text-green-600 outline-none" placeholder="VD: 0.5"/></div>
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">Giảm giá (%)</label>
+                              <input 
+                                type="text" // Keep as text to control input manually
+                                value={formData.value || ''} 
+                                onChange={e => {
+                                    // Allow numbers, dots, and commas only
+                                    const raw = e.target.value;
+                                    // Regex to allow digits, one dot, or one comma
+                                    if (/^[0-9]*[.,]?[0-9]*$/.test(raw)) {
+                                        setFormData({...formData, value: raw});
+                                    }
+                                }} 
+                                className="w-full border border-gray-300 rounded-xl px-3 py-2 font-bold text-blue-600 outline-none" 
+                                placeholder="VD: 0.5"
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">Tặng thêm (% giá trị xe)</label>
+                              <input 
+                                type="text" 
+                                value={formData.gift_ratio || ''} 
+                                onChange={e => {
+                                    const raw = e.target.value;
+                                    if (/^[0-9]*[.,]?[0-9]*$/.test(raw)) {
+                                        setFormData({...formData, gift_ratio: raw});
+                                    }
+                                }}
+                                className="w-full border border-gray-300 rounded-xl px-3 py-2 font-bold text-green-600 outline-none" 
+                                placeholder="VD: 0.5"
+                              />
+                          </div>
                           <div><label className="block text-sm font-bold text-gray-700 mb-1">Thứ tự ưu tiên</label><input type="number" value={formData.priority || 0} onChange={e => setFormData({...formData, priority: parseInt(e.target.value)})} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none"/></div>
+                          <div className="flex items-center gap-2 mt-2"><input type="checkbox" checked={formData.is_active !== false} onChange={e => setFormData({...formData, is_active: e.target.checked})} className="w-4 h-4"/><label className="text-sm">Đang kích hoạt</label></div>
+                      </>
+                  )}
+                  
+                  {activeTab === 'warranties' && (
+                      <>
+                          {/* Warranty specific fields */}
+                          {/* SCOPE SELECTION: Multi-Select for Models */}
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-2">Áp dụng cho Dòng xe (Chọn nhiều)</label>
+                              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto border border-gray-300 p-3 rounded-xl bg-gray-50">
+                                  {carModels.map(c => (
+                                      <label key={c.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1.5 rounded transition-colors">
+                                          <input
+                                              type="checkbox"
+                                              checked={formData.apply_to_model_ids && formData.apply_to_model_ids.includes(c.id)}
+                                              onChange={() => toggleModelSelection(c.id)}
+                                              className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
+                                          />
+                                          <span className="text-sm font-medium text-gray-700">{c.name}</span>
+                                      </label>
+                                  ))}
+                              </div>
+                              <p className="text-xs text-gray-500 mt-1">Để trống = Tất cả dòng xe</p>
+                          </div>
                           <div className="flex items-center gap-2 mt-2"><input type="checkbox" checked={formData.is_active !== false} onChange={e => setFormData({...formData, is_active: e.target.checked})} className="w-4 h-4"/><label className="text-sm">Đang kích hoạt</label></div>
                       </>
                   )}

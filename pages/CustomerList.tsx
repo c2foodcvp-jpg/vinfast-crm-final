@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import * as ReactRouterDOM from 'react-router-dom';
 import { exportToExcel } from '../utils/excelExport';
 import { Search, Plus, X, User, CarFront, Calendar, AlertCircle, Clock, CheckCircle2, MessageSquare, ShieldAlert, Upload, FileSpreadsheet, Download, AlertTriangle, Flame, History, RotateCcw, HardDrive, MapPin, Loader2, ChevronDown, List, Filter, Webhook, UserX, ScanSearch, Phone, Trash2, Eye, Share2, Star, Activity, PauseCircle, Ban, EyeOff, Lock, ChevronLeft, ChevronRight } from 'lucide-react';
-import { CAR_MODELS } from '../types';
+import AddCustomerModal from '../components/AddCustomerModal'; // NEW IMPORT
 
 const { useNavigate, useLocation } = ReactRouterDOM as any;
 
@@ -45,10 +45,8 @@ const CustomerList: React.FC = () => {
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [sendToDiscord, setSendToDiscord] = useState(true);
   
-  // DUPLICATE MODAL STATE
+  // DUPLICATE MODAL STATE (For Transfer Request logic from List - kept separate from Add logic)
   const [isDuplicateWarningOpen, setIsDuplicateWarningOpen] = useState(false);
   const [duplicateData, setDuplicateData] = useState<{id: string, name: string, sales_rep: string, phone: string} | null>(null);
 
@@ -56,6 +54,7 @@ const CustomerList: React.FC = () => {
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // DATE LOGIC HELPER (GMT+7)
   const getLocalTodayStr = () => {
@@ -66,13 +65,6 @@ const CustomerList: React.FC = () => {
   };
 
   const todayStr = getLocalTodayStr();
-
-  const initialFormState = {
-    name: '', phone: '', location: '', source: 'MKT Group', source_detail: '', interest: '', 
-    notes: '', isZaloOnly: false, recare_date: todayStr, classification: 'Warm' as CustomerClassification
-  };
-  
-  const [formData, setFormData] = useState(initialFormState);
 
   // --- OPTIMIZATION: Debounce Search Term ---
   useEffect(() => {
@@ -330,7 +322,6 @@ const CustomerList: React.FC = () => {
       }).filter(m => m.name !== 'Unknown');
   }, [employees]);
 
-  // ... (Keep existing handler functions: handleScanDuplicates, handleInputChange, toggleZaloOnly, normalizePhone, sendNewCustomerWebhook, handleAddCustomer, executeAddCustomer, handleRequestTransfer, handleDeleteCustomer) ...
   const handleScanDuplicates = async () => {
     setIsScanning(true);
     setIsDuplicateModalOpen(true);
@@ -361,108 +352,6 @@ const CustomerList: React.FC = () => {
     }
   };
   
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const toggleZaloOnly = () => {
-     setFormData(prev => ({ ...prev, isZaloOnly: !prev.isZaloOnly }));
-  }
-
-  const normalizePhone = (p: string) => {
-    if (!p) return '';
-    return p.toString().replace(/\D/g, '');
-  };
-
-  const sendNewCustomerWebhook = async (customer: Customer, notes: string) => {
-      let webhookUrl = localStorage.getItem('vinfast_crm_discord_webhook_new_lead');
-      if (!webhookUrl) {
-          const { data } = await supabase.from('app_settings').select('value').eq('key', 'discord_webhook_new_lead').maybeSingle();
-          if (data) webhookUrl = data.value;
-      }
-      if (!webhookUrl) return;
-      try {
-          await fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-              username: "Thông báo Khách Mới",
-              embeds: [{
-                  title: "🔥 CÓ KHÁCH HÀNG MỚI!",
-                  description: `**${customer.name}** vừa được thêm vào hệ thống.`,
-                  color: 5763719,
-                  fields: [
-                      { name: "📞 SĐT", value: customer.phone, inline: true },
-                      { name: "🚗 Quan tâm", value: customer.interest || 'Chưa rõ', inline: true },
-                      { name: "📍 Khu vực", value: customer.location || 'Chưa rõ', inline: true },
-                      { name: "📝 Ghi chú", value: notes || "Không có", inline: false },
-                      { name: "👤 Người tạo", value: userProfile?.full_name || 'System', inline: true }
-                  ]
-              }]
-          }) });
-      } catch (e) { console.error("Discord Error", e); }
-  };
-
-  const handleAddCustomer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // PERMISSION CHECK
-    if (userProfile?.is_locked_add) {
-        alert("Bạn đã bị khóa quyền thêm khách mới.");
-        return;
-    }
-
-    setIsSubmitting(true);
-    if (!formData.name.trim()) { alert("Vui lòng nhập tên khách hàng"); setIsSubmitting(false); return; }
-    if (!formData.isZaloOnly && !formData.phone.trim()) { alert("Vui lòng nhập số điện thoại"); setIsSubmitting(false); return; }
-    try {
-        let finalPhone = formData.phone;
-        if (!formData.isZaloOnly) {
-            finalPhone = normalizePhone(formData.phone);
-            if (finalPhone.length === 9) finalPhone = '0' + finalPhone;
-            const { data: existing } = await supabase.from('customers').select('id, name, sales_rep').eq('phone', finalPhone).maybeSingle();
-            if (existing) {
-                setDuplicateData({ id: existing.id, name: existing.name, sales_rep: existing.sales_rep || "Chưa phân bổ", phone: finalPhone });
-                setIsDuplicateWarningOpen(true);
-                setIsSubmitting(false);
-                return;
-            }
-        } else {
-            finalPhone = 'Zalo-' + Date.now().toString().slice(-6);
-        }
-        await executeAddCustomer(finalPhone);
-    } catch (err: any) {
-        alert("Lỗi thêm khách: " + err.message);
-        setIsSubmitting(false);
-    }
-  };
-
-  const executeAddCustomer = async (finalPhone: string) => {
-      try {
-        const payload: any = {
-            name: formData.name, phone: finalPhone, location: formData.location,
-            source: formData.source === 'Khác' || formData.source === 'Giới Thiệu' ? `${formData.source}: ${formData.source_detail}` : formData.source,
-            interest: formData.interest || null, status: CustomerStatus.NEW,
-            classification: formData.classification, recare_date: formData.recare_date,
-            creator_id: userProfile?.id, sales_rep: userProfile?.full_name,
-            is_special_care: false, is_long_term: false, created_at: new Date().toISOString()
-        };
-        const { data, error } = await supabase.from('customers').insert([payload]).select();
-        if (error) throw error;
-        if (data && data[0]) {
-            await supabase.from('interactions').insert([{
-                customer_id: data[0].id, user_id: userProfile?.id, type: 'note',
-                content: `Khách hàng mới được tạo. Ghi chú: ${formData.notes}`,
-                created_at: new Date().toISOString()
-            }]);
-            if (sendToDiscord) await sendNewCustomerWebhook(data[0] as Customer, formData.notes);
-            setFormData(initialFormState);
-            setIsAddModalOpen(false);
-            setIsDuplicateWarningOpen(false);
-            setDuplicateData(null);
-            fetchCustomersWithIsolation();
-            alert("Thêm khách hàng thành công!");
-        }
-      } catch (err: any) { alert("Lỗi thêm khách: " + err.message); } finally { setIsSubmitting(false); }
-  };
-
   const handleRequestTransfer = async () => {
       if (!duplicateData || !userProfile) return;
       setIsSubmitting(true);
@@ -475,9 +364,7 @@ const CustomerList: React.FC = () => {
           }]);
           alert("Đã gửi yêu cầu chuyển quyền chăm sóc cho Admin/Mod!");
           setIsDuplicateWarningOpen(false);
-          setIsAddModalOpen(false);
           setDuplicateData(null);
-          setFormData(initialFormState);
       } catch (e) { alert("Lỗi khi gửi yêu cầu."); } finally { setIsSubmitting(false); }
   };
 
@@ -494,6 +381,14 @@ const CustomerList: React.FC = () => {
       } catch (err: any) {
           alert("Lỗi xóa: " + (err.message || "Vui lòng liên hệ Admin."));
       }
+  };
+
+  const handleAddCustomerClick = () => {
+    if (userProfile?.is_locked_add) {
+        alert("Bạn đã bị khóa quyền thêm khách mới.");
+    } else {
+        setIsAddModalOpen(true);
+    }
   };
 
   // Base list filtered by Search/Rep/Date (Not Tabs)
@@ -565,7 +460,8 @@ const CustomerList: React.FC = () => {
               if (!c.is_long_term) return false;
               if (c.status === CustomerStatus.WON || c.status === CustomerStatus.LOST) return false;
               if (!c.recare_date) return false;
-              return c.recare_date <= todayStr;
+              // LOGIC CHANGE: Only check today (past dates are auto-converted in Dashboard)
+              return c.recare_date === todayStr;
           });
       }
 
@@ -713,7 +609,7 @@ const CustomerList: React.FC = () => {
         </div>
         <div className="flex gap-2">
             {(isAdmin || isMod) && (<button onClick={handleScanDuplicates} className="flex items-center gap-2 rounded-xl bg-gray-800 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-gray-400 transition-colors hover:bg-black"><ScanSearch size={18} /> Quét trùng lặp</button>)}
-            <button onClick={() => userProfile?.is_locked_add ? alert("Bạn đã bị khóa quyền thêm khách mới.") : setIsAddModalOpen(true)} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition-colors ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}><Plus size={18} /> Thêm khách</button>
+            <button onClick={handleAddCustomerClick} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition-colors ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}><Plus size={18} /> Thêm khách</button>
         </div>
       </div>
 
@@ -895,38 +791,15 @@ const CustomerList: React.FC = () => {
         </div>
       )}
       
-      {/* ... Add/Duplicate Modals (Identical to previous) ... */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6"><h3 className="text-xl font-bold text-gray-900">Thêm khách hàng mới</h3><button onClick={() => setIsAddModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={24} /></button></div>
-            <form onSubmit={handleAddCustomer} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Họ tên <span className="text-red-500">*</span></label><input name="name" required value={formData.name} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 font-medium" placeholder="Nguyễn Văn A" /></div>
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Số điện thoại <span className="text-red-500">*</span></label><input name="phone" type="tel" value={formData.phone} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 font-medium" placeholder="0912..." disabled={formData.isZaloOnly} /></div>
-              </div>
-              <div className="flex items-center gap-2"><input type="checkbox" id="zaloOnly" checked={formData.isZaloOnly} onChange={toggleZaloOnly} className="w-4 h-4 text-primary-600 rounded" /><label htmlFor="zaloOnly" className="text-sm text-gray-700 font-medium">Khách chỉ liên hệ qua Zalo</label></div>
-              <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Dòng xe quan tâm</label><div className="relative"><select name="interest" value={formData.interest} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 appearance-none"><option value="">-- Chưa xác định --</option>{CAR_MODELS.map(m => <option key={m} value={m}>{m}</option>)}</select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} /></div></div>
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Khu vực</label><input name="location" value={formData.location} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500" placeholder="Quận 1, TP.HCM" /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                   <div className={(formData.source === 'Khác' || formData.source === 'Giới Thiệu') ? "" : "col-span-2"}><label className="block text-sm font-bold text-gray-700 mb-1">Nguồn khách</label><div className="relative"><select name="source" value={formData.source} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 appearance-none"><option value="MKT Group">MKT Group</option><option value="Showroom">Showroom</option><option value="Hotline">Hotline</option><option value="Sự kiện">Sự kiện</option><option value="Giới Thiệu">Giới Thiệu</option><option value="Khác">Khác</option></select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} /></div></div>
-                   {(formData.source === 'Khác' || formData.source === 'Giới Thiệu') && (<div><label className="block text-sm font-bold text-gray-700 mb-1">Chi tiết nguồn</label><input name="source_detail" value={formData.source_detail} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500" placeholder="Nhập chi tiết..." /></div>)}
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Phân loại</label><div className="relative"><select name="classification" value={formData.classification} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 appearance-none"><option value="Hot">Hot</option><option value="Warm">Warm</option><option value="Cool">Cool</option></select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} /></div></div>
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Ngày CS tiếp theo</label><div className="relative"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} /><input name="recare_date" type="date" min={todayStr} value={formData.recare_date} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl pl-10 pr-4 py-3 outline-none focus:border-primary-500" /></div></div>
-              </div>
-              <div><label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú ban đầu</label><textarea name="notes" value={formData.notes} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 h-24 resize-none" placeholder="Khách hàng quan tâm vấn đề gì..." /></div>
-              <div className="flex gap-3 pt-2">
-                 <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 py-2.5 text-gray-700 font-bold bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors">Hủy</button>
-                 <button type="submit" disabled={isSubmitting} className="flex-1 py-2.5 text-white font-bold bg-primary-600 hover:bg-primary-700 rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2">{isSubmitting && <Loader2 className="animate-spin" size={18} />} Thêm mới</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* ISOLATED ADD CUSTOMER MODAL */}
+      <AddCustomerModal 
+          isOpen={isAddModalOpen} 
+          onClose={() => setIsAddModalOpen(false)} 
+          onSuccess={() => {
+              fetchCustomersWithIsolation();
+              // alert("Thêm khách hàng thành công!"); // Handled inside modal or rely on auto-refresh
+          }}
+      />
 
       {isDuplicateWarningOpen && duplicateData && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">

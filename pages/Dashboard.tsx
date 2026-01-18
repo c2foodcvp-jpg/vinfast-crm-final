@@ -7,7 +7,8 @@ import {
   Users, TrendingUp, CheckCircle, Plus, Loader2, AlertTriangle, Clock, Calendar, BellRing, ChevronRight, Send, X, Settings, Zap, MessageSquarePlus, BarChart3, UserPlus, Mail, Copy, Terminal, ExternalLink, ArrowRightLeft, FileCheck2, FileText, Save, Bell, Hand, Filter, Briefcase, Trophy, UserX, MapPin, CarFront, ChevronDown, BadgeDollarSign
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { CustomerStatus, Customer, UserProfile, UserRole, CustomerClassification, CAR_MODELS as DEFAULT_CAR_MODELS } from '../types';
+import { CustomerStatus, Customer, UserProfile, UserRole, CustomerClassification } from '../types';
+import AddCustomerModal from '../components/AddCustomerModal'; // NEW IMPORT
 
 const { useNavigate } = ReactRouterDOM as any;
 
@@ -39,20 +40,13 @@ const Dashboard: React.FC = () => {
   const [statusData, setStatusData] = useState<any[]>([]);
   const [leadData, setLeadData] = useState<any[]>([]);
   
-  const [carList, setCarList] = useState<string[]>(DEFAULT_CAR_MODELS);
-
   // Notification Bell State
   const [isNotiOpen, setIsNotiOpen] = useState(false);
   const notiRef = useRef<HTMLDivElement>(null);
 
   // --- ADD CUSTOMER MODAL STATE ---
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // DUPLICATE MODAL STATE
-  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
-  const [duplicateData, setDuplicateData] = useState<{id: string, name: string, sales_rep: string, phone: string} | null>(null);
-
   // GMT+7 Helper
   const getLocalTodayStr = () => {
     const now = new Date();
@@ -61,15 +55,16 @@ const Dashboard: React.FC = () => {
   };
   const todayStr = getLocalTodayStr();
 
-  const initialFormState = {
-    name: '', phone: '', location: '', source: 'MKT Group', source_detail: '', interest: '', 
-    notes: '', isZaloOnly: false, recare_date: todayStr, classification: 'Warm' as CustomerClassification
+  // Get Tomorrow Str for Auto-Reschedule
+  const getTomorrowStr = () => {
+    const now = new Date();
+    const vnTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+    vnTime.setDate(vnTime.getDate() + 1);
+    return vnTime.toISOString().split('T')[0];
   };
-  const [formData, setFormData] = useState(initialFormState);
 
   useEffect(() => {
     fetchDataWithIsolation();
-    fetchCarModels();
     const handleClickOutside = (event: MouseEvent) => {
       if (notiRef.current && !notiRef.current.contains(event.target as Node)) {
         setIsNotiOpen(false);
@@ -85,15 +80,6 @@ const Dashboard: React.FC = () => {
           calculateStats();
       }
   }, [timeFilter, allCustomers]);
-
-  const fetchCarModels = async () => {
-      try {
-          const { data } = await supabase.from('car_models').select('name').order('created_at', { ascending: false });
-          if (data && data.length > 0) {
-              setCarList(data.map(c => c.name));
-          }
-      } catch (e) { console.error("Error fetching car models", e); }
-  };
 
   // --- TEAM ISOLATION LOGIC ---
   const fetchDataWithIsolation = async () => {
@@ -147,7 +133,36 @@ const Dashboard: React.FC = () => {
 
           const { data: customersData, error } = await query;
           if (error) throw error;
-          const customers = customersData as Customer[] || [];
+          let customers = customersData as Customer[] || [];
+
+          // --- AUTO-CONVERT EXPIRED LONG-TERM TO NORMAL ---
+          const tomorrowStr = getTomorrowStr();
+          const expiredLongTermIds: string[] = [];
+          
+          customers = customers.map(c => {
+              // Logic: If Long-term AND Recare date is STRICTLY IN PAST (< todayStr)
+              // Convert to Normal and move Recare Date to TOMORROW
+              if (c.is_long_term && c.recare_date && c.recare_date < todayStr && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST) {
+                  expiredLongTermIds.push(c.id);
+                  // Update local object immediately for UI
+                  return { ...c, is_long_term: false, recare_date: tomorrowStr };
+              }
+              return c;
+          });
+
+          // Perform DB update for expired ones (Fire and forget, or await if critical)
+          if (expiredLongTermIds.length > 0) {
+              await supabase.from('customers').update({ 
+                  is_long_term: false, 
+                  recare_date: tomorrowStr 
+              }).in('id', expiredLongTermIds);
+              
+              // Optional: Log interaction for automation
+              // expiredLongTermIds.forEach(id => {
+              //    supabase.from('interactions').insert([{ customer_id: id, user_id: userProfile.id, type: 'note', content: 'Hệ thống: Tự động chuyển từ CS Dài hạn sang Thường (Hết hạn).', created_at: new Date().toISOString() }]);
+              // });
+          }
+
           setAllCustomers(customers);
           
           // Alerts are calculated on ALL fetched data (Operational)
@@ -163,7 +178,11 @@ const Dashboard: React.FC = () => {
   const calculateAlerts = async (customers: Customer[], teamIds: string[]) => {
       const dueCount = customers.filter((c: any) => !c.is_special_care && !c.is_long_term && c.recare_date === todayStr && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length;
       const overdueCount = customers.filter((c: any) => !c.is_special_care && !c.is_long_term && c.recare_date && c.recare_date < todayStr && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length;
-      const expiredLongTerm = customers.filter((c: any) => c.is_long_term && c.recare_date && c.recare_date <= todayStr && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
+      
+      // Expired Long Term: ONLY SHOW IF RECARE DATE IS TODAY
+      // (Past dates are auto-converted to normal, so only "Today" matters for notification)
+      const expiredLongTerm = customers.filter((c: any) => c.is_long_term && c.recare_date === todayStr && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.LOST).length;
+      
       const assignedTodayToMe = customers.filter((c: Customer) => c.status === CustomerStatus.NEW && c.is_acknowledged === false && c.creator_id === userProfile?.id).length;
       
       const unacknowledgedLeads = (isAdmin || isMod) 
@@ -252,9 +271,6 @@ const Dashboard: React.FC = () => {
       setStatusData(pieData);
 
       // 4. Trend Data (Last 7 Days - Always Realtime trend for UX, or Filtered?)
-      // Let's make "Recent Trend" strictly reflect the LAST 7 DAYS regardless of filter for "Activity Monitor" purposes,
-      // OR we can make it distribution of the selected period.
-      // Decision: Keep "Last 7 Days" as an operational metric (Recent Activity).
       const last7Days = [];
       const vnNow = new Date(new Date().getTime() + (7 * 60 * 60 * 1000));
       for (let i = 6; i >= 0; i--) {
@@ -341,94 +357,12 @@ const Dashboard: React.FC = () => {
   const totalPending = alerts.pendingCustomers + alerts.pendingEmployees + alerts.pendingTransfers + alerts.pendingDeals + alerts.overdue + alerts.pendingFinance;
   const displayNotifCount = (isAdmin || isMod) ? totalPending : (alerts.due + alerts.overdue + alerts.assignedTodayToMe);
 
-  // ... (Keep handler functions: handleInputChange, toggleZaloOnly, normalizePhone, handleAddCustomer, executeAddCustomer, handleRequestTransfer) ...
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const toggleZaloOnly = () => {
-     setFormData(prev => ({ ...prev, isZaloOnly: !prev.isZaloOnly }));
-  }
-
-  const normalizePhone = (p: string) => {
-    if (!p) return '';
-    return p.toString().replace(/\D/g, '');
-  };
-
-  const handleAddCustomer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // PERMISSION CHECK
+  const handleAddCustomerClick = () => {
     if (userProfile?.is_locked_add) {
         alert("Bạn đã bị khóa quyền thêm khách mới.");
-        return;
+    } else {
+        setIsAddModalOpen(true);
     }
-
-    setIsSubmitting(true);
-    if (!formData.name.trim()) { alert("Vui lòng nhập tên khách hàng"); setIsSubmitting(false); return; }
-    if (!formData.isZaloOnly && !formData.phone.trim()) { alert("Vui lòng nhập số điện thoại"); setIsSubmitting(false); return; }
-    try {
-        let finalPhone = formData.phone;
-        if (!formData.isZaloOnly) {
-            finalPhone = normalizePhone(formData.phone);
-            if (finalPhone.length === 9) finalPhone = '0' + finalPhone;
-            const { data: existing } = await supabase.from('customers').select('id, name, sales_rep').eq('phone', finalPhone).maybeSingle();
-            if (existing) {
-                setDuplicateData({ id: existing.id, name: existing.name, sales_rep: existing.sales_rep || "Chưa phân bổ", phone: finalPhone });
-                setIsDuplicateModalOpen(true);
-                setIsSubmitting(false);
-                return;
-            }
-        } else { finalPhone = 'Zalo-' + Date.now().toString().slice(-6); }
-        await executeAddCustomer(finalPhone);
-    } catch (err: any) { alert("Lỗi thêm khách: " + err.message); setIsSubmitting(false); }
-  };
-
-  const executeAddCustomer = async (finalPhone: string) => {
-      try {
-        const payload: any = {
-            name: formData.name, phone: finalPhone, location: formData.location,
-            source: formData.source === 'Khác' || formData.source === 'Giới Thiệu' ? `${formData.source}: ${formData.source_detail}` : formData.source,
-            interest: formData.interest || null, status: CustomerStatus.NEW,
-            classification: formData.classification, recare_date: formData.recare_date,
-            creator_id: userProfile?.id, sales_rep: userProfile?.full_name,
-            is_special_care: false, is_long_term: false, created_at: new Date().toISOString()
-        };
-        const { data, error } = await supabase.from('customers').insert([payload]).select();
-        if (error) throw error;
-        if (data && data[0]) {
-            await supabase.from('interactions').insert([{
-                customer_id: data[0].id, user_id: userProfile?.id, type: 'note',
-                content: `Khách hàng mới được tạo. Ghi chú: ${formData.notes}`,
-                created_at: new Date().toISOString()
-            }]);
-            
-            setFormData(initialFormState);
-            setIsAddModalOpen(false);
-            setIsDuplicateModalOpen(false);
-            setDuplicateData(null);
-            fetchDataWithIsolation();
-            alert("Thêm khách hàng thành công!");
-        }
-      } catch (err: any) { alert("Lỗi thêm khách: " + err.message); } finally { setIsSubmitting(false); }
-  };
-
-  const handleRequestTransfer = async () => {
-      if (!duplicateData || !userProfile) return;
-      setIsSubmitting(true);
-      try {
-          await supabase.from('customers').update({ pending_transfer_to: userProfile.id }).eq('id', duplicateData.id);
-          await supabase.from('interactions').insert([{
-              customer_id: duplicateData.id, user_id: userProfile.id, type: 'note',
-              content: `⚠️ Yêu cầu chuyển quyền chăm sóc từ ${userProfile.full_name}.`,
-              created_at: new Date().toISOString()
-          }]);
-          alert("Đã gửi yêu cầu chuyển quyền chăm sóc!");
-          setIsDuplicateModalOpen(false);
-          setIsAddModalOpen(false);
-          setDuplicateData(null);
-          setFormData(initialFormState);
-      } catch (e) { alert("Lỗi khi gửi yêu cầu."); } finally { setIsSubmitting(false); }
   };
 
   const StatCard: React.FC<any> = ({ title, value, icon: Icon, color, onClick }) => (
@@ -481,7 +415,7 @@ const Dashboard: React.FC = () => {
                                   {(isAdmin || isMod) && alerts.pendingFinance > 0 && <button onClick={() => navigate('/finance')} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-red-100 text-red-600 rounded-full h-fit"><BadgeDollarSign size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.pendingFinance} Yêu cầu Duyệt Quỹ</p><p className="text-xs text-gray-500">Nộp/Chi/Ứng cần xử lý.</p></div></button>}
                                   {(isAdmin || isMod) && alerts.pendingEmployees > 0 && <button onClick={() => navigate('/employees')} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-blue-100 text-blue-600 rounded-full h-fit"><UserPlus size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.pendingEmployees} Nhân sự mới</p><p className="text-xs text-gray-500">Đang chờ duyệt.</p></div></button>}
                                   {alerts.due > 0 && <button onClick={() => navigate('/customers', { state: { initialTab: 'due' } })} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-orange-100 text-orange-600 rounded-full h-fit"><Clock size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.due} Khách đến hạn CS</p><p className="text-xs text-gray-500">Hôm nay.</p></div></button>}
-                                  {alerts.expiredLongTerm > 0 && <button onClick={() => navigate('/customers', { state: { filterType: 'expired_longterm' } })} className="p-4 hover:bg-blue-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-blue-100 text-blue-600 rounded-full h-fit"><Calendar size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.expiredLongTerm} Hết hạn CS Dài hạn</p><p className="text-xs text-gray-500">Cần chăm sóc lại.</p></div></button>}
+                                  {alerts.expiredLongTerm > 0 && <button onClick={() => navigate('/customers', { state: { filterType: 'expired_longterm' } })} className="p-4 hover:bg-blue-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-blue-100 text-blue-600 rounded-full h-fit"><Calendar size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.expiredLongTerm} Hết hạn CS Dài hạn</p><p className="text-xs text-gray-500">Hôm nay - Cần chăm sóc lại.</p></div></button>}
                                   {alerts.overdue > 0 && <button onClick={() => navigate('/customers', { state: { initialTab: 'overdue' } })} className="p-4 hover:bg-gray-50 border-b border-gray-50 text-left transition-colors flex gap-3"><div className="p-2 bg-red-100 text-red-600 rounded-full h-fit"><AlertTriangle size={16}/></div><div><p className="text-sm font-bold text-gray-800">{alerts.overdue} Khách quá hạn CS</p><p className="text-xs text-gray-500">Cần xử lý gấp.</p></div></button>}
                               </div>
                           )}
@@ -489,7 +423,7 @@ const Dashboard: React.FC = () => {
                   </div>
               )}
           </div>
-          <button onClick={() => userProfile?.is_locked_add ? alert("Bạn đã bị khóa quyền thêm khách mới.") : setIsAddModalOpen(true)} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition-colors ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}><Plus size={18} /> Thêm khách</button>
+          <button onClick={handleAddCustomerClick} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition-colors ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}><Plus size={18} /> Thêm khách</button>
         </div>
       </div>
 
@@ -600,45 +534,16 @@ const Dashboard: React.FC = () => {
           </div>
       )}
 
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6"><h3 className="text-xl font-bold text-gray-900">Thêm khách hàng mới</h3><button onClick={() => setIsAddModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={24} /></button></div>
-            <form onSubmit={handleAddCustomer} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Họ tên <span className="text-red-500">*</span></label><input name="name" required value={formData.name} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 font-medium" placeholder="Nguyễn Văn A" /></div>
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Số điện thoại <span className="text-red-500">*</span></label><input name="phone" type="tel" value={formData.phone} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 font-medium" placeholder="0912..." disabled={formData.isZaloOnly} /></div>
-              </div>
-              <div className="flex items-center gap-2"><input type="checkbox" id="zaloOnly" checked={formData.isZaloOnly} onChange={toggleZaloOnly} className="w-4 h-4 text-primary-600 rounded" /><label htmlFor="zaloOnly" className="text-sm text-gray-700 font-medium">Khách chỉ liên hệ qua Zalo</label></div>
-              <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Dòng xe quan tâm</label><div className="relative"><select name="interest" value={formData.interest} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 appearance-none"><option value="">-- Chưa xác định --</option>{carList.map(m => <option key={m} value={m}>{m}</option>)}</select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} /></div></div>
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Khu vực</label><input name="location" value={formData.location} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500" placeholder="Quận 1, TP.HCM" /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                   <div className={(formData.source === 'Khác' || formData.source === 'Giới Thiệu') ? "" : "col-span-2"}><label className="block text-sm font-bold text-gray-700 mb-1">Nguồn khách</label><div className="relative"><select name="source" value={formData.source} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 appearance-none"><option value="MKT Group">MKT Group</option><option value="Showroom">Showroom</option><option value="Hotline">Hotline</option><option value="Sự kiện">Sự kiện</option><option value="Giới Thiệu">Giới Thiệu</option><option value="Khác">Khác</option></select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} /></div></div>
-                   {(formData.source === 'Khác' || formData.source === 'Giới Thiệu') && (<div><label className="block text-sm font-bold text-gray-700 mb-1">Chi tiết nguồn</label><input name="source_detail" value={formData.source_detail} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500" placeholder="Nhập chi tiết..." /></div>)}
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Phân loại</label><div className="relative"><select name="classification" value={formData.classification} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 appearance-none"><option value="Hot">Hot</option><option value="Warm">Warm</option><option value="Cool">Cool</option></select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} /></div></div>
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1">Ngày CS tiếp theo</label><div className="relative"><Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} /><input name="recare_date" type="date" min={todayStr} value={formData.recare_date} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl pl-10 pr-4 py-3 outline-none focus:border-primary-500" /></div></div>
-              </div>
-              <div><label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú ban đầu</label><textarea name="notes" value={formData.notes} onChange={handleInputChange} className="w-full bg-white text-gray-900 border border-gray-300 rounded-xl px-3 py-3 outline-none focus:border-primary-500 h-24 resize-none" placeholder="Khách hàng quan tâm vấn đề gì..." /></div>
-              <div className="flex gap-3 pt-2">
-                 <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 py-2.5 text-gray-700 font-bold bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors">Hủy</button>
-                 <button type="submit" disabled={isSubmitting} className="flex-1 py-2.5 text-white font-bold bg-primary-600 hover:bg-primary-700 rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2">{isSubmitting && <Loader2 className="animate-spin" size={18} />} Thêm mới</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* ISOLATED MODAL FOR BETTER PERFORMANCE */}
+      <AddCustomerModal 
+          isOpen={isAddModalOpen} 
+          onClose={() => setIsAddModalOpen(false)} 
+          onSuccess={() => {
+              fetchDataWithIsolation();
+              // alert("Thêm khách hàng thành công!"); // Handled inside modal or here
+          }}
+      />
 
-      {isDuplicateModalOpen && duplicateData && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl transform scale-100 transition-all border border-red-100">
-                  <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 animate-bounce"><AlertTriangle className="text-red-600" size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Cảnh báo Trùng lặp!</h3><p className="text-sm text-gray-500 mb-6">Số điện thoại <span className="font-bold text-gray-900">{duplicateData.phone}</span> đã tồn tại trên hệ thống.</p><div className="w-full bg-red-50 rounded-xl p-4 border border-red-100 mb-6 text-left space-y-2"><div className="flex justify-between items-center border-b border-red-200 pb-2"><span className="text-xs font-bold text-red-500 uppercase">Khách hàng cũ</span></div><div><p className="text-xs text-gray-500">Họ tên</p><p className="font-bold text-gray-900">{duplicateData.name}</p></div><div><p className="text-xs text-gray-500">Đang thuộc về TVBH</p><p className="font-bold text-red-600 uppercase">{duplicateData.sales_rep}</p></div></div><div className="flex flex-col gap-3 w-full"><button onClick={handleRequestTransfer} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors flex items-center justify-center gap-2">{isSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Yêu cầu chăm sóc Khách hàng này'}</button><button onClick={() => { setIsDuplicateModalOpen(false); setDuplicateData(null); setIsSubmitting(false); }} className="w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button></div></div>
-              </div>
-          </div>
-      )}
     </div>
   );
 };

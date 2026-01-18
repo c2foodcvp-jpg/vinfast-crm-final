@@ -148,7 +148,7 @@ const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
     // Inline Styles để đảm bảo tính nhất quán tuyệt đối khi render
     const styles = {
         container: {
-            width: '800px', // Cố định chiều rộng chuẩn
+            width: '800px', // Cố định chiều rộng chuẩn A4
             backgroundColor: '#ffffff',
             padding: '40px',
             fontFamily: 'Arial, Helvetica, sans-serif',
@@ -267,10 +267,17 @@ const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
                     <tbody>
                         {feeBreakdown.map((item: any, idx: number) => (
                             <tr key={idx}>
-                                <td style={styles.td}>{item.name}</td>
+                                <td style={styles.td}>{idx + 1}. {item.name}</td>
                                 <td style={{...styles.tdRight, fontWeight: 'normal'}}>{formatCurrency(item.amount)}</td>
                             </tr>
                         ))}
+                        
+                        {/* TOTAL REGISTRATION FEES ROW */}
+                        <tr style={{ backgroundColor: '#f3f4f6' }}>
+                            <td style={{...styles.td, fontWeight: 'bold', fontStyle: 'italic'}}>TỔNG PHÍ ĐĂNG KÝ</td>
+                            <td style={{...styles.tdRight, fontWeight: 'bold'}}>{formatCurrency(totalFees)}</td>
+                        </tr>
+
                         {isRegistrationFree && (
                             <tr style={{ backgroundColor: '#f0fdf4' }}>
                                 <td style={{...styles.td, color: '#166534', fontWeight: 'bold'}}>• Tặng 100% Phí Đăng ký</td>
@@ -368,7 +375,7 @@ const OnlineQuote: React.FC = () => {
   const [warranties, setWarranties] = useState<QuoteConfig[]>([]);
 
   // Selection State
-  const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [selectedModelId, setSelectedModelId] = useState<string>('all'); // Initialize empty string first
   const [selectedVersionId, setSelectedVersionId] = useState<string>('');
   const [selectedBankId, setSelectedBankId] = useState<string>('');
   const [selectedMembershipId, setSelectedMembershipId] = useState<string>(''); 
@@ -384,7 +391,7 @@ const OnlineQuote: React.FC = () => {
   const [customFees, setCustomFees] = useState<Record<string, number>>({});
   const [feeOptions, setFeeOptions] = useState<Record<string, number>>({});
   const [manualDiscount, setManualDiscount] = useState<string>('');
-  const [manualServiceFee, setManualServiceFee] = useState<string>('3.000.000');
+  const [manualServiceFee, setManualServiceFee] = useState<string>('3.000.000'); // Default to 3M
   
   // --- NEW: INSURANCE & REG FEE STATE ---
   const [includeInsurance, setIncludeInsurance] = useState(false);
@@ -527,11 +534,12 @@ const OnlineQuote: React.FC = () => {
       return { discount, giftValue, name: selectedMem.name, percent: selectedMem.value, giftPercent: selectedMem.gift_ratio };
   }, [selectedMembershipId, listPrice, memberships]);
 
-  // 1. Calculate Final INVOICE Price
+  // 1. Calculate Final INVOICE Price (Giá Xe Hóa Đơn)
   const invoicePromoCalculation = useMemo(() => {
       let currentPrice = listPrice;
       const breakdown: {name: string, amount: number}[] = [];
       
+      // A. Standard Promos (Target: Invoice)
       const applicable = promotions.filter(p => {
           const modelMatch = !p.apply_to_model_ids || p.apply_to_model_ids.length === 0 || p.apply_to_model_ids.includes(selectedModelId);
           let versionMatch = true;
@@ -557,6 +565,7 @@ const OnlineQuote: React.FC = () => {
           }
       });
 
+      // B. Membership Discount
       if (membershipCalculation.discount > 0) {
           currentPrice -= membershipCalculation.discount;
           breakdown.push({ name: `Ưu đãi ${membershipCalculation.name} (-${membershipCalculation.percent}%)`, amount: membershipCalculation.discount });
@@ -651,8 +660,8 @@ const OnlineQuote: React.FC = () => {
       return { totalDiscount, breakdown };
   }, [promotions, appliedPromos, selectedModelId, selectedVersionId, listPrice, manualDiscount]);
 
-  // NEW: Calculate Rolling Price logic (Handle Free Registration)
-  const preRollingPrice = finalInvoicePrice + (isRegistrationFree ? 0 : totalFees);
+  // Final Rolling Calculation
+  const preRollingPrice = finalInvoicePrice + totalFees;
   const finalRollingPrice = Math.max(0, preRollingPrice - rollingPromoCalculation.totalDiscount);
 
   // 4. Payment & Loan
@@ -693,24 +702,19 @@ const OnlineQuote: React.FC = () => {
       return result;
   }, [loanAmount, selectedBank, currentInterestRate]);
 
-  // Helper to check if gift is VinPoint or Region restricted
+  // Helper to check if gift is VinPoint
   const getGiftDetails = (g: QuoteConfig) => {
-      // 1. Check Region Restriction
-      if (g.apply_to_regions && g.apply_to_regions.length > 0) {
-          // If current region is not in the list, skip this gift
-          if (!g.apply_to_regions.includes(currentRegion)) return null;
-      }
-
-      // 2. Check VinPoint Model Mapping
+      // Check if it's VinPoint type (has options mapping)
       if (g.options && g.options.length > 0) {
+          // Find mapping for current model
           const mapped = g.options.find(opt => opt.model_id === selectedModelId);
           if (mapped) {
               return { isVinPoint: true, value: mapped.value, label: `${g.name} (Tích điểm)` };
           }
-          return null; // Gift configured with options but no match for this model
+          // If no mapping for this model, return null (gift not applicable)
+          return null;
       }
-      
-      // 3. Standard Gift
+      // Standard Gift
       return { isVinPoint: false, value: g.value, label: g.name };
   };
 
@@ -731,10 +735,7 @@ const OnlineQuote: React.FC = () => {
               ["", ""],
               ["CHI PHÍ LĂN BÁNH", ""],
               ...feeCalculation.breakdown.map(f => [f.name, formatCurrency(f.amount)]),
-              // If free registration, show negative line
-              ...(isRegistrationFree ? [["Tặng 100% Phí Đăng ký", `-${formatCurrency(totalFees)}`]] : []),
-              
-              ["TỔNG PHÍ", formatCurrency(isRegistrationFree ? 0 : totalFees)],
+              ["TỔNG PHÍ", formatCurrency(totalFees)],
               ["", ""],
               ["ƯU ĐÃI LĂN BÁNH", ""],
               ...rollingPromoCalculation.breakdown.map(p => [p.name, `-${formatCurrency(p.amount)}`]),
@@ -742,7 +743,7 @@ const OnlineQuote: React.FC = () => {
               ["TỔNG CỘNG LĂN BÁNH", formatCurrency(finalRollingPrice)],
               ["", ""],
               ["QUÀ TẶNG KÈM THEO", ""],
-              ...activeGifts.map(g => [g.label, g.isVinPoint ? `${formatCurrency(g.value)} điểm` : (g.value > 0 ? formatCurrency(g.value) : '')]),
+              ...activeGifts.map(g => [g.label, g.isVinPoint ? `${formatCurrency(g.value)} điểm` : (g.value > 0 ? formatCurrency(g.value) : 'Hiện vật')]),
               ...(membershipCalculation.giftValue > 0 ? [[`Ưu đãi ${membershipCalculation.name} (Tặng thêm)`, formatCurrency(membershipCalculation.giftValue)]] : []),
               ["", ""],
               ["DỰ TÍNH NGÂN HÀNG", selectedBank?.name],
@@ -857,9 +858,6 @@ const OnlineQuote: React.FC = () => {
           <div className="flex gap-2">
               <button onClick={() => handleExportQuote('image')} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg text-sm">
                   <FileImage size={16}/> Lưu Ảnh
-              </button>
-              <button onClick={() => handleExportQuote('excel')} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 shadow-lg text-sm">
-                  <Download size={16}/> Excel
               </button>
           </div>
       </div>
