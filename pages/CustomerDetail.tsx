@@ -604,13 +604,13 @@ const CustomerDetail: React.FC = () => {
       <div className="flex flex-col gap-3 mb-2">
         <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-                <button onClick={() => navigate('/customers')} className="p-2 hover:bg-white rounded-full transition-colors text-gray-500"><ArrowLeft size={24} /></button>
+                <button onClick={() => navigate(backPath)} className="p-2 hover:bg-white rounded-full transition-colors text-gray-500"><ArrowLeft size={24} /></button>
             </div>
             <div className="flex gap-2">
-                <button onClick={() => prevCustomerId && navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext } })} disabled={!prevCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
+                <button onClick={() => prevCustomerId && navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext, from: backPath } })} disabled={!prevCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
                     <ChevronLeft size={16}/> <span className="hidden sm:inline">Trước</span>
                 </button>
-                <button onClick={() => nextCustomerId && navigate(`/customers/${nextCustomerId}`, { state: { customerIds: customerListContext } })} disabled={!nextCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
+                <button onClick={() => nextCustomerId && navigate(`/customers/${nextCustomerId}`, { state: { customerIds: customerListContext, from: backPath } })} disabled={!nextCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
                     <span className="hidden sm:inline">Sau</span> <ChevronRight size={16}/>
                 </button>
             </div>
@@ -657,8 +657,6 @@ const CustomerDetail: React.FC = () => {
         </div>
       </div>
 
-      {/* ... Content Grids (Existing) ... */}
-      {/* ... (Rest of the component remains unchanged) ... */}
       {toast && (
           <div className={`fixed top-4 right-4 z-[70] px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 animate-fade-in ${toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
               {toast.type === 'success' ? <CheckCircle2 size={18}/> : <AlertTriangle size={18}/>}
