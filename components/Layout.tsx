@@ -5,7 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../supabaseClient';
 import { 
   LayoutDashboard, Users, LogOut, Menu, X, UserCircle, Briefcase, UserCog, Building2,
-  FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, PiggyBank, CarFront, Landmark, AlertCircle, Box, Settings, User, FileInput, BarChart2, Calendar, Calculator
+  FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, PiggyBank, CarFront, Landmark, AlertCircle, Box, Settings, User, FileInput, BarChart2, Calendar, Calculator,
+  TableProperties
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -36,18 +37,17 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     { key: 'dashboard', icon: LayoutDashboard, label: 'Tổng quan', path: '/' },
     { key: 'calendar', icon: Calendar, label: 'Lịch làm việc', path: '/calendar' },
     { key: 'quote', icon: Calculator, label: 'Báo giá Online', path: '/quote' },
+    { key: 'bank_calculator', icon: TableProperties, label: 'Tính lãi Bank', path: '/bank-calculator' },
     { key: 'analytics', icon: BarChart2, label: 'Phân tích (BI)', path: '/analytics', roleReq: [UserRole.ADMIN, UserRole.MOD] },
     { key: 'customers', icon: Users, label: 'Khách hàng', path: '/customers' },
     { key: 'deals', icon: FileCheck2, label: 'Đơn hàng', path: '/deals' },
     { key: 'finance', icon: BadgeDollarSign, label: 'Tài chính & Quỹ', path: '/finance' },
     { key: 'proposals', icon: FileInput, label: 'Đề Xuất (Mới)', path: '/proposals', countFetcher: async () => {
-        // Admin/Mod sees all pending, Employee sees own pending? Or just generic alert
         if (!userProfile) return 0;
         let q = supabase.from('proposals').select('*', { count: 'exact', head: true }).eq('status', 'pending');
         if (userProfile.role === 'employee') {
-            q = q.eq('user_id', userProfile.id); // Sales sees their own pending
+            q = q.eq('user_id', userProfile.id); 
         }
-        // Mod/Admin sees all pending
         const { count } = await q;
         return count || 0;
     }},
@@ -61,7 +61,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         return count || 0;
     }},
     { key: 'team_fund', icon: PiggyBank, label: 'Quỹ Nhóm', path: '/team-fund', partTimeHidden: true, countFetcher: async () => {
-        // Count unpaid fines for CURRENT USER
         if (!userProfile?.id) return 0;
         const { count } = await supabase.from('team_fines').select('*', { count: 'exact', head: true }).eq('user_id', userProfile.id).eq('status', 'pending');
         return count || 0;
@@ -74,11 +73,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     fetchMenuConfig();
     fetchBadges();
 
-    // Force update listener
     const handleForceUpdate = () => fetchMenuConfig();
     window.addEventListener('menu_config_updated', handleForceUpdate);
 
-    // Subscribe to changes in app_settings to update menu order in real-time
     const channel = supabase.channel('layout-menu-updates')
       .on(
         'postgres_changes',
@@ -97,7 +94,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const fetchMenuConfig = async () => {
       try {
-          // Get saved order
           const { data } = await supabase.from('app_settings').select('value').eq('key', 'menu_order').maybeSingle();
           let order: string[] = [];
           
@@ -105,21 +101,17 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               try { order = JSON.parse(data.value); } catch (e) {}
           }
 
-          // If no order or missing items, use default order from definitions
           const allKeys = MENU_DEFINITIONS.map(i => i.key);
           if (order.length === 0) {
               setMenuOrder(allKeys);
           } else {
-              // Ensure any new keys in definitions that aren't in saved order are appended
-              // Map old key 'distributors' to 'configuration' if present
               const mappedOrder = order.map(k => k === 'distributors' ? 'configuration' : k);
-              
               const missingKeys = allKeys.filter(k => !mappedOrder.includes(k));
               setMenuOrder([...mappedOrder, ...missingKeys]);
           }
       } catch (e) {
           console.error("Menu config error", e);
-          setMenuOrder(MENU_DEFINITIONS.map(i => i.key)); // Fallback
+          setMenuOrder(MENU_DEFINITIONS.map(i => i.key)); 
       }
   };
 
@@ -147,7 +139,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     navigate('/login');
   };
 
-  // Sort definitions based on menuOrder
   const sortedNavItems = useMemo(() => {
       return menuOrder
           .map(key => MENU_DEFINITIONS.find(i => i.key === key))
@@ -156,12 +147,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   return (
     <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-800">
-      {/* Mobile Overlay */}
       {isSidebarOpen && <div className="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm md:hidden" onClick={() => setIsSidebarOpen(false)} />}
 
-      {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200/60 transition-transform duration-300 md:static md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} shadow-2xl md:shadow-none flex flex-col`}>
-        {/* Logo Area */}
         <div className="h-20 flex items-center px-6 border-b border-slate-100">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 flex items-center justify-center text-white font-bold text-2xl shadow-glow mr-3">V</div>
             <div>
@@ -171,7 +159,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             <button onClick={() => setIsSidebarOpen(false)} className="md:hidden ml-auto text-slate-400 hover:text-slate-600"><X/></button>
         </div>
 
-        {/* User Info Card */}
         <div className="p-4">
             <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-100/50 shadow-sm">
                 <div className="w-10 h-10 rounded-full bg-white border border-slate-200 p-0.5 flex-shrink-0 shadow-sm overflow-hidden">
@@ -191,7 +178,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             </div>
         </div>
 
-        {/* Navigation */}
         <div className="px-4 py-2 flex-1 overflow-y-auto custom-scrollbar">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">Menu chính</p>
             <nav className="space-y-1">
@@ -224,7 +210,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             </nav>
         </div>
 
-        {/* Footer */}
         <div className="p-4 border-t border-slate-100">
             <button onClick={handleSignOut} className="flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all border border-transparent hover:border-red-100 group">
                 <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" /> 
@@ -233,9 +218,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#f8fafc]">
-          {/* Mobile Header */}
           <header className="md:hidden flex items-center justify-between h-16 px-4 bg-white border-b border-slate-200 shadow-sm z-30 sticky top-0">
               <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white font-bold">V</div>
