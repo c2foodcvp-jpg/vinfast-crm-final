@@ -215,3 +215,4 @@ create policy "Write Inventory" on public.team_inventory for all using (
 };
 
 export default Inventory;
+

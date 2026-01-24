@@ -774,7 +774,7 @@ const CustomerDetail: React.FC = () => {
 
       {/* ... Modals ... */}
       {showSuspendModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-gray-900">Yêu cầu treo hồ sơ</h3>
@@ -798,7 +798,7 @@ const CustomerDetail: React.FC = () => {
       )}
 
       {showChangeSalesModal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 max-h-[80vh] overflow-y-auto">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-gray-900">Chuyển quyền chăm sóc</h3>
@@ -827,7 +827,7 @@ const CustomerDetail: React.FC = () => {
       )}
 
       {showChangeSalesConfirm && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex flex-col items-center text-center">
                       <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4">
@@ -851,11 +851,11 @@ const CustomerDetail: React.FC = () => {
           </div>
       )}
 
-      {showDeleteConfirm && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl"><div className="flex flex-col items-center text-center"><div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4"><Trash2 size={24} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xóa khách hàng?</h3><p className="text-gray-500 text-sm mb-6">Hành động này không thể hoàn tác. Toàn bộ dữ liệu tương tác và giao dịch sẽ bị xóa.</p><div className="flex gap-3 w-full"><button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDeleteCustomer} className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Xóa vĩnh viễn</button></div></div></div></div>)}
+      {showDeleteConfirm && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl"><div className="flex flex-col items-center text-center"><div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4"><Trash2 size={24} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xóa khách hàng?</h3><p className="text-gray-500 text-sm mb-6">Hành động này không thể hoàn tác. Toàn bộ dữ liệu tương tác và giao dịch sẽ bị xóa.</p><div className="flex gap-3 w-full"><button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDeleteCustomer} className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Xóa vĩnh viễn</button></div></div></div></div>)}
       
       {/* ... SHARE MODAL ... */}
       {showShareModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Share2 className="text-teal-600"/> Chia sẻ Khách hàng</h3>
@@ -922,7 +922,7 @@ const CustomerDetail: React.FC = () => {
 
       {/* WIN DEAL MODAL */}
       {showWinModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><CheckCircle2 className="text-green-600"/> Xác nhận Chốt Đơn</h3>
@@ -977,7 +977,7 @@ const CustomerDetail: React.FC = () => {
 
       {/* --- ADD REVENUE MODAL --- */}
       {showAddRevenueModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-gray-900">Thêm Doanh thu Thực tế</h3>
@@ -1000,7 +1000,7 @@ const CustomerDetail: React.FC = () => {
 
       {/* --- INCURRED EXPENSE MODAL --- */}
       {showIncurredExpenseModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-gray-900">Chi phí Phát sinh (Đơn hàng)</h3>
@@ -1025,7 +1025,7 @@ const CustomerDetail: React.FC = () => {
       )}
 
       {showRepayModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-gray-900">Hoàn ứng / Nộp tiền</h3>
@@ -1047,7 +1047,7 @@ const CustomerDetail: React.FC = () => {
       )}
 
       {showDealerDebtModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-gray-900">Đại lý Nợ</h3>
@@ -1073,7 +1073,7 @@ const CustomerDetail: React.FC = () => {
       )}
 
       {dealerDebtToConfirm && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-green-100">
                   <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600"><CheckCircle2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Đại lý đã trả nợ?</h3><div className="bg-green-50 p-4 rounded-xl text-left w-full mb-4 border border-green-100 space-y-2"><div><p className="text-xs text-gray-500">Khoản nợ</p><p className="font-bold text-gray-900">{dealerDebtToConfirm.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền</p><p className="font-bold text-green-600 text-lg">{formatCurrency(dealerDebtToConfirm.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ ghi nhận <strong>Doanh thu/Nộp tiền</strong> vào hệ thống.</p><div className="flex gap-3 w-full"><button onClick={() => setDealerDebtToConfirm(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDealerDebtPaid} className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">Xác nhận</button></div></div>
               </div>
@@ -1082,7 +1082,7 @@ const CustomerDetail: React.FC = () => {
 
       {/* NEW EXPENSE MODAL - FIX 1 */}
       {showExpenseModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-red-700">Yêu cầu {expenseForm.type === 'advance' ? 'Ứng tiền' : 'Chi tiền'}</h3>
@@ -1126,7 +1126,7 @@ const CustomerDetail: React.FC = () => {
 
       {/* STOP CARE MODAL - FIX 2 */}
       {showStopModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-gray-900">Ngưng chăm sóc khách</h3>
@@ -1154,3 +1154,4 @@ const CustomerDetail: React.FC = () => {
 };
 
 export default CustomerDetail;
+

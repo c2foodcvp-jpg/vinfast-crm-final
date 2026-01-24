@@ -124,3 +124,4 @@ const Promotions: React.FC = () => {
 };
 
 export default Promotions;
+

@@ -214,3 +214,4 @@ create policy "Write Team Content" on public.team_content for all using (
 };
 
 export default BankRates;
+

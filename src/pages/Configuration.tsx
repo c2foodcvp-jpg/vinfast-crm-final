@@ -731,7 +731,7 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
 
       {/* Unified Create/Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
            <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                   <h3 className="text-lg font-bold text-gray-900">{formData.id ? 'Cập nhật' : 'Thêm mới'}</h3>
@@ -1023,7 +1023,7 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
 
       {/* Delete Confirm Modal */}
       {deleteTarget && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                   <div className="flex flex-col items-center text-center">
                       <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4"><Trash2 size={24} /></div>
@@ -1042,3 +1042,4 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
 };
 
 export default Configuration;
+

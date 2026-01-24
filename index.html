@@ -1,78 +1,106 @@
-
 <!DOCTYPE html>
 <html lang="vi">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>VinFast CRM Enterprise</title>
-    <meta name="description" content="Hệ thống quản lý quan hệ khách hàng chuyên nghiệp dành cho VinFast">
-    
-    <!-- iOS Specific Metas -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="VinFast CRM">
-    
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    
-    <!-- Tailwind CSS (Giữ CDN để đảm bảo giao diện không bị vỡ nếu thiếu config local) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Manrope', 'sans-serif'],
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>VinFast CRM Enterprise</title>
+  <meta name="description" content="Hệ thống quản lý quan hệ khách hàng chuyên nghiệp dành cho VinFast">
+
+  <!-- iOS Specific Metas -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="VinFast CRM">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
+
+  <!-- Tailwind CSS (Giữ CDN để đảm bảo giao diện không bị vỡ nếu thiếu config local) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Manrope', 'sans-serif'],
+          },
+          colors: {
+            primary: {
+              50: '#f0f6fc',
+              100: '#e0ecf9',
+              200: '#c2dcf5',
+              300: '#94c2ed',
+              400: '#5fa0e3',
+              500: '#387fd9',
+              600: '#2462bd', // VinFast Blue Primary
+              700: '#1d4f9b',
+              800: '#1b437e',
+              900: '#1a3967',
+              950: '#112341',
             },
-            colors: {
-              primary: {
-                50: '#f0f6fc',
-                100: '#e0ecf9',
-                200: '#c2dcf5',
-                300: '#94c2ed',
-                400: '#5fa0e3',
-                500: '#387fd9',
-                600: '#2462bd', // VinFast Blue Primary
-                700: '#1d4f9b',
-                800: '#1b437e',
-                900: '#1a3967',
-                950: '#112341',
-              },
-            },
-            boxShadow: {
-              'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
-              'glow': '0 0 15px rgba(36, 98, 189, 0.3)',
-            }
+          },
+          boxShadow: {
+            'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+            'glow': '0 0 15px rgba(36, 98, 189, 0.3)',
           }
         }
       }
-    </script>
-    <style>
-      body { 
-        background-color: #f8fafc; 
-        color: #0f172a;
-        -webkit-font-smoothing: antialiased;
-        -webkit-tap-highlight-color: transparent; /* Remove tap highlight on mobile */
+    }
+  </script>
+  <style>
+    body {
+      background-color: #f8fafc;
+      color: #0f172a;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      /* Remove tap highlight on mobile */
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 10px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    .animate-fade-in {
+      animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
       }
-      
-      /* Custom Scrollbar */
-      ::-webkit-scrollbar { width: 6px; height: 6px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-      
-      .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-      @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-      
-      /* Glass Effect */
-      .glass {
-        background: rgba(255, 255, 255, 0.7);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
       }
-    </style>
+    }
+
+    /* Glass Effect */
+    .glass {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+  </style>
   <script type="importmap">
 {
   "imports": {
@@ -95,10 +123,12 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
+  <link rel="stylesheet" href="/index.css">
 </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
-  </body>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
 </html>

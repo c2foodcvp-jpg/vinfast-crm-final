@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import { 
+import {
   User, Phone, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Database, Copy, Zap, Globe, Layout, ArrowUp, ArrowDown, RotateCcw, FileText, X
 } from 'lucide-react';
 import { UserRole } from '../types';
@@ -15,11 +15,11 @@ const Profile: React.FC = () => {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
-  
+
   // App Config State
   const [appIconUrl, setAppIconUrl] = useState('');
   const [savingConfig, setSavingConfig] = useState(false);
-  
+
   // Menu Sorting State
   const [menuOrder, setMenuOrder] = useState<string[]>([]);
   const [menuLabels, setMenuLabels] = useState<Record<string, string>>({});
@@ -35,23 +35,16 @@ const Profile: React.FC = () => {
 
   // Define default menu keys for reference
   const DEFAULT_MENU_KEYS = [
-      { key: 'dashboard', label: 'Tổng quan' },
-      { key: 'calendar', label: 'Lịch làm việc' },
-      { key: 'quote', label: 'Báo giá Online' }, // Added Quote
-      { key: 'analytics', label: 'Phân tích (BI)' },
-      { key: 'customers', label: 'Khách hàng' },
-      { key: 'deals', label: 'Đơn hàng' },
-      { key: 'finance', label: 'Tài chính & Quỹ' },
-      { key: 'proposals', label: 'Đề xuất (Mới)' },
-      { key: 'car_prices', label: 'Bảng giá Xe' },
-      { key: 'bank_rates', label: 'Lãi suất Bank' },
-      { key: 'inventory', label: 'Kho xe (Tồn)' },
-      { key: 'promotions', label: 'Chính sách Team' },
-      { key: 'assign', label: 'Phân bổ Leads' },
-      { key: 'employees', label: 'Nhân sự' },
-      { key: 'team_fund', label: 'Quỹ Nhóm' },
-      { key: 'configuration', label: 'Cấu hình' },
-      { key: 'profile', label: 'Cá nhân' }
+    { key: 'dashboard', label: 'Tổng quan' },
+    { key: 'calendar', label: 'Lịch làm việc' },
+    { key: 'quote', label: 'Báo giá Online' }, // Added Quote
+    { key: 'analytics', label: 'Phân tích (BI)' },
+    { key: 'customers', label: 'Khách hàng' },
+    { key: 'assign', label: 'Phân bổ Leads' },
+    { key: 'employees', label: 'Nhân sự' },
+    { key: 'team_fund', label: 'Quỹ Nhóm' },
+    { key: 'configuration', label: 'Cấu hình' },
+    { key: 'profile', label: 'Cá nhân' }
   ];
 
   useEffect(() => {
@@ -61,66 +54,71 @@ const Profile: React.FC = () => {
       setAvatarUrl(userProfile.avatar_url || '');
     }
     if (isAdmin) {
-        fetchAppConfig();
+      fetchAppConfig();
     }
   }, [userProfile, isAdmin]);
 
   const fetchAppConfig = async () => {
-      try {
-          const { data } = await supabase.from('app_settings').select('*').in('key', ['app_icon_url', 'menu_order']);
-          
-          let fetchedOrder: string[] = [];
-          if (data) {
-              data.forEach(item => {
-                  if (item.key === 'app_icon_url') setAppIconUrl(item.value);
-                  if (item.key === 'menu_order') {
-                      try { fetchedOrder = JSON.parse(item.value); } catch (e) {}
-                  }
-              });
-          }
-          // Init menu order if empty
-          const allDefaultKeys = DEFAULT_MENU_KEYS.map(k => k.key);
-          if (fetchedOrder.length === 0) {
-              setMenuOrder(allDefaultKeys);
-          } else {
-              // Ensure no missing keys if new features added
-              // Also map old 'distributors' to 'configuration' if it exists in DB
-              const mappedOrder = fetchedOrder.map(k => k === 'distributors' ? 'configuration' : k);
-              const missing = allDefaultKeys.filter(k => !mappedOrder.includes(k));
-              setMenuOrder([...mappedOrder, ...missing]);
-          }
-          
-          // Map labels
-          const labels: any = {};
-          DEFAULT_MENU_KEYS.forEach(k => labels[k.key] = k.label);
-          setMenuLabels(labels);
+    try {
+      const { data } = await supabase.from('app_settings').select('*').in('key', ['app_icon_url', 'menu_order']);
 
-      } catch (e) { console.error("Failed to fetch app config", e); }
+      let fetchedOrder: string[] = [];
+      if (data) {
+        data.forEach(item => {
+          if (item.key === 'app_icon_url') setAppIconUrl(item.value);
+          if (item.key === 'menu_order') {
+            try { fetchedOrder = JSON.parse(item.value); } catch (e) { }
+          }
+        });
+      }
+      // Init menu order if empty
+      const allDefaultKeys = DEFAULT_MENU_KEYS.map(k => k.key);
+      if (fetchedOrder.length === 0) {
+        setMenuOrder(allDefaultKeys);
+      } else {
+        // Ensure no missing keys if new features added
+        // Also map old 'distributors' to 'configuration' if it exists in DB
+        const mappedOrder = fetchedOrder.map(k => k === 'distributors' ? 'configuration' : k);
+
+        // Filter out keys that are no longer top-level (like car_prices, etc.)
+        const validKeys = allDefaultKeys;
+        const cleanedOrder = mappedOrder.filter(k => validKeys.includes(k));
+
+        const missing = validKeys.filter(k => !cleanedOrder.includes(k));
+        setMenuOrder([...cleanedOrder, ...missing]);
+      }
+
+      // Map labels
+      const labels: any = {};
+      DEFAULT_MENU_KEYS.forEach(k => labels[k.key] = k.label);
+      setMenuLabels(labels);
+
+    } catch (e) { console.error("Failed to fetch app config", e); }
   };
 
   const handleSaveAppConfig = async () => {
-      setSavingConfig(true);
-      try {
-          const updates = [];
-          updates.push({ key: 'app_icon_url', value: appIconUrl });
-          if (menuOrder.length > 0) updates.push({ key: 'menu_order', value: JSON.stringify(menuOrder) });
+    setSavingConfig(true);
+    try {
+      const updates = [];
+      updates.push({ key: 'app_icon_url', value: appIconUrl });
+      if (menuOrder.length > 0) updates.push({ key: 'menu_order', value: JSON.stringify(menuOrder) });
 
-          const { error } = await supabase.from('app_settings').upsert(updates);
-          if (error) throw error;
-          
-          // Trigger forced update for Layout
-          window.dispatchEvent(new Event('menu_config_updated'));
-          
-          setMessage({ type: 'success', content: 'Đã lưu cấu hình hệ thống! Menu sẽ cập nhật ngay.' });
-      } catch (e) {
-          setMessage({ type: 'error', content: 'Lỗi lưu cấu hình.' });
-      } finally {
-          setSavingConfig(false);
-      }
+      const { error } = await supabase.from('app_settings').upsert(updates);
+      if (error) throw error;
+
+      // Trigger forced update for Layout
+      window.dispatchEvent(new Event('menu_config_updated'));
+
+      setMessage({ type: 'success', content: 'Đã lưu cấu hình hệ thống! Menu sẽ cập nhật ngay.' });
+    } catch (e) {
+      setMessage({ type: 'error', content: 'Lỗi lưu cấu hình.' });
+    } finally {
+      setSavingConfig(false);
+    }
   };
 
   const handleResetMenu = () => {
-      setMenuOrder(DEFAULT_MENU_KEYS.map(k => k.key));
+    setMenuOrder(DEFAULT_MENU_KEYS.map(k => k.key));
   };
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
@@ -130,30 +128,30 @@ const Profile: React.FC = () => {
     try {
       // Removing updated_at to prevent errors if column missing
       const updateData: any = { full_name: fullName, phone: phone, avatar_url: avatarUrl };
-      
+
       const { error } = await supabase.from('profiles').update(updateData).eq('id', userProfile?.id);
-      
+
       if (error) throw error;
-      
+
       // Update Auth Metadata as well
       await supabase.auth.updateUser({ data: { full_name: fullName, phone: phone } });
-      
+
       setMessage({ type: 'success', content: 'Cập nhật thông tin thành công! Đang tải lại...' });
-      
+
       // Reload to ensure Sidebar/Header updates (Context might not refresh immediately)
       setTimeout(() => {
-          window.location.reload();
+        window.location.reload();
       }, 1000);
 
     } catch (err: any) {
       console.error(err);
       if (err.message?.includes('violates row-level security')) {
-          setMessage({ type: 'error', content: 'Lỗi Quyền: Bạn chưa được cấp quyền sửa hồ sơ. Vui lòng báo Admin.' });
+        setMessage({ type: 'error', content: 'Lỗi Quyền: Bạn chưa được cấp quyền sửa hồ sơ. Vui lòng báo Admin.' });
       } else if (err.code === 'PGRST204') {
-          // Columns missing
-          setMessage({ type: 'error', content: 'Lỗi Database: Thiếu cột dữ liệu. Hãy chạy mã SQL sửa lỗi trong phần Cấu hình.' });
+        // Columns missing
+        setMessage({ type: 'error', content: 'Lỗi Database: Thiếu cột dữ liệu. Hãy chạy mã SQL sửa lỗi trong phần Cấu hình.' });
       } else {
-          setMessage({ type: 'error', content: err.message || 'Lỗi cập nhật hồ sơ.' });
+        setMessage({ type: 'error', content: err.message || 'Lỗi cập nhật hồ sơ.' });
       }
       setLoading(false);
     }
@@ -183,39 +181,39 @@ const Profile: React.FC = () => {
   };
 
   const moveMenu = (index: number, direction: 'up' | 'down') => {
-      const newOrder = [...menuOrder];
-      if (direction === 'up') {
-          if (index === 0) return;
-          [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
-      } else {
-          if (index === newOrder.length - 1) return;
-          [newOrder[index + 1], newOrder[index]] = [newOrder[index], newOrder[index + 1]];
-      }
-      setMenuOrder(newOrder);
+    const newOrder = [...menuOrder];
+    if (direction === 'up') {
+      if (index === 0) return;
+      [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
+    } else {
+      if (index === newOrder.length - 1) return;
+      [newOrder[index + 1], newOrder[index]] = [newOrder[index], newOrder[index + 1]];
+    }
+    setMenuOrder(newOrder);
   };
 
   // --- QUICK EDIT LOGIC ---
   const openQuickEdit = async (type: 'car_prices' | 'bank_rates') => {
-      setQuickEditType(type);
-      setLoadingContent(true);
-      const key = type === 'car_prices' ? 'car_prices_html' : 'bank_rates_html';
-      try {
-          const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
-          setQuickEditContent(data?.value || '');
-      } catch (e) {} finally { setLoadingContent(false); }
+    setQuickEditType(type);
+    setLoadingContent(true);
+    const key = type === 'car_prices' ? 'car_prices_html' : 'bank_rates_html';
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
+      setQuickEditContent(data?.value || '');
+    } catch (e) { } finally { setLoadingContent(false); }
   };
 
   const saveQuickEdit = async () => {
-      if (!quickEditType) return;
-      setLoadingContent(true);
-      const key = quickEditType === 'car_prices' ? 'car_prices_html' : 'bank_rates_html';
-      try {
-          await supabase.from('app_settings').upsert({ key, value: quickEditContent });
-          setMessage({ type: 'success', content: 'Đã cập nhật nội dung thành công!' });
-          setQuickEditType(null);
-      } catch (e) {
-          setMessage({ type: 'error', content: 'Lỗi lưu nội dung.' });
-      } finally { setLoadingContent(false); }
+    if (!quickEditType) return;
+    setLoadingContent(true);
+    const key = quickEditType === 'car_prices' ? 'car_prices_html' : 'bank_rates_html';
+    try {
+      await supabase.from('app_settings').upsert({ key, value: quickEditContent });
+      setMessage({ type: 'success', content: 'Đã cập nhật nội dung thành công!' });
+      setQuickEditType(null);
+    } catch (e) {
+      setMessage({ type: 'error', content: 'Lỗi lưu nội dung.' });
+    } finally { setLoadingContent(false); }
   };
 
   return (
@@ -238,58 +236,58 @@ const Profile: React.FC = () => {
           </form>
 
           {isAdmin && (
-              <div className="bg-white rounded-2xl shadow-sm border border-indigo-200 overflow-hidden">
-                 <div className="p-6 border-b border-indigo-100 bg-indigo-50 flex items-center justify-between">
-                     <div className="flex items-center gap-3"><div className="p-2 bg-indigo-100 rounded-lg text-indigo-600"><Globe size={24} /></div><div><h3 className="font-bold text-indigo-900">Cấu hình Hệ thống (Admin)</h3></div></div>
-                     <button onClick={handleSaveAppConfig} disabled={savingConfig} className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-70">{savingConfig ? <Loader2 className="animate-spin" size={16}/> : <Save size={16}/>} Lưu cấu hình</button>
-                 </div>
-                 <div className="p-6 space-y-6">
-                     <div>
-                         <label className="block text-sm font-bold text-gray-700 mb-2">URL Icon Web</label>
-                         <div className="flex gap-2"><input type="text" value={appIconUrl} onChange={e => setAppIconUrl(e.target.value)} className="w-full border border-gray-200 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 text-gray-900 font-medium" placeholder="https://..." /></div>
-                     </div>
-                     
-                     {/* CONTENT MANAGEMENT */}
-                     <div>
-                         <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><FileText size={16}/> Quản lý Nội dung Chung</label>
-                         <div className="flex gap-3">
-                             <button onClick={() => openQuickEdit('car_prices')} className="px-4 py-2 bg-white border border-gray-300 rounded-xl text-sm font-bold hover:bg-gray-50 flex items-center gap-2 shadow-sm"><FileText size={14}/> Sửa Bảng giá Xe</button>
-                             <button onClick={() => openQuickEdit('bank_rates')} className="px-4 py-2 bg-white border border-gray-300 rounded-xl text-sm font-bold hover:bg-gray-50 flex items-center gap-2 shadow-sm"><FileText size={14}/> Sửa Lãi suất Bank</button>
-                         </div>
-                         {quickEditType && (
-                             <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200 animate-fade-in">
-                                 <div className="flex justify-between items-center mb-2">
-                                     <h4 className="font-bold text-sm text-gray-800">Đang sửa: {quickEditType === 'car_prices' ? 'Bảng giá Xe' : 'Lãi suất Ngân hàng'}</h4>
-                                     <button onClick={() => setQuickEditType(null)} className="text-gray-400 hover:text-gray-600"><X size={16}/></button>
-                                 </div>
-                                 <textarea className="w-full h-48 border border-gray-300 rounded-lg p-3 text-xs font-mono focus:border-indigo-500 outline-none" value={quickEditContent} onChange={e => setQuickEditContent(e.target.value)} disabled={loadingContent}></textarea>
-                                 <div className="mt-2 flex justify-end">
-                                     <button onClick={saveQuickEdit} className="px-4 py-2 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 flex items-center gap-1">{loadingContent ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} Lưu Nội dung</button>
-                                 </div>
-                             </div>
-                         )}
-                     </div>
-
-                     {/* MENU SORTING */}
-                     <div>
-                         <div className="flex justify-between items-center mb-2">
-                             <label className="block text-sm font-bold text-gray-700 flex items-center gap-2"><Layout size={16}/> Sắp xếp Menu Chính</label>
-                             <button onClick={handleResetMenu} className="text-xs text-indigo-600 font-bold flex items-center gap-1 hover:underline"><RotateCcw size={12}/> Khôi phục mặc định</button>
-                         </div>
-                         <div className="bg-gray-50 border border-gray-200 rounded-xl overflow-hidden">
-                             {menuOrder.map((key, index) => (
-                                 <div key={key} className="flex items-center justify-between p-3 border-b border-gray-200 last:border-0 bg-white">
-                                     <span className="font-medium text-gray-700 ml-2">{menuLabels[key] || key}</span>
-                                     <div className="flex gap-1">
-                                         <button onClick={() => moveMenu(index, 'up')} disabled={index === 0} className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30 text-gray-600"><ArrowUp size={16}/></button>
-                                         <button onClick={() => moveMenu(index, 'down')} disabled={index === menuOrder.length - 1} className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30 text-gray-600"><ArrowDown size={16}/></button>
-                                     </div>
-                                 </div>
-                             ))}
-                         </div>
-                     </div>
-                 </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-indigo-200 overflow-hidden">
+              <div className="p-6 border-b border-indigo-100 bg-indigo-50 flex items-center justify-between">
+                <div className="flex items-center gap-3"><div className="p-2 bg-indigo-100 rounded-lg text-indigo-600"><Globe size={24} /></div><div><h3 className="font-bold text-indigo-900">Cấu hình Hệ thống (Admin)</h3></div></div>
+                <button onClick={handleSaveAppConfig} disabled={savingConfig} className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-70">{savingConfig ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Lưu cấu hình</button>
               </div>
+              <div className="p-6 space-y-6">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">URL Icon Web</label>
+                  <div className="flex gap-2"><input type="text" value={appIconUrl} onChange={e => setAppIconUrl(e.target.value)} className="w-full border border-gray-200 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 text-gray-900 font-medium" placeholder="https://..." /></div>
+                </div>
+
+                {/* CONTENT MANAGEMENT */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><FileText size={16} /> Quản lý Nội dung Chung</label>
+                  <div className="flex gap-3">
+                    <button onClick={() => openQuickEdit('car_prices')} className="px-4 py-2 bg-white border border-gray-300 rounded-xl text-sm font-bold hover:bg-gray-50 flex items-center gap-2 shadow-sm"><FileText size={14} /> Sửa Bảng giá Xe</button>
+                    <button onClick={() => openQuickEdit('bank_rates')} className="px-4 py-2 bg-white border border-gray-300 rounded-xl text-sm font-bold hover:bg-gray-50 flex items-center gap-2 shadow-sm"><FileText size={14} /> Sửa Lãi suất Bank</button>
+                  </div>
+                  {quickEditType && (
+                    <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200 animate-fade-in">
+                      <div className="flex justify-between items-center mb-2">
+                        <h4 className="font-bold text-sm text-gray-800">Đang sửa: {quickEditType === 'car_prices' ? 'Bảng giá Xe' : 'Lãi suất Ngân hàng'}</h4>
+                        <button onClick={() => setQuickEditType(null)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+                      </div>
+                      <textarea className="w-full h-48 border border-gray-300 rounded-lg p-3 text-xs font-mono focus:border-indigo-500 outline-none" value={quickEditContent} onChange={e => setQuickEditContent(e.target.value)} disabled={loadingContent}></textarea>
+                      <div className="mt-2 flex justify-end">
+                        <button onClick={saveQuickEdit} className="px-4 py-2 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 flex items-center gap-1">{loadingContent ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />} Lưu Nội dung</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* MENU SORTING */}
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block text-sm font-bold text-gray-700 flex items-center gap-2"><Layout size={16} /> Sắp xếp Menu Chính</label>
+                    <button onClick={handleResetMenu} className="text-xs text-indigo-600 font-bold flex items-center gap-1 hover:underline"><RotateCcw size={12} /> Khôi phục mặc định</button>
+                  </div>
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl overflow-hidden">
+                    {menuOrder.map((key, index) => (
+                      <div key={key} className="flex items-center justify-between p-3 border-b border-gray-200 last:border-0 bg-white">
+                        <span className="font-medium text-gray-700 ml-2">{menuLabels[key] || key}</span>
+                        <div className="flex gap-1">
+                          <button onClick={() => moveMenu(index, 'up')} disabled={index === 0} className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30 text-gray-600"><ArrowUp size={16} /></button>
+                          <button onClick={() => moveMenu(index, 'down')} disabled={index === menuOrder.length - 1} className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30 text-gray-600"><ArrowDown size={16} /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
@@ -306,3 +304,4 @@ const Profile: React.FC = () => {
 };
 
 export default Profile;
+
