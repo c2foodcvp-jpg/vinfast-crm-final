@@ -28,6 +28,7 @@ import Analytics from './pages/Analytics';
 import CalendarPage from './pages/Calendar';
 import OnlineQuote from './pages/OnlineQuote';
 import BankCalculator from './pages/BankCalculator';
+import LeadsQueue from './pages/LeadsQueue';
 
 const { HashRouter, Routes, Route, Navigate } = ReactRouterDOM as any;
 
@@ -58,7 +59,7 @@ const App: React.FC = () => {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/update-password" element={<UpdatePassword />} />
-            
+
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
             <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
@@ -68,15 +69,16 @@ const App: React.FC = () => {
             <Route path="/deals" element={<ProtectedRoute><Deals /></ProtectedRoute>} />
             <Route path="/employees" element={<ProtectedRoute><EmployeeList /></ProtectedRoute>} />
             <Route path="/employees/:id" element={<ProtectedRoute><EmployeeDetail /></ProtectedRoute>} />
-            
+
             <Route path="/configuration" element={<ProtectedRoute><Configuration /></ProtectedRoute>} />
             <Route path="/quote" element={<ProtectedRoute><OnlineQuote /></ProtectedRoute>} />
             <Route path="/bank-calculator" element={<ProtectedRoute><BankCalculator /></ProtectedRoute>} />
-            
-            <Route path="/distributors" element={<Navigate to="/configuration" replace />} /> 
-            
+
+            <Route path="/distributors" element={<Navigate to="/configuration" replace />} />
+
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="/leads-form" element={<ProtectedRoute><LeadsFromForm /></ProtectedRoute>} />
+            <Route path="/leads-queue" element={<ProtectedRoute><LeadsQueue /></ProtectedRoute>} />
             <Route path="/promotions" element={<ProtectedRoute><Promotions /></ProtectedRoute>} />
             <Route path="/finance" element={<ProtectedRoute><Finance /></ProtectedRoute>} />
             <Route path="/team-fund" element={<ProtectedRoute><TeamFund /></ProtectedRoute>} />
@@ -84,7 +86,7 @@ const App: React.FC = () => {
             <Route path="/bank-rates" element={<ProtectedRoute><BankRates /></ProtectedRoute>} />
             <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
             <Route path="/proposals" element={<ProtectedRoute><Proposals /></ProtectedRoute>} />
-            
+
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </HashRouter>

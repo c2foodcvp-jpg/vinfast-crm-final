@@ -6,9 +6,12 @@ import { supabase } from '../supabaseClient';
 import {
     LayoutDashboard, Users, LogOut, Menu, X, UserCircle, Briefcase, UserCog, Building2,
     FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, ChevronDown, PiggyBank, CarFront, Landmark, AlertCircle, Box, Settings, User, FileInput, BarChart2, Calendar, Calculator,
-    FolderOpen
+    FolderOpen, Mail
 } from 'lucide-react';
+
+// ... (existing imports)
 import { UserRole } from '../types';
+import NewCustomerNotification from './NewCustomerNotification';
 
 interface NavItemDef {
     key: string;
@@ -31,7 +34,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [counts, setCounts] = useState<Record<string, number>>({});
     const [menuOrder, setMenuOrder] = useState<string[]>([]);
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-        'lookup_tools': false // Default collapsed - user can expand when needed
+        'lookup_tools': false, // Default collapsed - user can expand when needed
+        'customer_allocation': false // Phân Bổ Khách - auto-expands when at child routes
     });
 
     // Definition of all possible menu items
@@ -42,6 +46,27 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         { key: 'analytics', icon: BarChart2, label: 'Phân tích (BI)', path: '/analytics', roleReq: [UserRole.ADMIN, UserRole.MOD] },
         { key: 'customers', icon: Users, label: 'Khách hàng', path: '/customers' },
         { key: 'deals', icon: FileCheck2, label: 'Đơn hàng', path: '/deals' },
+        {
+            key: 'customer_allocation',
+            icon: UserPlus,
+            label: 'Phân Bổ Khách',
+            path: '',
+            roleReq: [UserRole.ADMIN, UserRole.MOD],
+            children: [
+                { key: 'assign', icon: UserPlus, label: 'Phân bổ Leads', path: '/assign', roleReq: [UserRole.ADMIN, UserRole.MOD] },
+                {
+                    key: 'leads_queue',
+                    icon: Mail,
+                    label: 'Lead Email (Chờ)',
+                    path: '/leads-queue',
+                    roleReq: [UserRole.ADMIN, UserRole.MOD],
+                    countFetcher: async () => {
+                        const { count } = await supabase.from('customers').select('*', { count: 'exact', head: true }).or('sales_rep.is.null,sales_rep.eq.,sales_rep.eq.System,sales_rep.eq.Chưa phân bổ');
+                        return count || 0;
+                    }
+                },
+            ]
+        },
         { key: 'finance', icon: BadgeDollarSign, label: 'Tài chính & Quỹ', path: '/finance' },
         {
             key: 'proposals', icon: FileInput, label: 'Đề Xuất (Mới)', path: '/proposals', countFetcher: async () => {
@@ -66,7 +91,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 { key: 'promotions', icon: Gift, label: 'Chính sách Team', path: '/promotions' },
             ]
         },
-        { key: 'assign', icon: UserPlus, label: 'Phân bổ Leads', path: '/assign', roleReq: [UserRole.ADMIN, UserRole.MOD] },
         {
             key: 'employees', icon: Briefcase, label: 'Nhân sự', path: '/employees', roleReq: [UserRole.ADMIN, UserRole.MOD], countFetcher: async () => {
                 const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('status', 'pending');
@@ -156,6 +180,10 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const checkPermission = (item: NavItemDef) => {
         if (item.partTimeHidden && userProfile?.is_part_time) return false;
         if (item.roleReq && userProfile && !item.roleReq.includes(userProfile.role)) return false;
+        // Special check for leads_queue: MOD needs can_access_leads_queue permission
+        if (item.key === 'leads_queue' && userProfile?.role === UserRole.MOD && !userProfile.can_access_leads_queue) {
+            return false;
+        }
         return true;
     };
 
@@ -312,6 +340,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                     </div>
                 </div>
             </main>
+
+            {/* New Customer Notification Popup for Employees */}
+            <NewCustomerNotification />
         </div>
     );
 };

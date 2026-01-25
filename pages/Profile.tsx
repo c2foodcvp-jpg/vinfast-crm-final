@@ -3,12 +3,11 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  User, Phone, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Database, Copy, Zap, Globe, Layout, ArrowUp, ArrowDown, RotateCcw, FileText, X
+  User, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Globe, Layout, ArrowUp, ArrowDown, RotateCcw
 } from 'lucide-react';
-import { UserRole } from '../types';
 
 const Profile: React.FC = () => {
-  const { userProfile, session, isAdmin, isMod } = useAuth();
+  const { userProfile, session, isAdmin } = useAuth();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', content: string } | null>(null);
 
@@ -24,23 +23,22 @@ const Profile: React.FC = () => {
   const [menuOrder, setMenuOrder] = useState<string[]>([]);
   const [menuLabels, setMenuLabels] = useState<Record<string, string>>({});
 
-  // Quick Edit Text (Car Prices, Bank Rates)
-  const [quickEditType, setQuickEditType] = useState<'car_prices' | 'bank_rates' | null>(null);
-  const [quickEditContent, setQuickEditContent] = useState('');
-  const [loadingContent, setLoadingContent] = useState(false);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Define default menu keys for reference
   const DEFAULT_MENU_KEYS = [
     { key: 'dashboard', label: 'Tổng quan' },
     { key: 'calendar', label: 'Lịch làm việc' },
-    { key: 'quote', label: 'Báo giá Online' }, // Added Quote
+    { key: 'quote', label: 'Báo giá Online' },
     { key: 'analytics', label: 'Phân tích (BI)' },
     { key: 'customers', label: 'Khách hàng' },
-    { key: 'assign', label: 'Phân bổ Leads' },
+    { key: 'deals', label: 'Đơn hàng' },
+    { key: 'customer_allocation', label: 'Phân Bổ Khách' },
+    { key: 'finance', label: 'Tài chính & Quỹ' },
+    { key: 'proposals', label: 'Đề Xuất (Mới)' },
+    { key: 'lookup_tools', label: 'Chính sách & Tồn kho' },
     { key: 'employees', label: 'Nhân sự' },
     { key: 'team_fund', label: 'Quỹ Nhóm' },
     { key: 'configuration', label: 'Cấu hình' },
@@ -192,30 +190,6 @@ const Profile: React.FC = () => {
     setMenuOrder(newOrder);
   };
 
-  // --- QUICK EDIT LOGIC ---
-  const openQuickEdit = async (type: 'car_prices' | 'bank_rates') => {
-    setQuickEditType(type);
-    setLoadingContent(true);
-    const key = type === 'car_prices' ? 'car_prices_html' : 'bank_rates_html';
-    try {
-      const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle();
-      setQuickEditContent(data?.value || '');
-    } catch (e) { } finally { setLoadingContent(false); }
-  };
-
-  const saveQuickEdit = async () => {
-    if (!quickEditType) return;
-    setLoadingContent(true);
-    const key = quickEditType === 'car_prices' ? 'car_prices_html' : 'bank_rates_html';
-    try {
-      await supabase.from('app_settings').upsert({ key, value: quickEditContent });
-      setMessage({ type: 'success', content: 'Đã cập nhật nội dung thành công!' });
-      setQuickEditType(null);
-    } catch (e) {
-      setMessage({ type: 'error', content: 'Lỗi lưu nội dung.' });
-    } finally { setLoadingContent(false); }
-  };
-
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-10">
       <div><h1 className="text-2xl font-bold text-gray-900">Tài khoản cá nhân</h1><p className="text-gray-500">Quản lý thông tin hồ sơ và bảo mật tài khoản.</p></div>
@@ -245,27 +219,6 @@ const Profile: React.FC = () => {
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">URL Icon Web</label>
                   <div className="flex gap-2"><input type="text" value={appIconUrl} onChange={e => setAppIconUrl(e.target.value)} className="w-full border border-gray-200 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 text-gray-900 font-medium" placeholder="https://..." /></div>
-                </div>
-
-                {/* CONTENT MANAGEMENT */}
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><FileText size={16} /> Quản lý Nội dung Chung</label>
-                  <div className="flex gap-3">
-                    <button onClick={() => openQuickEdit('car_prices')} className="px-4 py-2 bg-white border border-gray-300 rounded-xl text-sm font-bold hover:bg-gray-50 flex items-center gap-2 shadow-sm"><FileText size={14} /> Sửa Bảng giá Xe</button>
-                    <button onClick={() => openQuickEdit('bank_rates')} className="px-4 py-2 bg-white border border-gray-300 rounded-xl text-sm font-bold hover:bg-gray-50 flex items-center gap-2 shadow-sm"><FileText size={14} /> Sửa Lãi suất Bank</button>
-                  </div>
-                  {quickEditType && (
-                    <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200 animate-fade-in">
-                      <div className="flex justify-between items-center mb-2">
-                        <h4 className="font-bold text-sm text-gray-800">Đang sửa: {quickEditType === 'car_prices' ? 'Bảng giá Xe' : 'Lãi suất Ngân hàng'}</h4>
-                        <button onClick={() => setQuickEditType(null)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
-                      </div>
-                      <textarea className="w-full h-48 border border-gray-300 rounded-lg p-3 text-xs font-mono focus:border-indigo-500 outline-none" value={quickEditContent} onChange={e => setQuickEditContent(e.target.value)} disabled={loadingContent}></textarea>
-                      <div className="mt-2 flex justify-end">
-                        <button onClick={saveQuickEdit} className="px-4 py-2 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 flex items-center gap-1">{loadingContent ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />} Lưu Nội dung</button>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 {/* MENU SORTING */}

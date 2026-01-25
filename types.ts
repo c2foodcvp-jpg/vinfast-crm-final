@@ -132,6 +132,7 @@ export interface UserProfile {
   is_locked_view?: boolean; // Block viewing/editing existing customers
   is_locked_quote?: boolean; // Block Quote & Interest Calculator pages
   is_locked_advance?: boolean; // Block salary advance requests
+  can_access_leads_queue?: boolean; // MOD permission to access Leads Queue page
 
   created_at?: string;
   discord_config?: any;

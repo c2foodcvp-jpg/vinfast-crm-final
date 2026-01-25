@@ -33,7 +33,7 @@ const EmployeeList: React.FC = () => {
     // Permission Lock Modal
     const [showPermissionModal, setShowPermissionModal] = useState(false);
     const [targetUserForPerm, setTargetUserForPerm] = useState<UserProfile | null>(null);
-    const [permForm, setPermForm] = useState({ lockAdd: false, lockView: false });
+    const [permForm, setPermForm] = useState({ lockAdd: false, lockView: false, canAccessLeadsQueue: false });
 
     // Confirmation Modal State (Replaces window.confirm)
     const [confirmAction, setConfirmAction] = useState<{
@@ -331,17 +331,25 @@ const EmployeeList: React.FC = () => {
 
     const openPermissionModal = (emp: UserProfile) => {
         setTargetUserForPerm(emp);
-        setPermForm({ lockAdd: !!emp.is_locked_add, lockView: !!emp.is_locked_view });
+        setPermForm({
+            lockAdd: !!emp.is_locked_add,
+            lockView: !!emp.is_locked_view,
+            canAccessLeadsQueue: !!emp.can_access_leads_queue
+        });
         setShowPermissionModal(true);
     };
 
     const handleSavePermission = async () => {
         if (!targetUserForPerm) return;
         try {
-            const updates = {
+            const updates: any = {
                 is_locked_add: permForm.lockAdd,
                 is_locked_view: permForm.lockView
             };
+            // Only save can_access_leads_queue for MOD users
+            if (targetUserForPerm.role === UserRole.MOD) {
+                updates.can_access_leads_queue = permForm.canAccessLeadsQueue;
+            }
             const { error } = await supabase.from('profiles').update(updates).eq('id', targetUserForPerm.id);
             if (error) throw error;
 
@@ -547,6 +555,19 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
                                     <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${permForm.lockView ? 'translate-x-5' : ''}`}></div>
                                 </div>
                             </div>
+
+                            {/* MOD-only permission: Leads Queue access */}
+                            {targetUserForPerm.role === UserRole.MOD && (
+                                <div className="flex items-center justify-between p-3 bg-purple-50 border border-purple-100 rounded-xl">
+                                    <div>
+                                        <span className="block text-sm font-bold text-purple-900">Cho phép xem Lead Email (Chờ)</span>
+                                        <span className="text-xs text-purple-700">Truy cập trang phân bổ từ Email.</span>
+                                    </div>
+                                    <div onClick={() => setPermForm({ ...permForm, canAccessLeadsQueue: !permForm.canAccessLeadsQueue })} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${permForm.canAccessLeadsQueue ? 'bg-purple-600' : 'bg-gray-300'}`}>
+                                        <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${permForm.canAccessLeadsQueue ? 'translate-x-5' : ''}`}></div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex gap-3">
@@ -665,6 +686,7 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
             {showRLSModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70  animate-fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"><div className="p-6 bg-red-50 border-b border-red-100 flex gap-4 items-start"><div className="p-3 bg-red-100 text-red-600 rounded-xl shrink-0"><AlertTriangle size={24} /></div><div><h3 className="text-xl font-bold text-gray-900">Cập nhật Database</h3><p className="text-sm text-gray-600 mt-1">Database của bạn đang thiếu các cột phân quyền hoặc chính sách bảo mật (RLS). Vui lòng chạy lệnh SQL sau:</p></div><button onClick={() => setShowRLSModal(false)} className="ml-auto text-gray-400 hover:text-gray-600"><X size={24} /></button></div><div className="p-6 overflow-y-auto space-y-4"><div className="relative bg-gray-900 rounded-xl p-4 font-mono text-sm text-green-400 overflow-x-auto border border-gray-700 shadow-inner"><pre>{`-- 1. Bổ sung cột phân quyền hạn chế (Fix lỗi 400 Bad Request)
 alter table profiles add column if not exists is_locked_add boolean default false;
 alter table profiles add column if not exists is_locked_view boolean default false;
+alter table profiles add column if not exists can_access_leads_queue boolean default false;
 
 -- 2. Cập nhật Policy để Admin/Mod sửa được Profile
 drop policy if exists "Users can update own profile" on profiles;
@@ -685,6 +707,7 @@ using ( auth.uid() = id );`}</pre><button onClick={() => {
                     const code = `-- 1. Bổ sung cột phân quyền hạn chế (Fix lỗi 400 Bad Request)
 alter table profiles add column if not exists is_locked_add boolean default false;
 alter table profiles add column if not exists is_locked_view boolean default false;
+alter table profiles add column if not exists can_access_leads_queue boolean default false;
 
 -- 2. Cập nhật Policy để Admin/Mod sửa được Profile
 drop policy if exists "Users can update own profile" on profiles;

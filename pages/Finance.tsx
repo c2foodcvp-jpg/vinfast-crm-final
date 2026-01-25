@@ -700,6 +700,84 @@ const Finance: React.FC = () => {
         return rows;
     }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, pnlNet, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, allKPIs]);
 
+    // --- NEW: Employee Performance & Debt Stats ---
+    const employeeStats = useMemo(() => {
+        let eligibleProfiles = allProfiles.filter(p => !p.is_part_time && p.status === 'active' && p.role !== 'admin');
+        if (isAdmin && selectedTeam !== 'all') {
+            eligibleProfiles = eligibleProfiles.filter(p => p.manager_id === selectedTeam || p.id === selectedTeam);
+        } else if (isMod) {
+            eligibleProfiles = eligibleProfiles.filter(p => p.id === userProfile?.id || p.manager_id === userProfile?.id);
+        } else if (!isAdmin && !isMod) {
+            eligibleProfiles = eligibleProfiles.filter(p => p.id === userProfile?.id);
+        }
+
+        return eligibleProfiles.map(emp => {
+            // Get Customers for this employee (Filtered by Month/Year/MKT) - reusing logic roughly from profitSharing
+            const empCustomers = allCustomers.filter(c => {
+                if (c.creator_id !== emp.id) return false;
+                if (c.status !== CustomerStatus.WON) return false;
+                if (c.deal_status === 'refunded' || c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
+
+                if (!isMKT(c.source)) return false;
+                // Use date logic consistent with page filters
+                if (filterMode === 'creation') {
+                    const d = new Date(c.created_at);
+                    return isInMonthYear(c.created_at);
+                } else {
+                    return isInMonthYear(c.updated_at || c.created_at || '');
+                }
+            });
+
+            const countWon = empCustomers.length;
+            const expectedRevenue = empCustomers.reduce((sum, c) => sum + (c.deal_details?.revenue || 0), 0);
+
+            // Collected Revenue (From Customer Deal Details)
+            const collectedRevenue = empCustomers.reduce((sum, c) => sum + (c.deal_details?.actual_revenue || 0), 0);
+            const custIds = empCustomers.map(c => c.id);
+
+            // Incurred Expenses (Chi phí phát sinh linked to customers)
+            const incurredExpenses = transactions
+                .filter(t => t.customer_id && custIds.includes(t.customer_id) && t.type === 'incurred_expense' && t.status === 'approved')
+                .reduce((sum, t) => sum + t.amount, 0);
+
+            // Deposited (Nộp quỹ)
+            const depositedRevenue = transactions
+                .filter(t => t.customer_id && custIds.includes(t.customer_id) && t.type === 'deposit' && t.status === 'approved')
+                .reduce((sum, t) => sum + t.amount, 0);
+
+            // General Expenses (Chi quỹ - type=expense)
+            const totalExpenses = transactions
+                .filter(t => t.user_id === emp.id && t.type === 'expense' && t.status === 'approved')
+                .reduce((sum, t) => sum + t.amount, 0);
+
+            // Advances & Repayments
+            const totalAdvances = transactions
+                .filter(t => t.user_id === emp.id && t.type === 'advance' && t.status === 'approved')
+                .reduce((sum, t) => sum + t.amount, 0);
+
+            const totalRepayments = transactions
+                .filter(t => t.user_id === emp.id && t.type === 'repayment' && t.status === 'approved')
+                .reduce((sum, t) => sum + t.amount, 0);
+
+            const outstandingAdvance = Math.max(0, totalAdvances - totalRepayments);
+            const revenueDebt = Math.max(0, (collectedRevenue - incurredExpenses) - depositedRevenue);
+
+            // Total Debt = Revenue Debt + Outstanding Advance
+            const debt = revenueDebt + outstandingAdvance;
+
+            return {
+                user: emp,
+                countWon,
+                expectedRevenue,
+                collectedRevenue,
+                depositedRevenue,
+                totalExpenses,
+                totalAdvances,
+                debt
+            };
+        }).sort((a, b) => b.expectedRevenue - a.expectedRevenue);
+    }, [allProfiles, allCustomers, transactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, filterMode]);
+
 
     const expenses = filteredTransactions.filter(t => t.type === 'expense' || t.type === 'advance');
     const deposits = filteredTransactions.filter(t => ['deposit', 'revenue', 'adjustment', 'repayment', 'personal_bonus'].includes(t.type));
@@ -1020,6 +1098,58 @@ const Finance: React.FC = () => {
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <div className="p-4 bg-orange-50 border-b border-orange-100 flex justify-between items-center"><h3 className="font-bold text-orange-800 flex items-center gap-2"><Building2 size={18} /> Đại lý nợ chưa thu</h3></div>
                     <div className="p-4 max-h-[600px] overflow-y-auto space-y-3">{pendingDealerDebts.length === 0 ? (<div className="text-center py-8 text-gray-400 text-sm">Không có khoản nợ nào.</div>) : (pendingDealerDebts.map(t => (<div key={t.id} className={`p-3 border border-orange-200 bg-orange-50 rounded-xl transition-all ${t.customer_id ? 'cursor-pointer hover:shadow-md hover:border-orange-300' : ''}`}><div className="flex justify-between items-start"><div><div className="flex items-center gap-1 mb-1"><p className="font-bold text-gray-900 line-clamp-1">{t.reason}</p>{t.customer_id && <ExternalLink size={12} className="text-orange-400" />}</div><p className="text-xs text-gray-500">{t.user_name} • Dự kiến: {t.target_date ? new Date(t.target_date).toLocaleDateString('vi-VN') : 'N/A'}</p>{t.customer_name && <p className="text-xs text-blue-600 mt-1 font-semibold">Khách: {t.customer_name}</p>}</div><div className="flex flex-col items-end"><span className="font-bold text-orange-700">+{formatCurrency(t.amount)}</span><span className="text-[10px] bg-orange-200 text-orange-800 px-1.5 py-0.5 rounded mt-1 font-bold">Chờ thu</span></div></div>{(isAdmin || isMod) && (<div className="flex justify-end mt-2 pt-2 border-t border-orange-100"><button onClick={(e) => { e.stopPropagation(); setTransactionToDelete(t); }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={14} /></button></div>)}</div>)))}</div>
+                </div>
+            </div>
+
+            {/* --- NEW: EMPLOYEE PERFORMANCE & DEBT TABLE --- */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-6">
+                <div className="p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
+                    <h3 className="font-bold text-gray-800 flex items-center gap-2"><User size={20} className="text-gray-600" /> Hiệu suất & Công nợ Nhân viên</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="text-xs text-gray-500 uppercase bg-gray-50">
+                            <tr>
+                                <th className="px-4 py-3">Nhân viên</th>
+                                <th className="px-4 py-3 text-center">Số xe đã chốt</th>
+                                <th className="px-4 py-3 text-right">Doanh thu dự kiến</th>
+                                <th className="px-4 py-3 text-right">Doanh thu thực tế (Tổng)</th>
+                                <th className="px-4 py-3 text-right text-green-600">Đã nộp quỹ</th>
+                                <th className="px-4 py-3 text-right text-orange-600">Đã chi</th>
+                                <th className="px-4 py-3 text-right text-purple-600">Đã ứng</th>
+                                <th className="px-4 py-3 text-right text-red-600">Nợ cần thu</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {employeeStats.length === 0 ? (
+                                <tr><td colSpan={8} className="p-4 text-center text-gray-400">Không có dữ liệu nhân viên.</td></tr>
+                            ) : employeeStats.map(row => (
+                                <tr key={row.user.id} className="hover:bg-gray-50 transition-colors">
+                                    <td className="px-4 py-3 font-bold text-gray-900">{row.user.full_name}</td>
+                                    <td className="px-4 py-3 text-center font-semibold">{row.countWon}</td>
+                                    <td className="px-4 py-3 text-right font-medium text-purple-600">{formatCurrency(row.expectedRevenue)}</td>
+                                    <td className="px-4 py-3 text-right font-bold text-gray-800">{formatCurrency(row.collectedRevenue)}</td>
+                                    <td className="px-4 py-3 text-right font-bold text-green-600">{formatCurrency(row.depositedRevenue)}</td>
+                                    <td className="px-4 py-3 text-right font-medium text-orange-600">{formatCurrency(row.totalExpenses)}</td>
+                                    <td className="px-4 py-3 text-right font-medium text-purple-600">{formatCurrency(row.totalAdvances)}</td>
+                                    <td className="px-4 py-3 text-right font-bold text-red-600">{formatCurrency(row.debt)}</td>
+                                </tr>
+                            ))}
+                            {/* Summary Row */}
+                            {employeeStats.length > 0 && (
+                                <tr className="bg-gray-50 font-bold bg-yellow-50/50">
+                                    <td className="px-4 py-3 text-gray-800 uppercase">TỔNG CỘNG</td>
+                                    <td className="px-4 py-3 text-center">{employeeStats.reduce((a, b) => a + b.countWon, 0)}</td>
+                                    <td className="px-4 py-3 text-right text-purple-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.expectedRevenue, 0))}</td>
+                                    <td className="px-4 py-3 text-right text-gray-900">{formatCurrency(employeeStats.reduce((a, b) => a + b.collectedRevenue, 0))}</td>
+                                    <td className="px-4 py-3 text-right text-green-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.depositedRevenue, 0))}</td>
+                                    <td className="px-4 py-3 text-right text-orange-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.totalExpenses, 0))}</td>
+                                    <td className="px-4 py-3 text-right text-purple-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.totalAdvances, 0))}</td>
+                                    <td className="px-4 py-3 text-right text-red-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.debt, 0))}</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 

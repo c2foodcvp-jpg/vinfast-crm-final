@@ -6,7 +6,8 @@ import { useAuth } from '../contexts/AuthContext';
 import * as ReactRouterDOM from 'react-router-dom';
 import { exportToExcel } from '../utils/excelExport';
 import { Search, Plus, X, User, CarFront, Calendar, AlertCircle, Clock, CheckCircle2, MessageSquare, ShieldAlert, Upload, FileSpreadsheet, Download, AlertTriangle, Flame, History, RotateCcw, HardDrive, MapPin, Loader2, ChevronDown, List, Filter, Webhook, UserX, ScanSearch, Phone, Trash2, Eye, Share2, Star, Activity, PauseCircle, Ban, EyeOff, Lock, ChevronLeft, ChevronRight } from 'lucide-react';
-import AddCustomerModal from '../components/AddCustomerModal'; // NEW IMPORT
+import AddCustomerModal from '../components/AddCustomerModal';
+import DateRangeFilter from '../components/DateRangeFilter';
 
 const { useNavigate, useLocation } = ReactRouterDOM as any;
 
@@ -30,10 +31,14 @@ const CustomerList: React.FC = () => {
 
     const [selectedRep, setSelectedRep] = useState<string>('all');
     const [selectedTeam, setSelectedTeam] = useState<string>('all');
-    const [timeFilter, setTimeFilter] = useState<'today' | 'this_month' | 'last_month' | 'quarter' | 'year' | 'all'>('all');
+    // Custom Date Range Filter (replaces timeFilter)
+    const [dateRangeStart, setDateRangeStart] = useState<string>('');
+    const [dateRangeEnd, setDateRangeEnd] = useState<string>('');
 
     const [isUnacknowledgedFilter, setIsUnacknowledgedFilter] = useState(false);
     const [isExpiredLongTermFilter, setIsExpiredLongTermFilter] = useState(false);
+    const [isDuplicateLeadsFilter, setIsDuplicateLeadsFilter] = useState(false);
+    const [duplicateLeadCustomerIds, setDuplicateLeadCustomerIds] = useState<string[]>([]);
     const [activeTab, setActiveTab] = useState<string>('general');
 
     // Pagination State
@@ -82,68 +87,92 @@ const CustomerList: React.FC = () => {
         if (location.state) {
             if (location.state.initialTab) {
                 setActiveTab(location.state.initialTab);
-                setTimeFilter('all'); setIsUnacknowledgedFilter(false); setIsExpiredLongTermFilter(false);
+                setDateRangeStart(''); setDateRangeEnd(''); setIsUnacknowledgedFilter(false); setIsExpiredLongTermFilter(false);
             }
             if (location.state.filterType === 'today') {
-                setTimeFilter('today'); setActiveTab('all');
+                // Set today's date for date range filter
+                setDateRangeStart(todayStr); setDateRangeEnd(todayStr); setActiveTab('all');
                 setIsUnacknowledgedFilter(false); setIsExpiredLongTermFilter(false);
             }
             if (location.state.filterType === 'unacknowledged') {
                 setIsUnacknowledgedFilter(true); setActiveTab('all');
-                setTimeFilter('all'); setIsExpiredLongTermFilter(false);
+                setDateRangeStart(''); setDateRangeEnd(''); setIsExpiredLongTermFilter(false);
             }
             if (location.state.filterType === 'expired_longterm') {
                 setIsExpiredLongTermFilter(true); setActiveTab('all');
-                setTimeFilter('all'); setIsUnacknowledgedFilter(false);
+                setDateRangeStart(''); setDateRangeEnd(''); setIsUnacknowledgedFilter(false); setIsDuplicateLeadsFilter(false);
             }
-            setIsRestored(true); // Restoration complete
+            if (location.state.filterType === 'duplicate_leads_today') {
+                setIsDuplicateLeadsFilter(true); setActiveTab('all');
+                setDateRangeStart(''); setDateRangeEnd(''); setIsUnacknowledgedFilter(false); setIsExpiredLongTermFilter(false);
+                fetchDuplicateLeadCustomerIds();
+            }
+            setIsRestored(true);
         }
-        // 2. Else, restore from SessionStorage if available
         else {
             const savedState = sessionStorage.getItem('crm_customer_view_state');
             if (savedState) {
                 try {
                     const parsed = JSON.parse(savedState);
-                    // Only restore if valid
                     if (parsed.activeTab) setActiveTab(parsed.activeTab);
-                    // Note: We don't restore searchTerm automatically to avoid confusion
                     if (parsed.selectedRep) setSelectedRep(parsed.selectedRep);
                     if (parsed.selectedTeam) setSelectedTeam(parsed.selectedTeam);
-                    if (parsed.timeFilter) setTimeFilter(parsed.timeFilter);
+                    if (parsed.dateRangeStart) setDateRangeStart(parsed.dateRangeStart);
+                    if (parsed.dateRangeEnd) setDateRangeEnd(parsed.dateRangeEnd);
                     setIsUnacknowledgedFilter(!!parsed.isUnacknowledgedFilter);
                     setIsExpiredLongTermFilter(!!parsed.isExpiredLongTermFilter);
                 } catch (e) {
                     console.error("Failed to restore state", e);
                 }
             }
-            setIsRestored(true); // Restoration complete (even if nothing found)
+            setIsRestored(true);
         }
     }, [location.state]);
 
     // --- SAVE STATE LOGIC ---
     useEffect(() => {
-        if (!isRestored) return; // CRITICAL: Do not save until restored
-
+        if (!isRestored) return;
         const stateToSave = {
             activeTab,
-            searchTerm: debouncedSearchTerm, // Save the actual applied term
+            searchTerm: debouncedSearchTerm,
             selectedRep,
             selectedTeam,
-            timeFilter,
+            dateRangeStart,
+            dateRangeEnd,
             isUnacknowledgedFilter,
             isExpiredLongTermFilter
         };
         sessionStorage.setItem('crm_customer_view_state', JSON.stringify(stateToSave));
-    }, [activeTab, debouncedSearchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, isRestored]);
+    }, [activeTab, debouncedSearchTerm, selectedRep, selectedTeam, dateRangeStart, dateRangeEnd, isUnacknowledgedFilter, isExpiredLongTermFilter, isRestored]);
 
     // Reset to page 1 when filters change
     useEffect(() => {
         setCurrentPage(1);
-    }, [debouncedSearchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, activeTab]);
+    }, [debouncedSearchTerm, selectedRep, selectedTeam, dateRangeStart, dateRangeEnd, isUnacknowledgedFilter, isExpiredLongTermFilter, activeTab]);
 
     useEffect(() => {
         fetchCustomersWithIsolation();
     }, [userProfile]);
+
+    // Fetch Customer IDs that have duplicate lead interactions today
+    const fetchDuplicateLeadCustomerIds = async () => {
+        const todayStart = todayStr + 'T00:00:00';
+        const todayEnd = todayStr + 'T23:59:59';
+
+        const { data } = await supabase
+            .from('interactions')
+            .select('customer_id')
+            .ilike('content', '%[LEAD MỚI TRÙNG]%')
+            .gte('created_at', todayStart)
+            .lt('created_at', todayEnd);
+
+        if (data && data.length > 0) {
+            const ids = [...new Set(data.map(d => d.customer_id))]; // Unique IDs
+            setDuplicateLeadCustomerIds(ids);
+        } else {
+            setDuplicateLeadCustomerIds([]);
+        }
+    };
 
     const fetchCustomersWithIsolation = async () => {
         if (!userProfile) return;
@@ -429,29 +458,10 @@ const CustomerList: React.FC = () => {
             filtered = filtered.filter(c => c.creator_id === selectedRep);
         }
 
-        // Time Range Filter Logic
-        if (timeFilter !== 'all') {
-            const now = new Date();
-            let start = new Date(0); // Epoch
-            let end = new Date();
-
-            if (timeFilter === 'today') {
-                start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-                end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-            } else if (timeFilter === 'this_month') {
-                start = new Date(now.getFullYear(), now.getMonth(), 1);
-                end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-            } else if (timeFilter === 'last_month') {
-                start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-            } else if (timeFilter === 'quarter') {
-                const q = Math.floor(now.getMonth() / 3);
-                start = new Date(now.getFullYear(), q * 3, 1);
-                end = new Date(now.getFullYear(), (q + 1) * 3, 0, 23, 59, 59);
-            } else if (timeFilter === 'year') {
-                start = new Date(now.getFullYear(), 0, 1);
-                end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
-            }
+        // Date Range Filter Logic
+        if (dateRangeStart || dateRangeEnd) {
+            const start = dateRangeStart ? new Date(dateRangeStart + 'T00:00:00') : new Date(0);
+            const end = dateRangeEnd ? new Date(dateRangeEnd + 'T23:59:59') : new Date();
 
             filtered = filtered.filter(c => {
                 const d = new Date(c.created_at);
@@ -468,13 +478,17 @@ const CustomerList: React.FC = () => {
                 if (!c.is_long_term) return false;
                 if (c.status === CustomerStatus.WON || c.status === CustomerStatus.LOST) return false;
                 if (!c.recare_date) return false;
-                // LOGIC CHANGE: Only check today (past dates are auto-converted in Dashboard)
                 return c.recare_date === todayStr;
             });
         }
 
+        // Filter for Duplicate Leads Today
+        if (isDuplicateLeadsFilter && duplicateLeadCustomerIds.length > 0) {
+            filtered = filtered.filter(c => duplicateLeadCustomerIds.includes(c.id));
+        }
+
         return filtered;
-    }, [customers, debouncedSearchTerm, selectedRep, selectedTeam, timeFilter, isUnacknowledgedFilter, isExpiredLongTermFilter, isAdmin, isMod, todayStr, employees]);
+    }, [customers, debouncedSearchTerm, selectedRep, selectedTeam, dateRangeStart, dateRangeEnd, isUnacknowledgedFilter, isExpiredLongTermFilter, isDuplicateLeadsFilter, duplicateLeadCustomerIds, isAdmin, isMod, todayStr, employees]);
 
     // Tab Filtering logic applied to base list
     const filteredList = useMemo(() => {
@@ -611,13 +625,24 @@ const CustomerList: React.FC = () => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Quản lý Khách hàng</h1>
-                    {timeFilter === 'today' && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold"><Calendar size={14} /> Đang xem: Khách mới hôm nay<button onClick={() => setTimeFilter('all')} className="ml-1 hover:text-green-900"><X size={14} /></button></span>)}
+                    {(dateRangeStart === todayStr && dateRangeEnd === todayStr) && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold"><Calendar size={14} /> Đang xem: Khách mới hôm nay<button onClick={() => { setDateRangeStart(''); setDateRangeEnd(''); }} className="ml-1 hover:text-green-900"><X size={14} /></button></span>)}
                     {isUnacknowledgedFilter && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold animate-fade-in"><UserX size={14} /> Đang xem: Khách chưa được TVBH tiếp nhận<button onClick={() => setIsUnacknowledgedFilter(false)} className="ml-1 hover:text-purple-900"><X size={14} /></button></span>)}
                     {isExpiredLongTermFilter && (<span className="inline-flex items-center gap-2 mt-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold animate-fade-in"><AlertTriangle size={14} /> Đang xem: Khách CS Dài hạn đã đến hạn (Hết hạn)<button onClick={() => setIsExpiredLongTermFilter(false)} className="ml-1 hover:text-blue-900"><X size={14} /></button></span>)}
                 </div>
-                <div className="flex gap-2">
-                    {(isAdmin || isMod) && (<button onClick={handleScanDuplicates} className="flex items-center gap-2 rounded-xl bg-gray-800 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-gray-400 transition-colors hover:bg-black"><ScanSearch size={18} /> Quét trùng lặp</button>)}
-                    <button onClick={handleAddCustomerClick} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-lg transition-colors ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}><Plus size={18} /> Thêm khách</button>
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+                    <DateRangeFilter
+                        startDate={dateRangeStart}
+                        endDate={dateRangeEnd}
+                        onStartDateChange={setDateRangeStart}
+                        onEndDateChange={setDateRangeEnd}
+                        onClear={() => {
+                            setDateRangeStart('');
+                            setDateRangeEnd('');
+                        }}
+                        className="w-full md:w-auto" // Mobile responsive
+                    />
+                    {(isAdmin || isMod) && (<button onClick={handleScanDuplicates} className="flex items-center gap-2 rounded-xl bg-gray-800 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-gray-400 transition-colors hover:bg-black whitespace-nowrap"><ScanSearch size={18} /> Quét trùng</button>)}
+                    <button onClick={handleAddCustomerClick} className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors whitespace-nowrap ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}><Plus size={18} /> Thêm khách</button>
                 </div>
             </div>
 
@@ -628,24 +653,7 @@ const CustomerList: React.FC = () => {
                 </div>
 
                 {/* FILTERS & EXPORT */}
-                <div className="flex gap-2 w-full md:w-auto overflow-x-auto">
-                    {/* Time Filter */}
-                    <div className="relative min-w-[140px]">
-                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                        <select
-                            value={timeFilter}
-                            onChange={(e) => setTimeFilter(e.target.value as any)}
-                            className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-8 text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all appearance-none cursor-pointer"
-                        >
-                            <option value="all">Tất cả</option>
-                            <option value="today">Hôm nay</option>
-                            <option value="this_month">Tháng này</option>
-                            <option value="last_month">Tháng trước</option>
-                            <option value="quarter">Quý này</option>
-                            <option value="year">Năm nay</option>
-                        </select>
-                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
-                    </div>
+                <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
 
                     {/* Team Filter */}
                     {isAdmin && (
