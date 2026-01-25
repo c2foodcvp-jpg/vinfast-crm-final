@@ -200,9 +200,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
     return (
         <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-800">
-            {isSidebarOpen && <div className="fixed inset-0 z-40 bg-slate-900/60  md:hidden" onClick={() => setIsSidebarOpen(false)} />}
+            {isSidebarOpen && <div className="fixed inset-0 z-[90] bg-slate-900/60  md:hidden" onClick={() => setIsSidebarOpen(false)} />}
 
-            <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200/60 transition-transform duration-300 md:static md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} shadow-2xl md:shadow-none flex flex-col`}>
+            <aside className={`fixed inset-y-0 left-0 z-[100] w-72 bg-white border-r border-slate-200/60 transition-transform duration-300 md:static md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} shadow-2xl md:shadow-none flex flex-col`}>
                 <div className="h-20 flex items-center px-6 border-b border-slate-100">
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 flex items-center justify-center text-white font-bold text-2xl shadow-glow mr-3">V</div>
                     <div>

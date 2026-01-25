@@ -40,7 +40,7 @@ function processIncomingLeads() {
 
   threads.forEach(thread => {
     const messages = thread.getMessages();
-    const message = messages[0]; // Lấy email đầu tiên
+    const message = messages[messages.length - 1]; // Lấy email mới nhất trong luồng (quan trọng nếu email bị gộp thread)
     const body = message.getPlainBody();
     const subject = message.getSubject();
 

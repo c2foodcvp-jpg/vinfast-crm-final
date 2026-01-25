@@ -427,7 +427,7 @@ const OnlineQuote: React.FC = () => {
 
     // --- NEW: INSURANCE & REG FEE STATE ---
     const [includeInsurance, setIncludeInsurance] = useState(() => getSavedState('includeInsurance', false));
-    const [insuranceRate, setInsuranceRate] = useState<number>(() => getSavedState('insuranceRate', 1.2));
+    const [insuranceRate, setInsuranceRate] = useState<string>(() => String(getSavedState('insuranceRate', 1.2)));
     const [feeSearch, setFeeSearch] = useState('');
     const [showFeeList, setShowFeeList] = useState(false);
 
@@ -700,7 +700,8 @@ const OnlineQuote: React.FC = () => {
         });
 
         if (includeInsurance) {
-            const insuranceAmount = finalInvoicePrice * (insuranceRate / 100);
+            const rate = parseFloat(String(insuranceRate).replace(',', '.')) || 0;
+            const insuranceAmount = finalInvoicePrice * (rate / 100);
             totalFees += insuranceAmount;
             breakdown.push({ name: `Bảo hiểm 2 chiều (${insuranceRate}%)`, amount: insuranceAmount, originalId: 'hull_insurance' });
         }
@@ -1048,11 +1049,20 @@ const OnlineQuote: React.FC = () => {
                                 {includeInsurance && (
                                     <div className="flex items-center gap-2">
                                         <input
-                                            type="number"
-                                            step="0.1"
+                                            type="text"
+                                            inputMode="decimal"
+                                            step="any"
                                             value={insuranceRate}
-                                            onChange={(e) => setInsuranceRate(parseFloat(e.target.value))}
-                                            className="w-16 px-2 py-1 text-sm text-right font-bold border border-blue-200 rounded outline-none"
+                                            onChange={(e) => setInsuranceRate(e.target.value)}
+                                            onBlur={() => {
+                                                // Normalize on blur: 1,2 -> 1.2
+                                                // Handle empty/invalid cases gracefully
+                                                if (!insuranceRate) return;
+                                                const parsed = parseFloat(insuranceRate.replace(',', '.'));
+                                                if (!isNaN(parsed)) setInsuranceRate(parsed.toString());
+                                            }}
+                                            onFocus={(e) => e.target.select()}
+                                            className="w-20 px-2 py-1 text-sm text-right font-bold border border-blue-200 rounded outline-none"
                                         />
                                         <span className="text-xs font-bold text-blue-600">%</span>
                                     </div>
@@ -1352,7 +1362,7 @@ const OnlineQuote: React.FC = () => {
                                         <div className="flex justify-between items-center group pt-1">
                                             <span className="text-gray-700 font-medium">Bảo hiểm 2 chiều ({insuranceRate}%)</span>
                                             <div className="flex items-center gap-2">
-                                                <span className="text-right font-bold text-gray-800 w-28">{formatCurrency(finalInvoicePrice * (insuranceRate / 100))}</span>
+                                                <span className="text-right font-bold text-gray-800 w-28">{formatCurrency(finalInvoicePrice * ((parseFloat(String(insuranceRate).replace(',', '.')) || 0) / 100))}</span>
                                                 <span className="text-gray-500 text-xs">VNĐ</span>
                                             </div>
                                         </div>

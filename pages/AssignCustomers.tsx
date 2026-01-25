@@ -6,11 +6,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { UserPlus, User, MapPin, Phone, MessageSquare, ChevronDown, Save, Loader2, CheckCircle2, Calendar, Upload, ScanText, Search, XCircle, AlertTriangle, Trash2 } from 'lucide-react';
 import { createWorker } from 'tesseract.js';
-import emailjs from '@emailjs/browser';
 
-const EMAILJS_SERVICE_ID: string = 'service_tprir4g';
-const EMAILJS_TEMPLATE_ID: string = 'template_tjsj62d';
-const EMAILJS_PUBLIC_KEY: string = 'HsbStS_wMT4tjJbMe';
+
+
 
 const AssignCustomers: React.FC = () => {
     const { userProfile, isAdmin, isMod } = useAuth();
@@ -36,6 +34,9 @@ const AssignCustomers: React.FC = () => {
     const [isDuplicateWarningOpen, setIsDuplicateWarningOpen] = useState(false);
     const [duplicateData, setDuplicateData] = useState<{ id: string, name: string, sales_rep: string, phone: string } | null>(null);
 
+    // Email Script State
+    const [emailScriptUrl, setEmailScriptUrl] = useState<string>('');
+
     // DATE LOGIC: GMT+7
     const todayStr = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
 
@@ -52,7 +53,13 @@ const AssignCustomers: React.FC = () => {
         if (!isAdmin && !isMod) { navigate('/'); return; }
         fetchEmployees();
         fetchCarModels();
+        fetchEmailConfig();
     }, [userProfile]);
+
+    const fetchEmailConfig = async () => {
+        const { data } = await supabase.from('app_settings').select('value').eq('key', 'email_script_url').maybeSingle();
+        if (data?.value) setEmailScriptUrl(data.value);
+    };
 
     const fetchEmployees = async () => {
         setLoading(true);
@@ -194,13 +201,27 @@ const AssignCustomers: React.FC = () => {
     };
 
     const sendEmailNotification = async (repEmail: string, repName: string, customerData: any) => {
-        if (EMAILJS_SERVICE_ID === 'YOUR_SERVICE_ID') return;
+        if (!emailScriptUrl) return;
         try {
-            await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-                to_email: repEmail, to_name: repName, customer_name: customerData.name, customer_phone: customerData.phone,
-                customer_interest: customerData.interest || 'Chưa rõ', notes: customerData.notes || 'Không có', link: window.location.origin
-            }, EMAILJS_PUBLIC_KEY);
-        } catch (error) { console.error("EmailJS Error:", error); }
+            const payload = {
+                recipientEmail: repEmail,
+                recipientName: repName,
+                customers: [{
+                    name: customerData.name,
+                    phone: customerData.phone,
+                    interest: customerData.interest || 'Chưa rõ',
+                    location: customerData.location || ''
+                }],
+                adminNote: customerData.notes || ''
+            };
+
+            await fetch(emailScriptUrl, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        } catch (error) { console.error("Script Email Error:", error); }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
