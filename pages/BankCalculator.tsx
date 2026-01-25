@@ -68,19 +68,19 @@ const BankCalculator: React.FC = () => {
     const [numStages, setNumStages] = useState<1 | 2 | 3>(2);
 
     // Phase 1 (Fixed) - Initialize from bankPackage if available
-    const [phase1Rate, setPhase1Rate] = useState<number>(() =>
-        navState?.bankPackage?.rate ?? 7.5
+    const [phase1Rate, setPhase1Rate] = useState<string>(() =>
+        (navState?.bankPackage?.rate ?? 7.5).toString()
     );
     const [phase1Duration, setPhase1Duration] = useState<number>(() =>
         parseDurationFromPackage(navState?.bankPackage?.name) || 12
     );
 
     // Phase 2 (Intermediate or Floating)
-    const [phase2Rate, setPhase2Rate] = useState<number>(8.5);
+    const [phase2Rate, setPhase2Rate] = useState<string>('8.5');
     const [phase2Duration, setPhase2Duration] = useState<number>(12); // months
 
     // Final Stage (Floating)
-    const [floatingRate, setFloatingRate] = useState<number>(10.5);
+    const [floatingRate, setFloatingRate] = useState<string>('10.5');
 
     // Prepayment Penalty Settings
     const [penalties, setPenalties] = useState<number[]>([4, 3, 2, 1, 0]);
@@ -105,12 +105,15 @@ const BankCalculator: React.FC = () => {
             const daysInMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
 
             // Determine Interest Rate based on stages
-            let currentAnnualRate = floatingRate;
+            let currentAnnualRate = parseFloat(floatingRate.replace(',', '.'));
             if (numStages >= 2 && i <= phase1Duration) {
-                currentAnnualRate = phase1Rate;
+                currentAnnualRate = parseFloat(phase1Rate.replace(',', '.'));
             } else if (numStages === 3 && i <= (phase1Duration + phase2Duration)) {
-                currentAnnualRate = phase2Rate;
+                currentAnnualRate = parseFloat(phase2Rate.replace(',', '.'));
             }
+
+            // Fallback for check
+            if (isNaN(currentAnnualRate)) currentAnnualRate = 0;
 
             const monthlyInterest = currentBalance * (currentAnnualRate / 100 / 12);
             const totalPayment = monthlyPrincipal + monthlyInterest;
@@ -277,7 +280,20 @@ const BankCalculator: React.FC = () => {
                                 <div className="flex-1">
                                     <label className="block text-[10px] font-bold text-blue-700 uppercase">Lãi cố định ({numStages === 1 ? 'Suốt TG' : 'GĐ 1'})</label>
                                     <div className="flex items-center gap-1 mt-1">
-                                        <input type="number" step="0.1" className="w-full border rounded-lg px-2 py-1.5 text-sm font-bold" value={phase1Rate} onChange={e => setPhase1Rate(Number(e.target.value))} />
+                                        <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            step="any"
+                                            className="w-full border rounded-lg px-2 py-1.5 text-sm font-bold"
+                                            value={phase1Rate}
+                                            onChange={e => setPhase1Rate(e.target.value)}
+                                            onBlur={() => {
+                                                if (!phase1Rate) return;
+                                                const parsed = parseFloat(phase1Rate.replace(',', '.'));
+                                                if (!isNaN(parsed)) setPhase1Rate(parsed.toString());
+                                            }}
+                                            onFocus={(e) => e.target.select()}
+                                        />
                                         <span className="text-xs font-bold text-blue-600">%</span>
                                     </div>
                                 </div>
@@ -297,7 +313,20 @@ const BankCalculator: React.FC = () => {
                                     <div className="flex-1">
                                         <label className="block text-[10px] font-bold text-purple-700 uppercase">Lãi Giai đoạn 2</label>
                                         <div className="flex items-center gap-1 mt-1">
-                                            <input type="number" step="0.1" className="w-full border rounded-lg px-2 py-1.5 text-sm font-bold" value={phase2Rate} onChange={e => setPhase2Rate(Number(e.target.value))} />
+                                            <input
+                                                type="text"
+                                                inputMode="decimal"
+                                                step="any"
+                                                className="w-full border rounded-lg px-2 py-1.5 text-sm font-bold"
+                                                value={phase2Rate}
+                                                onChange={e => setPhase2Rate(e.target.value)}
+                                                onBlur={() => {
+                                                    if (!phase2Rate) return;
+                                                    const parsed = parseFloat(phase2Rate.replace(',', '.'));
+                                                    if (!isNaN(parsed)) setPhase2Rate(parsed.toString());
+                                                }}
+                                                onFocus={(e) => e.target.select()}
+                                            />
                                             <span className="text-xs font-bold text-purple-600">%</span>
                                         </div>
                                     </div>
@@ -315,7 +344,20 @@ const BankCalculator: React.FC = () => {
                                 <div className="pt-2 border-t border-blue-200">
                                     <label className="block text-[10px] font-bold text-gray-600 uppercase">Lãi thả nổi sau ưu đãi</label>
                                     <div className="flex items-center gap-2 mt-1">
-                                        <input type="number" step="0.1" className="flex-1 border rounded-lg px-2 py-1.5 text-sm font-bold" value={floatingRate} onChange={e => setFloatingRate(Number(e.target.value))} />
+                                        <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            step="any"
+                                            className="flex-1 border rounded-lg px-2 py-1.5 text-sm font-bold"
+                                            value={floatingRate}
+                                            onChange={e => setFloatingRate(e.target.value)}
+                                            onBlur={() => {
+                                                if (!floatingRate) return;
+                                                const parsed = parseFloat(floatingRate.replace(',', '.'));
+                                                if (!isNaN(parsed)) setFloatingRate(parsed.toString());
+                                            }}
+                                            onFocus={(e) => e.target.select()}
+                                        />
                                         <span className="text-xs font-bold text-gray-500">% / năm</span>
                                     </div>
                                 </div>

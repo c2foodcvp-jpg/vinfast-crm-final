@@ -12,6 +12,7 @@ import {
 // ... (existing imports)
 import { UserRole } from '../types';
 import NewCustomerNotification from './NewCustomerNotification';
+import VersionChecker from './VersionChecker';
 
 interface NavItemDef {
     key: string;
@@ -343,6 +344,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
             {/* New Customer Notification Popup for Employees */}
             <NewCustomerNotification />
+
+            {/* Auto Update Checker */}
+            <VersionChecker />
         </div>
     );
 };
