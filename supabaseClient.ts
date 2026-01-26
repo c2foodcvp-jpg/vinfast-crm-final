@@ -1,8 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Configuration provided by the user
-const SUPABASE_URL = 'https://ksrzwrizbqkjyzqhkfkn.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtzcnp3cml6YnFranl6cWhrZmtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczMzkyMDcsImV4cCI6MjA4MjkxNTIwN30.8OxhjfjI0hqfYONKO4sC650KZO8uGNFtdwSV-2rmbEA';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.error('Missing Supabase Environment Variables. Please restart the dev server.');
+    if (typeof window !== 'undefined') {
+        alert('DEBUG: Không tìm thấy biến môi trường (.env).\nHãy KHỞI ĐỘNG LẠI terminal "npm run dev" để khắc phục!');
+    }
+}
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 

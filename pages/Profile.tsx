@@ -3,8 +3,9 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  User, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Globe, Layout, ArrowUp, ArrowDown, RotateCcw
+  User, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Globe, Layout, ArrowUp, ArrowDown, RotateCcw, Camera, Crown, UploadCloud
 } from 'lucide-react';
+import { MembershipTier } from '../types';
 
 const Profile: React.FC = () => {
   const { userProfile, session, isAdmin } = useAuth();
@@ -14,6 +15,7 @@ const Profile: React.FC = () => {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [uploading, setUploading] = useState(false); // New uploading state
 
   // App Config State
   const [appIconUrl, setAppIconUrl] = useState('');
@@ -41,6 +43,7 @@ const Profile: React.FC = () => {
     { key: 'lookup_tools', label: 'Chính sách & Tồn kho' },
     { key: 'employees', label: 'Nhân sự' },
     { key: 'team_fund', label: 'Quỹ Nhóm' },
+    { key: 'utilities', label: 'Tiện ích' },
     { key: 'configuration', label: 'Cấu hình' },
     { key: 'profile', label: 'Cá nhân' }
   ];
@@ -98,7 +101,7 @@ const Profile: React.FC = () => {
     setSavingConfig(true);
     try {
       const updates = [];
-      updates.push({ key: 'app_icon_url', value: appIconUrl });
+
       if (menuOrder.length > 0) updates.push({ key: 'menu_order', value: JSON.stringify(menuOrder) });
 
       const { error } = await supabase.from('app_settings').upsert(updates);
@@ -155,6 +158,64 @@ const Profile: React.FC = () => {
     }
   };
 
+  // --- NEW: AVATAR UPLOAD LOGIC ---
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      setUploading(true);
+      setMessage(null);
+
+      // 1. Tier Check
+      const isPlatinumOrHigher =
+        userProfile?.member_tier === MembershipTier.PLATINUM ||
+        userProfile?.member_tier === MembershipTier.DIAMOND ||
+        userProfile?.role === 'admin' || userProfile?.role === 'moderator';
+
+      if (!isPlatinumOrHigher) {
+        setMessage({ type: 'error', content: 'Tính năng đổi ảnh chỉ dành cho Platinum trở lên.' });
+        // Reset input
+        event.target.value = '';
+        return;
+      }
+
+      if (!event.target.files || event.target.files.length === 0) {
+        throw new Error('Bạn phải chọn một hình ảnh để tải lên.');
+      }
+
+      const file = event.target.files[0];
+
+      // 2. Size Check (Max 1MB)
+      if (file.size > 1024 * 1024) {
+        throw new Error('Kích thước ảnh quá lớn (Tối đa 1MB).');
+      }
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${userProfile?.id}-${Math.random()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      // 3. Upload
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // 4. Get Public URL
+      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
+
+      if (data) {
+        setAvatarUrl(data.publicUrl);
+        setMessage({ type: 'success', content: 'Tải ảnh lên thành công! Bấm Lưu để cập nhật.' });
+      }
+
+    } catch (error: any) {
+      setMessage({ type: 'error', content: error.message });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -201,8 +262,42 @@ const Profile: React.FC = () => {
             <div className="p-6 border-b border-gray-100 flex justify-between items-center"><h3 className="font-bold text-gray-900 flex items-center gap-2"><User size={20} className="text-primary-600" /> Thông tin chung</h3></div>
             <div className="p-6 space-y-6">
               <div className="flex items-center gap-6">
-                <div className="relative group"><div className="w-24 h-24 rounded-full bg-gray-100 border-4 border-white shadow-md flex items-center justify-center overflow-hidden">{avatarUrl ? (<img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />) : (<span className="text-3xl font-bold text-gray-400">{fullName?.charAt(0)?.toUpperCase() || 'U'}</span>)}</div></div>
-                <div className="flex-1"><label className="block text-sm font-medium text-gray-700 mb-1">Link Ảnh đại diện (URL)</label><input type="text" value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://example.com/avatar.jpg" className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:border-primary-500 outline-none text-gray-900 font-medium" /></div>
+                <div className="relative group">
+                  <div className="w-24 h-24 rounded-full bg-gray-100 border-4 border-white shadow-md flex items-center justify-center overflow-hidden">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-3xl font-bold text-gray-400">{fullName?.charAt(0)?.toUpperCase() || 'U'}</span>
+                    )}
+                  </div>
+                  {/* Upload Button Overlay */}
+                  <label
+                    className={`absolute bottom-0 right-0 p-2 bg-white rounded-full shadow-lg border border-gray-200 cursor-pointer transition-all 
+                        ${(userProfile?.member_tier === MembershipTier.PLATINUM || userProfile?.member_tier === MembershipTier.DIAMOND || isAdmin) ? 'hover:bg-gray-50 text-gray-600' : 'opacity-60 grayscale cursor-not-allowed'}`}
+                    title={!(userProfile?.member_tier === MembershipTier.PLATINUM || userProfile?.member_tier === MembershipTier.DIAMOND || isAdmin) ? "Chỉ dành cho Platinum+" : "Đổi ảnh đại diện"}
+                  >
+                    {uploading ? <Loader2 className="animate-spin" size={16} /> : <Camera size={16} />}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarUpload}
+                      disabled={uploading || !(userProfile?.member_tier === MembershipTier.PLATINUM || userProfile?.member_tier === MembershipTier.DIAMOND || isAdmin)}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Link Ảnh đại diện (URL)</label>
+                  <div className="flex gap-2">
+                    <input type="text" value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://example.com/avatar.jpg" className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:border-primary-500 outline-none text-gray-900 font-medium" />
+                    {!(userProfile?.member_tier === MembershipTier.PLATINUM || userProfile?.member_tier === MembershipTier.DIAMOND || isAdmin) && (
+                      <div className="flex items-center gap-1 px-3 py-1 bg-gray-100 rounded-lg text-xs text-gray-500 whitespace-nowrap border border-gray-200" title="Nâng cấp lên Platinum để mở khóa upload">
+                        <Crown size={12} className="text-gray-400" />
+                        <span className="font-bold">Upgrade to Upload</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label className="block text-sm font-bold text-gray-700 mb-2">Họ và tên</label><input type="text" required value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-gray-900 font-medium outline-none focus:border-primary-500" /></div><div><label className="block text-sm font-bold text-gray-700 mb-2">Số điện thoại</label><input type="text" required value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-gray-900 font-medium outline-none focus:border-primary-500" /></div></div>
             </div>
@@ -216,10 +311,7 @@ const Profile: React.FC = () => {
                 <button onClick={handleSaveAppConfig} disabled={savingConfig} className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-70">{savingConfig ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Lưu cấu hình</button>
               </div>
               <div className="p-6 space-y-6">
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">URL Icon Web</label>
-                  <div className="flex gap-2"><input type="text" value={appIconUrl} onChange={e => setAppIconUrl(e.target.value)} className="w-full border border-gray-200 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 text-gray-900 font-medium" placeholder="https://..." /></div>
-                </div>
+
 
                 {/* MENU SORTING */}
                 <div>

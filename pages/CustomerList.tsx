@@ -1,7 +1,7 @@
 
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, CustomerClassification, UserProfile, AccessDelegation } from '../types';
+import { Customer, CustomerStatus, CustomerClassification, UserProfile, AccessDelegation, MembershipTier } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import * as ReactRouterDOM from 'react-router-dom';
 import { exportToExcel } from '../utils/excelExport';
@@ -18,6 +18,16 @@ interface DuplicateGroup {
 }
 
 const ITEMS_PER_PAGE = 15;
+
+// HELPER: Normalize string for fuzzy search (remove accents, spaces, lowercase)
+const normalizeStr = (str: string | null | undefined): string => {
+    if (!str) return '';
+    return str
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "") // Remove accents
+        .replace(/\s+/g, "") // Remove spaces
+        .toLowerCase();
+};
 
 const CustomerList: React.FC = () => {
     const { userProfile, isAdmin, isMod } = useAuth();
@@ -61,6 +71,9 @@ const CustomerList: React.FC = () => {
     const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // KEY UPDATE: Check for duplicates when adding new customer
+    const [customerNotes, setCustomerNotes] = useState<Record<string, string>>({}); // Map: customer_id -> note_content
+
     // DATE LOGIC HELPER (GMT+7)
     const getLocalTodayStr = () => {
         const now = new Date();
@@ -78,6 +91,55 @@ const CustomerList: React.FC = () => {
         }, 400); // Wait 400ms after typing stops
         return () => clearTimeout(handler);
     }, [searchTerm]);
+
+    // --- NOTE SEARCH SIDE-EFFECT (Platinum+) ---
+    const [matchedByNoteIds, setMatchedByNoteIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        const searchNotes = async () => {
+            if (!debouncedSearchTerm || debouncedSearchTerm.length < 2) {
+                setMatchedByNoteIds([]);
+                // Clear note search results from state, BUT keep existing latest notes if any (logic handled in fetchLatestNotes)
+                return;
+            }
+
+            // Only Platinum+ can search notes
+            const isPlatinumOrHigher = userProfile?.member_tier === MembershipTier.PLATINUM || userProfile?.member_tier === MembershipTier.DIAMOND;
+            if (!isPlatinumOrHigher) return;
+
+            try {
+                // Search in interactions table
+                const { data } = await supabase
+                    .from('interactions')
+                    .select('customer_id, content')
+                    .eq('type', 'note') // Ensure strictly notes
+                    .ilike('content', `%${debouncedSearchTerm}%`)
+                    .limit(50);
+
+                if (data && data.length > 0) {
+                    const ids = [...new Set(data.map(d => d.customer_id))];
+                    setMatchedByNoteIds(ids);
+
+                    // Update customerNotes with the MATCHING CONTENT
+                    const noteMap: Record<string, string> = {};
+                    data.forEach(d => {
+                        // If multiple notes match, just take the first one found (or we could group them)
+                        if (!noteMap[d.customer_id]) {
+                            noteMap[d.customer_id] = d.content;
+                        }
+                    });
+                    setCustomerNotes(prev => ({ ...prev, ...noteMap }));
+
+                } else {
+                    setMatchedByNoteIds([]);
+                }
+            } catch (err) {
+                console.error("Note search failed", err);
+            }
+        };
+
+        searchNotes();
+    }, [debouncedSearchTerm, userProfile]);
 
     // --- RESTORE STATE LOGIC (SessionStorage) ---
     const [isRestored, setIsRestored] = useState(false); // NEW: Guard flag
@@ -230,14 +292,21 @@ const CustomerList: React.FC = () => {
             // OPTIMIZATION: ONLY SELECT COLUMNS NEEDED FOR LIST VIEW
             // Excludes: deal_details (heavy json), stop_reason (text)
             // PERFORMANCE: Add limit for initial load (first 500 customers)
+            // FEATURE: Fetch 'notes' only for Platinum/Diamond for search
+            // FIX: 'notes' column does not exist on customers table (it is in interactions). 
+            // We cannot select it here. Search must be done via side-channel query.
+            const baseFields = [
+                'id', 'name', 'phone', 'secondary_phone', 'location', 'status', 'source', 'interest',
+                'sales_rep', 'creator_id', 'classification', 'recare_date', 'is_special_care',
+                'is_long_term', 'deal_status', 'pending_transfer_to', 'is_acknowledged',
+                'created_at', 'updated_at'
+            ];
+
+            const selectFields = baseFields.join(',');
+
             let query = supabase
                 .from('customers')
-                .select(`
-            id, name, phone, secondary_phone, location, status, source, interest, 
-            sales_rep, creator_id, classification, recare_date, is_special_care, 
-            is_long_term, deal_status, pending_transfer_to, is_acknowledged, 
-            created_at, updated_at
-        `, { count: 'exact' })
+                .select(selectFields, { count: 'exact' })
                 .order('created_at', { ascending: false })
                 .limit(1000); // PERFORMANCE: Limit to 1000 most recent customers
 
@@ -255,7 +324,7 @@ const CustomerList: React.FC = () => {
             const { data, error } = await query;
             if (error) throw error;
 
-            let fetchedCustomers = data as Customer[] || [];
+            let fetchedCustomers = (data as unknown as Customer[]) || [];
 
             // Mark delegated customers for UI (Old delegation)
             if (delegatedTargetIds.length > 0) {
@@ -431,18 +500,27 @@ const CustomerList: React.FC = () => {
     // Base list filtered by Search/Rep/Date (Not Tabs)
     const baseFilteredCustomers = useMemo(() => {
         // Use Debounced Term for Filtering
-        const normalizedSearch = debouncedSearchTerm.replace(/\s+/g, '');
-        const lowerSearchTerm = debouncedSearchTerm.toLowerCase();
+        // FUZZY SEARCH: Normalize the search term once
+        const normalizedSearch = normalizeStr(debouncedSearchTerm);
+        // const lowerSearchTerm = debouncedSearchTerm.toLowerCase(); // REMOVED (Unused)
 
         let filtered = customers.filter(c => {
-            const normalizedPhone = c.phone ? c.phone.replace(/\s+/g, '') : '';
-            const normalizedSecPhone = c.secondary_phone ? c.secondary_phone.replace(/\s+/g, '') : '';
+            // Normalize Customer Fields
+            const normName = normalizeStr(c.name);
+            const normInterest = normalizeStr(c.interest);
+            const normPhone = normalizeStr(c.phone);
+            const normSecPhone = normalizeStr(c.secondary_phone);
+
+            // Check Note Search (Platinum+) - via ID match from async search
+            // Note match is already filtered by ID, so we keep that simple boolean check
+            const matchesNote = matchedByNoteIds.includes(c.id);
 
             return (
-                (c.name?.toLowerCase() || '').includes(lowerSearchTerm) ||
-                (c.interest?.toLowerCase() || '').includes(lowerSearchTerm) ||
-                normalizedPhone.includes(normalizedSearch) ||
-                normalizedSecPhone.includes(normalizedSearch)
+                normName.includes(normalizedSearch) ||
+                normInterest.includes(normalizedSearch) ||
+                normPhone.includes(normalizedSearch) ||
+                normSecPhone.includes(normalizedSearch) ||
+                matchesNote
             );
         });
 
@@ -523,6 +601,55 @@ const CustomerList: React.FC = () => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
         return filteredList.slice(start, start + ITEMS_PER_PAGE);
     }, [filteredList, currentPage]);
+
+    // FETCH LATEST NOTES FOR PAGINATED ITEMS (When NOT matching by note search)
+    useEffect(() => {
+        const fetchLatestNotes = async () => {
+            // 1. Identify customers who need a note fetched
+            // We only fetch if we DON'T already have a note for them (from search results)
+            // OR if we are not searching by note.
+            if (paginatedCustomers.length === 0) return;
+
+            const idsToFetch = paginatedCustomers
+                .map(c => c.id)
+                .filter(id => !customerNotes[id] || (matchedByNoteIds.length === 0)); // Refetch if clearing search
+
+            if (idsToFetch.length === 0) return;
+
+            try {
+                // Fetch latest note (type='note') for these customers
+                // Is there a better way? We need latest note per customer.
+                // Supabase RPC or just simple query? Simple query might be heavy. 
+                // Let's do a simple ".in()" query ordered by created_at.
+                // NOTE: This fetches ALL notes for these IDs then we pick latest in JS. 
+                // Optimized: We can't easily "limit 1 per group" in simple supabase query without RPC.
+                // Workaround: Fetch recent notes for these IDs.
+
+                const { data } = await supabase
+                    .from('interactions')
+                    .select('customer_id, content, created_at')
+                    .in('customer_id', idsToFetch)
+                    .eq('type', 'note')
+                    .order('created_at', { ascending: false });
+
+                if (data) {
+                    const newNotes: Record<string, string> = {};
+                    // Data is ordered desc, so first occurrence is latest
+                    data.forEach(d => {
+                        if (!newNotes[d.customer_id]) {
+                            newNotes[d.customer_id] = d.content;
+                        }
+                    });
+
+                    setCustomerNotes(prev => ({ ...prev, ...newNotes }));
+                }
+            } catch (e) {
+                console.error("Error fetching latest notes", e);
+            }
+        };
+
+        fetchLatestNotes();
+    }, [paginatedCustomers, matchedByNoteIds.length]); // Re-run when page changes or search mode changes
 
     const handlePageChange = (page: number) => {
         if (page >= 1 && page <= totalPages) {
@@ -649,7 +776,17 @@ const CustomerList: React.FC = () => {
             <div className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                    <input type="text" placeholder="Tìm tên, dòng xe, SĐT (Chính/Phụ)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all" />
+                    <input
+                        type="text"
+                        placeholder={
+                            (userProfile?.member_tier === MembershipTier.PLATINUM || userProfile?.member_tier === MembershipTier.DIAMOND)
+                                ? "Tìm tên, dòng xe, SĐT, ghi chú..."
+                                : "Tìm tên, dòng xe, SĐT (Chính/Phụ)..."
+                        }
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all"
+                    />
                 </div>
 
                 {/* FILTERS & EXPORT */}
@@ -773,6 +910,22 @@ const CustomerList: React.FC = () => {
                                     {/* Show owner if delegated or shared */}
                                     {(isShared || customer._is_delegated) && customer.sales_rep && (<div className="flex items-center gap-2 mt-1 pt-1 border-t border-indigo-100"><User size={12} className="text-indigo-500" /><span className="text-xs text-indigo-600 font-bold">{customer.sales_rep}</span></div>)}
                                     {(isAdmin || isMod) && !customer._is_delegated && !isShared && customer.sales_rep && (<div className="flex items-center gap-2 mt-1 pt-1 border-t border-gray-100"><User size={12} className="text-blue-500" /><span className="text-xs text-blue-600 font-bold">{customer.sales_rep}</span></div>)}
+
+                                    {/* Note Snippet Display */}
+                                    {customerNotes[customer.id] && (
+                                        <div className="mt-2 pt-2 border-t border-dashed border-gray-200 text-xs text-gray-500 italic flex gap-1 items-start">
+                                            <MessageSquare size={10} className="mt-0.5 shrink-0" />
+                                            <span className="line-clamp-2" title={customerNotes[customer.id]}>
+                                                {matchedByNoteIds.includes(customer.id) ? (
+                                                    // Highlight match if searched
+                                                    <span className="text-gray-700 font-medium">"{customerNotes[customer.id]}"</span>
+                                                ) : (
+                                                    // Standard latest note
+                                                    <span>{customerNotes[customer.id]}</span>
+                                                )}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="flex items-center justify-between pt-3 border-t border-gray-50 text-xs">
                                     {getCustomerStatusDisplay(customer)}

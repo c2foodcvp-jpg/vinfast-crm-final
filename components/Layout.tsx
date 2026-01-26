@@ -4,15 +4,16 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../supabaseClient';
 import {
-    LayoutDashboard, Users, LogOut, Menu, X, UserCircle, Briefcase, UserCog, Building2,
-    FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, ChevronDown, PiggyBank, CarFront, Landmark, AlertCircle, Box, Settings, User, FileInput, BarChart2, Calendar, Calculator,
-    FolderOpen, Mail
+    LayoutDashboard, Users, LogOut, Menu, X, UserCircle, Briefcase,
+    FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, ChevronDown, PiggyBank, CarFront, Landmark, Box, Settings, User, FileInput, BarChart2, Calendar, Calculator,
+    FolderOpen, Mail, Moon, Sun, Sparkles
 } from 'lucide-react';
 
 // ... (existing imports)
 import { UserRole } from '../types';
 import NewCustomerNotification from './NewCustomerNotification';
 import VersionChecker from './VersionChecker';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface NavItemDef {
     key: string;
@@ -27,6 +28,7 @@ interface NavItemDef {
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { userProfile, signOut } = useAuth();
+    const { theme, toggleTheme } = useTheme();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const location = useLocation();
     const navigate = useNavigate();
@@ -38,6 +40,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         'lookup_tools': false, // Default collapsed - user can expand when needed
         'customer_allocation': false // Phân Bổ Khách - auto-expands when at child routes
     });
+
+    const [menuLogo, setMenuLogo] = useState<string | null>(null);
 
     // Definition of all possible menu items
     const MENU_DEFINITIONS: NavItemDef[] = useMemo(() => [
@@ -105,23 +109,29 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 return count || 0;
             }
         },
+        { key: 'utilities', icon: Sparkles, label: 'Tiện ích', path: '/utilities' },
         { key: 'configuration', icon: Settings, label: 'Cấu hình', path: '/configuration', roleReq: [UserRole.ADMIN, UserRole.MOD] },
         { key: 'profile', icon: User, label: 'Cá nhân', path: '/profile' },
     ], [userProfile]);
 
     useEffect(() => {
         fetchMenuConfig();
+        fetchLogoConfig();
         fetchBadges();
 
-        const handleForceUpdate = () => fetchMenuConfig();
+        const handleForceUpdate = () => {
+            fetchMenuConfig();
+            fetchLogoConfig();
+        };
         window.addEventListener('menu_config_updated', handleForceUpdate);
 
         const channel = supabase.channel('layout-menu-updates')
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'app_settings', filter: 'key=eq.menu_order' },
+                { event: '*', schema: 'public', table: 'app_settings', filter: 'key=in.(menu_order,system_logo_menu)' },
                 () => {
                     fetchMenuConfig();
+                    fetchLogoConfig();
                 }
             )
             .subscribe();
@@ -154,6 +164,13 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             setMenuOrder(MENU_DEFINITIONS.map(i => i.key));
         }
     };
+
+    const fetchLogoConfig = async () => {
+        try {
+            const { data } = await supabase.from('app_settings').select('value').eq('key', 'system_logo_menu').maybeSingle();
+            if (data?.value) setMenuLogo(data.value);
+        } catch (e) { }
+    }
 
     const fetchBadges = async () => {
         const newCounts: Record<string, number> = {};
@@ -200,35 +217,56 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     }, [menuOrder, MENU_DEFINITIONS, userProfile]);
 
     return (
-        <div className="flex h-screen bg-[#f8fafc] font-sans text-slate-800">
-            {isSidebarOpen && <div className="fixed inset-0 z-[90] bg-slate-900/60  md:hidden" onClick={() => setIsSidebarOpen(false)} />}
+        <div className="flex h-screen bg-[#f8fafc] dark:bg-slate-900 font-sans text-slate-800 dark:text-slate-100 transition-colors duration-200">
+            {isSidebarOpen && <div className="fixed inset-0 z-[90] bg-slate-900/60 font-sans text-slate-800 transition-colors duration-200  md:hidden" onClick={() => setIsSidebarOpen(false)} />}
 
-            <aside className={`fixed inset-y-0 left-0 z-[100] w-72 bg-white border-r border-slate-200/60 transition-transform duration-300 md:static md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} shadow-2xl md:shadow-none flex flex-col`}>
-                <div className="h-20 flex items-center px-6 border-b border-slate-100">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 flex items-center justify-center text-white font-bold text-2xl shadow-glow mr-3">V</div>
+            <aside className={`fixed inset-y-0 left-0 z-[100] w-72 bg-white dark:bg-slate-800 border-r border-slate-200/60 dark:border-slate-700 transition-all duration-300 md:static md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} shadow-2xl md:shadow-none flex flex-col`}>
+                <div className="h-20 flex items-center px-6 border-b border-slate-100 dark:border-slate-700/50">
+                    {menuLogo ? (
+                        <div className="mr-3 flex items-center justify-center">
+                            <img src={menuLogo} alt="Logo" className="w-10 h-10 object-contain rounded-lg" />
+                        </div>
+                    ) : (
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 flex items-center justify-center text-white font-bold text-2xl shadow-glow mr-3">V</div>
+                    )}
                     <div>
-                        <h1 className="text-xl font-extrabold text-slate-900 tracking-tight leading-none">VinFast<span className="text-primary-600">CRM</span></h1>
+                        <h1 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-none">VinFast<span className="text-primary-600">CRM</span></h1>
                         <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-1">Enterprise</p>
                     </div>
-                    <button onClick={() => setIsSidebarOpen(false)} className="md:hidden ml-auto text-slate-400 hover:text-slate-600"><X /></button>
+                    <button onClick={() => setIsSidebarOpen(false)} className="md:hidden ml-auto text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"><X /></button>
                 </div>
 
                 <div className="p-4">
-                    <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-100/50 shadow-sm">
-                        <div className="w-10 h-10 rounded-full bg-white border border-slate-200 p-0.5 flex-shrink-0 shadow-sm overflow-hidden">
-                            {userProfile?.avatar_url ? <img src={userProfile.avatar_url} className="w-full h-full rounded-full object-cover" /> : <UserCircle className="w-full h-full text-slate-300" />}
+                    <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-700/50 border border-slate-100/50 dark:border-slate-600/50 shadow-sm">
+                        <div className="w-10 h-10 rounded-full bg-white dark:bg-slate-600 border border-slate-200 dark:border-slate-500 p-0.5 flex-shrink-0 shadow-sm overflow-hidden">
+                            {userProfile?.avatar_url ? <img src={userProfile.avatar_url} className="w-full h-full rounded-full object-cover" /> : <UserCircle className="w-full h-full text-slate-300 dark:text-slate-400" />}
                         </div>
-                        <div className="overflow-hidden">
-                            <p className="text-sm font-bold text-slate-900 truncate">{userProfile?.full_name || 'User'}</p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                                <span className="relative flex h-2 w-2">
+                        <div className="overflow-hidden flex-1">
+                            <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{userProfile?.full_name || 'User'}</p>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                <span className="relative flex h-2 w-2 flex-shrink-0">
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                                 </span>
-                                <p className="text-xs text-slate-500 capitalize font-medium">{userProfile?.role || 'Sales'}</p>
-                                {userProfile?.is_part_time && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 rounded uppercase font-bold">Part-time</span>}
+                                <p className="text-xs text-slate-500 dark:text-slate-400 capitalize font-medium whitespace-nowrap">{userProfile?.role || 'Sales'}</p>
+                                {userProfile?.is_part_time && <span className="text-[9px] bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded-md uppercase font-bold tracking-wider border border-orange-200 dark:border-orange-800">Part-time</span>}
+                                {userProfile?.member_tier && (
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded-md uppercase font-bold tracking-wider border ${userProfile.member_tier === 'Gold' ? 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-700' :
+                                        userProfile.member_tier === 'Platinum' ? 'bg-slate-200 text-slate-700 border-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600' :
+                                            userProfile.member_tier === 'Diamond' ? 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-700' : ''
+                                        }`}>
+                                        {userProfile.member_tier}
+                                    </span>
+                                )}
                             </div>
                         </div>
+                        <button
+                            onClick={toggleTheme}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-primary-600 hover:bg-white dark:hover:bg-slate-600/80 transition-all"
+                            title={theme === 'dark' ? 'Chuyển sang chế độ Sáng' : 'Chuyển sang chế độ Tối'}
+                        >
+                            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+                        </button>
                     </div>
                 </div>
 
@@ -251,8 +289,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                                         <button
                                             onClick={() => setExpandedGroups(prev => ({ ...prev, [item.key]: !prev[item.key] }))}
                                             className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 ${isExpanded || isChildActive
-                                                ? 'text-slate-800 bg-slate-100/50'
-                                                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                                ? 'text-slate-800 dark:text-white bg-slate-100/50 dark:bg-slate-700/40'
+                                                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/30 hover:text-slate-900 dark:hover:text-slate-200'
                                                 }`}
                                         >
                                             <div className="flex items-center gap-3">
@@ -270,7 +308,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                                                     <Link key={child.key} to={child.path} onClick={() => setIsSidebarOpen(false)}
                                                         className={`flex items-center justify-between px-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ml-3 ${isActive
                                                             ? 'bg-primary-600 text-white shadow-md shadow-primary-200'
-                                                            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                                                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/30 hover:text-slate-900 dark:hover:text-slate-200'
                                                             }`}
                                                     >
                                                         <div className="flex items-center gap-3">
@@ -298,7 +336,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                                 <Link key={item.key} to={item.path} onClick={() => setIsSidebarOpen(false)}
                                     className={`group flex items-center justify-between px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 ${isActive
                                         ? 'bg-primary-600 text-white shadow-md shadow-primary-200'
-                                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/30 hover:text-slate-900 dark:hover:text-slate-200'
                                         }`}
                                 >
                                     <div className="flex items-center gap-3">
@@ -318,21 +356,30 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                     </nav>
                 </div>
 
-                <div className="p-4 border-t border-slate-100">
-                    <button onClick={handleSignOut} className="flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all border border-transparent hover:border-red-100 group">
+                <div className="p-4 border-t border-slate-100 dark:border-slate-700/50">
+                    <button onClick={handleSignOut} className="flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all border border-transparent hover:border-red-100 dark:hover:border-red-900/30 group">
                         <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
                         Đăng xuất
                     </button>
                 </div>
             </aside>
 
-            <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#f8fafc]">
-                <header className="md:hidden flex items-center justify-between h-16 px-4 bg-white border-b border-slate-200 shadow-sm z-30 sticky top-0">
+            <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#f8fafc] dark:bg-slate-900 transition-colors duration-200">
+                <header className="md:hidden flex items-center justify-between h-16 px-4 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm z-30 sticky top-0 transition-colors duration-200">
                     <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white font-bold">V</div>
-                        <span className="font-extrabold text-slate-800 text-lg">VinFast CRM</span>
+                        {menuLogo ? (
+                            <img src={menuLogo} alt="Logo" className="w-8 h-8 object-contain rounded-lg" />
+                        ) : (
+                            <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white font-bold">V</div>
+                        )}
+                        <span className="font-extrabold text-slate-800 dark:text-white text-lg">VinFast CRM</span>
                     </div>
-                    <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg"><Menu /></button>
+                    <div className="flex gap-2">
+                        <button onClick={toggleTheme} className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
+                            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                        </button>
+                        <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"><Menu /></button>
+                    </div>
                 </header>
 
                 <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
@@ -352,4 +399,3 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 export default Layout;
-

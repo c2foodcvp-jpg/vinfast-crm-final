@@ -3,10 +3,11 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     Calculator, Landmark, Calendar, DollarSign, Percent, ArrowRight, Download,
-    FileImage, Settings2, Info, ChevronDown, CheckCircle2, TableProperties, Loader2, ArrowLeft, Lock
+    FileImage, Settings2, Info, ChevronDown, CheckCircle2, TableProperties, Loader2, ArrowLeft, Lock, ArrowUpCircle
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { useAuth } from '../contexts/AuthContext';
+import { MembershipTier } from '../types';
 
 const BankCalculator: React.FC = () => {
     const { userProfile } = useAuth();
@@ -15,17 +16,32 @@ const BankCalculator: React.FC = () => {
     const navigate = useNavigate();
     const [isExporting, setIsExporting] = useState(false);
 
-    // Check if user is locked from using this page
-    if (userProfile?.is_locked_quote) {
+    // Check if user is locked from using this page (Restricted to Platinum+)
+    const isPlatinumOrHigher =
+        userProfile?.member_tier === MembershipTier.PLATINUM ||
+        userProfile?.member_tier === MembershipTier.DIAMOND ||
+        userProfile?.role === 'admin' || userProfile?.role === 'moderator'; // Allow Admin/Mod
+
+    if (!isPlatinumOrHigher) {
         return (
-            <div className="max-w-2xl mx-auto mt-20 p-8 bg-red-50 border-2 border-red-200 rounded-2xl text-center">
-                <Lock className="mx-auto text-red-500 mb-4" size={48} />
-                <h2 className="text-2xl font-bold text-red-700 mb-2">Tài khoản bị khoá</h2>
-                <p className="text-red-600">Bạn đã bị khoá quyền sử dụng trang Báo giá & Tính lãi.</p>
-                <p className="text-gray-500 mt-2 text-sm">Vui lòng liên hệ Quản lý để được hỗ trợ.</p>
-                <button onClick={() => navigate('/')} className="mt-6 px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
-                    Về trang chủ
-                </button>
+            <div className="max-w-2xl mx-auto mt-20 p-8 bg-white border border-gray-100 rounded-3xl text-center shadow-xl">
+                <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Lock className="text-gray-400" size={32} />
+                </div>
+                <h2 className="text-2xl font-extrabold text-gray-800 mb-2">Tính năng giới hạn</h2>
+                <p className="text-gray-500 mb-6">
+                    Công cụ Tính Lãi Bank chỉ dành cho thành viên hạng
+                    <span className="font-bold text-slate-700"> Platinum</span> trở lên.
+                </p>
+                <div className="flex flex-col gap-3 max-w-xs mx-auto">
+                    <div className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-slate-700 to-slate-900 text-white rounded-xl font-bold shadow-lg cursor-default">
+                        <ArrowUpCircle size={20} />
+                        <span>Nâng cấp hạng thành viên</span>
+                    </div>
+                    <button onClick={() => navigate('/')} className="px-6 py-2 text-gray-500 hover:text-gray-900 font-medium text-sm">
+                        Quay lại trang chủ
+                    </button>
+                </div>
             </div>
         );
     }

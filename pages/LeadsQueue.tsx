@@ -4,8 +4,7 @@ import { supabase } from '../supabaseClient';
 import { Customer, UserProfile } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
-    Loader2, Search, Filter, CheckSquare, Square, UserPlus, Users,
-    ArrowRight, MessageSquare, Calendar, Mail, RefreshCw
+    Loader2, CheckSquare, Square, UserPlus, Users, Mail, RefreshCw
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 

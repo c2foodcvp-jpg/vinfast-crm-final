@@ -1,67 +1,14 @@
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { RefreshCw, X } from 'lucide-react';
-
-const CHECK_INTERVAL = 60 * 1000; // Check every 1 minute (for testing/demo), can be increased to 5-10 mins in prod
-
-interface VersionData {
-    version: string;
-    buildTime: number;
-}
+import { useVersionCheck } from '../src/hooks/useVersionCheck';
 
 const VersionChecker: React.FC = () => {
-    const [hasUpdate, setHasUpdate] = useState(false);
-    const [localBuildTime, setLocalBuildTime] = useState<number | null>(null);
+    // Check every minute
+    const { hasUpdate, reload } = useVersionCheck(60 * 1000);
+    const [dismissed, setDismissed] = React.useState(false);
 
-    useEffect(() => {
-        // Initial check to set base version
-        const fetchInitialVersion = async () => {
-            try {
-                const res = await fetch('/version.json?t=' + new Date().getTime());
-                if (res.ok) {
-                    const data: VersionData = await res.json();
-                    setLocalBuildTime(data.buildTime);
-                    console.log('Current Build Time:', data.buildTime);
-                }
-            } catch (error) {
-                console.error('Failed to fetch version info:', error);
-            }
-        };
-
-        fetchInitialVersion();
-
-        const interval = setInterval(async () => {
-            if (document.hidden) return; // Don't check if tab is inactive
-
-            try {
-                // Cache-busting to ensure we get the latest file
-                const res = await fetch('/version.json?t=' + new Date().getTime());
-                if (res.ok) {
-                    const data: VersionData = await res.json();
-
-                    setLocalBuildTime(prevTime => {
-                        // Only update if we have a previous time and it's different
-                        if (prevTime !== null && data.buildTime > prevTime) {
-                            console.log('New version detected!', data.buildTime);
-                            setHasUpdate(true);
-                        }
-                        return prevTime; // Keep original time as reference
-                    });
-                }
-            } catch (error) {
-                console.error('Version check failed:', error);
-            }
-        }, CHECK_INTERVAL);
-
-        return () => clearInterval(interval);
-    }, []);
-
-    const handleReload = () => {
-        // Hard reload ensuring cache is cleared
-        window.location.reload();
-    };
-
-    if (!hasUpdate) return null;
+    if (!hasUpdate || dismissed) return null;
 
     return (
         <div className="fixed bottom-6 right-6 z-[9999] animate-fade-in-up">
@@ -77,7 +24,7 @@ const VersionChecker: React.FC = () => {
                         </p>
                     </div>
                     <button
-                        onClick={() => setHasUpdate(false)}
+                        onClick={() => setDismissed(true)}
                         className="text-white/60 hover:text-white p-1 hover:bg-white/10 rounded-lg transition-colors"
                     >
                         <X size={18} />
@@ -85,7 +32,7 @@ const VersionChecker: React.FC = () => {
                 </div>
 
                 <button
-                    onClick={handleReload}
+                    onClick={reload}
                     className="w-full py-2.5 bg-white text-blue-700 font-bold rounded-xl hover:bg-blue-50 transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
                 >
                     <RefreshCw size={16} />

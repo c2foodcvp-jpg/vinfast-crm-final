@@ -17,7 +17,7 @@ const Register: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  
+
   const navigate = useNavigate();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -44,6 +44,16 @@ const Register: React.FC = () => {
       if (authError) throw authError;
 
       if (authData.user) {
+        // Redundant Update: Manual update in case trigger fails or is delayed
+        try {
+          await supabase.from('profiles').update({
+            phone: formData.phone,
+            full_name: formData.fullName
+          }).eq('id', authData.user.id);
+        } catch (updateErr) {
+          console.warn('Manual profile update failed, relying on trigger:', updateErr);
+        }
+
         setSuccess('Đăng ký thành công! Vui lòng chờ Quản trị viên duyệt tài khoản.');
       }
     } catch (err: any) {
@@ -71,10 +81,10 @@ const Register: React.FC = () => {
           {success && (
             <div className="mb-6 rounded-lg bg-green-50 p-6 text-center border border-green-100">
               <div className="mb-3 flex justify-center text-green-600">
-                  <div className="h-12 w-12 rounded-full bg-green-100 flex items-center justify-center animate-bounce">
-                      <Loader2 className="animate-spin" size={0} />
-                      <span className="text-2xl">✓</span>
-                  </div>
+                <div className="h-12 w-12 rounded-full bg-green-100 flex items-center justify-center animate-bounce">
+                  <Loader2 className="animate-spin" size={0} />
+                  <span className="text-2xl">✓</span>
+                </div>
               </div>
               <p className="font-bold text-lg text-green-800 mb-1">Đăng ký thành công!</p>
               <p className="text-sm text-green-700">{success}</p>
@@ -87,36 +97,36 @@ const Register: React.FC = () => {
           {!success && (
             <form onSubmit={handleRegister} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="mb-1 block text-sm font-semibold text-gray-700">Họ và tên</label>
-                    <div className="relative">
-                      <UserCircle className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
-                      <input
-                        name="fullName"
-                        type="text"
-                        required
-                        value={formData.fullName}
-                        onChange={handleChange}
-                        className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-4 text-sm text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 font-medium"
-                        placeholder="Nguyễn Văn A"
-                      />
-                    </div>
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-gray-700">Họ và tên</label>
+                  <div className="relative">
+                    <UserCircle className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                    <input
+                      name="fullName"
+                      type="text"
+                      required
+                      value={formData.fullName}
+                      onChange={handleChange}
+                      className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-4 text-sm text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 font-medium"
+                      placeholder="Nguyễn Văn A"
+                    />
                   </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-semibold text-gray-700">Số điện thoại</label>
-                    <div className="relative">
-                      <Phone className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
-                      <input
-                        name="phone"
-                        type="tel"
-                        required
-                        value={formData.phone}
-                        onChange={handleChange}
-                        className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-4 text-sm text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 font-medium"
-                        placeholder="09xx..."
-                      />
-                    </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-gray-700">Số điện thoại</label>
+                  <div className="relative">
+                    <Phone className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                    <input
+                      name="phone"
+                      type="tel"
+                      required
+                      value={formData.phone}
+                      onChange={handleChange}
+                      className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-4 text-sm text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 font-medium"
+                      placeholder="09xx..."
+                    />
                   </div>
+                </div>
               </div>
 
               <div>
@@ -152,8 +162,8 @@ const Register: React.FC = () => {
               </div>
 
               <div className="flex items-start gap-2 rounded-lg bg-blue-50 p-3 text-xs text-blue-700 border border-blue-100">
-                 <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                 <p>Hệ thống tự động đồng bộ thông tin của bạn. Sau khi đăng ký, vui lòng liên hệ Admin để được duyệt quyền truy cập.</p>
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <p>Hệ thống tự động đồng bộ thông tin của bạn. Sau khi đăng ký, vui lòng liên hệ Admin để được duyệt quyền truy cập.</p>
               </div>
 
               <button

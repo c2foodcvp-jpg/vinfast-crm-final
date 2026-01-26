@@ -2,12 +2,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, UserProfile, Transaction, EmployeeKPI } from '../types';
+import { Customer, CustomerStatus, UserProfile, Transaction } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
-    ArrowLeft, Users, CheckCircle, Ban, TrendingUp, Calendar, Phone, MapPin, CarFront, Loader2, User, Clock, AlertTriangle, BadgeDollarSign, Wallet, ArrowUpRight, ArrowDownLeft, Building2, Target, Trophy, X, Save, UserX, Hand, Flame, Briefcase, Database, Copy, Terminal, Lock
+    ArrowLeft, Users, CheckCircle, TrendingUp, Calendar, Loader2, BadgeDollarSign, Wallet, ArrowUpRight, ArrowDownLeft, Target, Trophy, X, Flame, Briefcase, Copy, Terminal, Lock
 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, AreaChart, Area } from 'recharts';
 
 const EmployeeDetail: React.FC = () => {
     const { id } = useParams<{ id: string }>();
@@ -297,7 +297,26 @@ create policy "Write KPIs" on public.employee_kpis for all using (
                             <h1 className="text-2xl font-bold text-gray-900">{employee.full_name}</h1>
                             {employee.is_part_time && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-0.5 rounded border border-orange-200 uppercase">Part-time</span>}
                         </div>
-                        <p className="text-gray-500 text-sm">{employee.email} • {employee.phone}</p>
+                        <p className="text-gray-500 text-sm mb-1">{employee.email} • {employee.phone}</p>
+                        {(isAdmin || isMod) && (
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-gray-500 uppercase">Hạng:</span>
+                                <select
+                                    className="bg-white border border-gray-200 text-xs font-bold rounded-lg px-2 py-1 outline-none focus:border-primary-500 text-gray-700 cursor-pointer hover:bg-gray-50 transition-colors"
+                                    value={employee.member_tier || ''}
+                                    onChange={async (e) => {
+                                        const newVal = e.target.value;
+                                        await supabase.from('profiles').update({ member_tier: newVal || null }).eq('id', employee.id);
+                                        setEmployee({ ...employee, member_tier: newVal as any });
+                                    }}
+                                >
+                                    <option value="">-- Member --</option>
+                                    <option value="Gold">Gold</option>
+                                    <option value="Platinum">Platinum</option>
+                                    <option value="Diamond">Diamond</option>
+                                </select>
+                            </div>
+                        )}
                     </div>
                 </div>
 

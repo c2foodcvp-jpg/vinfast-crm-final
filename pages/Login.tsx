@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { User, Lock, Loader2, AlertCircle, ShieldCheck, Mail, ArrowLeft, ChevronRight } from 'lucide-react';
@@ -6,19 +6,30 @@ import { User, Lock, Loader2, AlertCircle, ShieldCheck, Mail, ArrowLeft, Chevron
 const { useNavigate, Link } = ReactRouterDOM as any;
 
 const Login: React.FC = () => {
+    const [loginLogo, setLoginLogo] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchLogo = async () => {
+            const { data } = await supabase.from('app_settings').select('value').eq('key', 'system_logo_login').maybeSingle();
+            if (data?.value) setLoginLogo(data.value);
+        };
+        fetchLogo();
+    }, []);
+
+    // ... (rest of states)
+
     const [emailOrPhone, setEmailOrPhone] = useState('');
     const [password, setPassword] = useState('');
-
-    // Forgot Password State
     const [isForgotPassword, setIsForgotPassword] = useState(false);
     const [recoveryEmail, setRecoveryEmail] = useState('');
     const [rememberMe, setRememberMe] = useState(true);
-
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
 
     const navigate = useNavigate();
+
+    // ... (rest of handlers)
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -83,6 +94,7 @@ const Login: React.FC = () => {
         }
     };
 
+    // ... (reset password handler)
     const handleResetPassword = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
@@ -121,9 +133,19 @@ const Login: React.FC = () => {
                 {/* Left Side: Brand Area */}
                 <div className="hidden md:flex flex-col justify-between w-1/2 p-10 bg-gradient-to-br from-primary-900/80 to-slate-900/80 text-white relative">
                     <div className="relative z-10">
-                        <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/20 mb-6">
-                            <span className="font-bold text-2xl">V</span>
-                        </div>
+                        {loginLogo ? (
+                            <div className="mb-6">
+                                <img
+                                    src={loginLogo}
+                                    alt="Company Logo"
+                                    className="max-w-[180px] h-auto object-contain max-h-[80px]"
+                                />
+                            </div>
+                        ) : (
+                            <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/20 mb-6">
+                                <span className="font-bold text-2xl">V</span>
+                            </div>
+                        )}
                         <h1 className="text-4xl font-bold mb-4 leading-tight">Quản lý khách hàng<br /><span className="text-primary-400">Chuyên nghiệp</span></h1>
                         <p className="text-blue-100/80 text-sm leading-relaxed max-w-sm">
                             Hệ thống CRM tối ưu dành riêng cho đội ngũ kinh doanh VinFast. Tăng tốc độ chốt đơn, quản lý dòng tiền và chăm sóc khách hàng hiệu quả.

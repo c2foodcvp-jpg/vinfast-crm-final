@@ -49,45 +49,51 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <Layout>{children}</Layout>;
 };
 
+import SystemConfigListener from './components/SystemConfigListener';
+import { ThemeProvider } from './contexts/ThemeContext'; // Ensure ThemeProvider is used if applicable, otherwise just ignore this line if not relevant
+
 const App: React.FC = () => {
   return (
     <AuthProvider>
       <NotificationProvider>
-        <HashRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/update-password" element={<UpdatePassword />} />
-            
-            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
-            <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
-            <Route path="/customers" element={<ProtectedRoute><CustomerList /></ProtectedRoute>} />
-            <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetail /></ProtectedRoute>} />
-            <Route path="/assign" element={<ProtectedRoute><AssignCustomers /></ProtectedRoute>} />
-            <Route path="/deals" element={<ProtectedRoute><Deals /></ProtectedRoute>} />
-            <Route path="/employees" element={<ProtectedRoute><EmployeeList /></ProtectedRoute>} />
-            <Route path="/employees/:id" element={<ProtectedRoute><EmployeeDetail /></ProtectedRoute>} />
-            
-            <Route path="/configuration" element={<ProtectedRoute><Configuration /></ProtectedRoute>} />
-            <Route path="/quote" element={<ProtectedRoute><OnlineQuote /></ProtectedRoute>} />
-            <Route path="/bank-calculator" element={<ProtectedRoute><BankCalculator /></ProtectedRoute>} />
-            
-            <Route path="/distributors" element={<Navigate to="/configuration" replace />} /> 
-            
-            <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-            <Route path="/leads-form" element={<ProtectedRoute><LeadsFromForm /></ProtectedRoute>} />
-            <Route path="/promotions" element={<ProtectedRoute><Promotions /></ProtectedRoute>} />
-            <Route path="/finance" element={<ProtectedRoute><Finance /></ProtectedRoute>} />
-            <Route path="/team-fund" element={<ProtectedRoute><TeamFund /></ProtectedRoute>} />
-            <Route path="/car-prices" element={<ProtectedRoute><CarPrices /></ProtectedRoute>} />
-            <Route path="/bank-rates" element={<ProtectedRoute><BankRates /></ProtectedRoute>} />
-            <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
-            <Route path="/proposals" element={<ProtectedRoute><Proposals /></ProtectedRoute>} />
-            
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </HashRouter>
+        <ThemeProvider>
+          <SystemConfigListener />
+          <HashRouter>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/update-password" element={<UpdatePassword />} />
+
+              <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
+              <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+              <Route path="/customers" element={<ProtectedRoute><CustomerList /></ProtectedRoute>} />
+              <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetail /></ProtectedRoute>} />
+              <Route path="/assign" element={<ProtectedRoute><AssignCustomers /></ProtectedRoute>} />
+              <Route path="/deals" element={<ProtectedRoute><Deals /></ProtectedRoute>} />
+              <Route path="/employees" element={<ProtectedRoute><EmployeeList /></ProtectedRoute>} />
+              <Route path="/employees/:id" element={<ProtectedRoute><EmployeeDetail /></ProtectedRoute>} />
+
+              <Route path="/configuration" element={<ProtectedRoute><Configuration /></ProtectedRoute>} />
+              <Route path="/quote" element={<ProtectedRoute><OnlineQuote /></ProtectedRoute>} />
+              <Route path="/bank-calculator" element={<ProtectedRoute><BankCalculator /></ProtectedRoute>} />
+
+              <Route path="/distributors" element={<Navigate to="/configuration" replace />} />
+
+              <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+              <Route path="/leads-form" element={<ProtectedRoute><LeadsFromForm /></ProtectedRoute>} />
+              <Route path="/promotions" element={<ProtectedRoute><Promotions /></ProtectedRoute>} />
+              <Route path="/finance" element={<ProtectedRoute><Finance /></ProtectedRoute>} />
+              <Route path="/team-fund" element={<ProtectedRoute><TeamFund /></ProtectedRoute>} />
+              <Route path="/car-prices" element={<ProtectedRoute><CarPrices /></ProtectedRoute>} />
+              <Route path="/bank-rates" element={<ProtectedRoute><BankRates /></ProtectedRoute>} />
+              <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
+              <Route path="/proposals" element={<ProtectedRoute><Proposals /></ProtectedRoute>} />
+
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </HashRouter>
+        </ThemeProvider>
       </NotificationProvider>
     </AuthProvider>
   );

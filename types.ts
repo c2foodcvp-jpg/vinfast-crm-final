@@ -114,6 +114,12 @@ export interface DealDetails {
   notes?: string;
 }
 
+export enum MembershipTier {
+  GOLD = 'Gold',
+  PLATINUM = 'Platinum',
+  DIAMOND = 'Diamond'
+}
+
 export interface UserProfile {
   id: string;
   email: string;
@@ -127,6 +133,9 @@ export interface UserProfile {
   is_part_time?: boolean; // New Flag for Part-time
   profit_share_ratio?: number; // Custom profit share ratio (optional)
 
+  // Membership Tier (New)
+  member_tier?: MembershipTier;
+
   // Restricted Permissions
   is_locked_add?: boolean; // Block adding new customers
   is_locked_view?: boolean; // Block viewing/editing existing customers
@@ -137,6 +146,7 @@ export interface UserProfile {
   created_at?: string;
   discord_config?: any;
 }
+
 
 export interface EmployeeKPI {
   id: string;
