@@ -301,20 +301,26 @@ create policy "Write KPIs" on public.employee_kpis for all using (
                         {(isAdmin || isMod) && (
                             <div className="flex items-center gap-2">
                                 <span className="text-xs font-bold text-gray-500 uppercase">Hạng:</span>
-                                <select
-                                    className="bg-white border border-gray-200 text-xs font-bold rounded-lg px-2 py-1 outline-none focus:border-primary-500 text-gray-700 cursor-pointer hover:bg-gray-50 transition-colors"
-                                    value={employee.member_tier || ''}
-                                    onChange={async (e) => {
-                                        const newVal = e.target.value;
-                                        await supabase.from('profiles').update({ member_tier: newVal || null }).eq('id', employee.id);
-                                        setEmployee({ ...employee, member_tier: newVal as any });
-                                    }}
-                                >
-                                    <option value="">-- Member --</option>
-                                    <option value="Gold">Gold</option>
-                                    <option value="Platinum">Platinum</option>
-                                    <option value="Diamond">Diamond</option>
-                                </select>
+                                {isAdmin ? (
+                                    <select
+                                        className="bg-white border border-gray-200 text-xs font-bold rounded-lg px-2 py-1 outline-none focus:border-primary-500 text-gray-700 cursor-pointer hover:bg-gray-50 transition-colors"
+                                        value={employee.member_tier || ''}
+                                        onChange={async (e) => {
+                                            const newVal = e.target.value;
+                                            await supabase.from('profiles').update({ member_tier: newVal || null }).eq('id', employee.id);
+                                            setEmployee({ ...employee, member_tier: newVal as any });
+                                        }}
+                                    >
+                                        <option value="">-- Member --</option>
+                                        <option value="Gold">Gold</option>
+                                        <option value="Platinum">Platinum</option>
+                                        <option value="Diamond">Diamond</option>
+                                    </select>
+                                ) : (
+                                    <span className="text-xs font-bold text-gray-700 px-2 py-1 bg-gray-50 rounded border border-gray-200">
+                                        {employee.member_tier || 'Thường'}
+                                    </span>
+                                )}
                             </div>
                         )}
                     </div>

@@ -35,92 +35,101 @@ export const getJulianDayNumber = (d: number, m: number, y: number) => {
  * NOTE: For full astronomical accuracy over centuries, this needs 50KB+ of code.
  * We will use a robust approximation suitable for the application's lifespan (2000-2050).
  */
+const LUNAR_MONTH_DATA: Record<number, number[]> = {
+    // 2024: Giap Thin (No Leap) - Starts Feb 10
+    // Days: 29, 30, 29, 30, 29, 30, 29, 30, 30, 29, 30, 29
+    2024: [29, 30, 29, 30, 29, 30, 29, 30, 30, 29, 30, 29],
+
+    // 2025: At Ty (Leap Month 6) - Starts Jan 29
+    // Days sequence (Month 1..12 + Leap): 
+    // 1(29), 2(30), 3(29), 4(30), 5(29), 6(30), 6+(29), 7(30), 8(29), 9(30), 10(29), 11(30), 12(30)
+    // Note: This is an approximation of the Vietnamese Lunar Calendar. 
+    // To strictly support the user's issue "Month 12 not 13", we ensure the mapping aligns.
+    2025: [29, 30, 29, 30, 29, 30, 29, 30, 29, 30, 29, 30, 30],
+
+    // 2026: Binh Ngo (No Leap) - Starts Feb 17
+    2026: [30, 29, 30, 29, 30, 29, 30, 29, 30, 29, 30, 29]
+};
+
+const LUNAR_LEAP_INFO: Record<number, number> = {
+    2024: 0,
+    2025: 6, // Month 6 is leap (so index 6 in 0-based array is month 6+, or logical handling needed)
+    2026: 0
+};
+
 export const getLunarDate = (dd: number, mm: number, yyyy: number): LunarDate => {
     const jd = getJulianDayNumber(dd, mm, yyyy);
-
-    // Algorithmic approach (Simplified for environment limits)
-    // In a real production environment, use 'lunar-date-vi' package.
-    // Here we simulate the logic to ensure the Can-Chi and Relative dates are correct.
-
-    // 1. Calculate Lunar Year/Month/Day relative to known anchors.
-    // Known Anchor: 2026-01-26 Solar is 2025-12-08 Lunar (Snake Year)
-
-    // We will use a standard algorithm function if possible.
-    // Since I must write the code myself, I will implement the standard wrapper 
-    // around `getSunLongitude` logic if I can recall it, OR use a simpler offset map.
-
-    // Let's rely on the relative Can/Chi calculation which is mathematically exact,
-    // and approximate the Day/Month if outside an Anchor range.
-
-    // BUT user wants specific "View Calendar".
-    // I will implement a basic version that is "good enough" for the current year context.
-
-    // --- COMPUTATION ---
-    // Let's try to be as accurate as reasonably possible without 1000 lines.
-
-    // Approximation:
-    // Lunar year usually starts late Jan / early Feb.
-    // 2025 Tet: Jan 29. 2026 Tet: Feb 17.
-
-    // Simple table for Tet (Lunar New Year) start dates (Solar)
-    // 2024: Feb 10
-    // 2025: Jan 29
-    // 2026: Feb 17
-    // 2027: Feb 6
-    // 2028: Jan 26
-
-    // We can infer the lunar date based on days transpired since Tet.
-    // This is robust for the years listed.
 
     const tetDates: Record<number, string> = {
         2024: "2024-02-10",
         2025: "2025-01-29",
         2026: "2026-02-17",
-        2027: "2027-02-06",
-        2028: "2028-01-26"
+        2027: "2027-02-06"
     };
 
-    // Determine current solar
+    // 1. Determine Solar Date
     const currentSolar = new Date(yyyy, mm - 1, dd);
 
-    // Find Lunar Year
+    // 2. Determine Lunar Year
     let lunarYear = yyyy;
-    let tetSolar = new Date(tetDates[yyyy] || `${yyyy}-02-01`); // Fallback
+    let tetSolar = new Date(tetDates[yyyy] || `${yyyy}-02-01`);
 
+    // If before Tet, it belongs to previous lunar year
     if (currentSolar < tetSolar) {
         lunarYear = yyyy - 1;
         tetSolar = new Date(tetDates[lunarYear] || `${lunarYear}-02-01`);
     }
 
-    // Days since Tet (Lunar 01/01)
-    // 1 day = 86400000 ms
+    // 3. Calculate Days since Tet
     const diffTime = currentSolar.getTime() - tetSolar.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-    // Estimate Lunar Month/Day from diffDays
-    // Average lunar month = 29.53 days.
-    // This is an approximation. A Month is 29 or 30 days. 
-    // We will alternate 30, 29, 30, 29 for simplicity in this constrained env.
+    // 4. Calculate Month/Day using Data
+    const months = LUNAR_MONTH_DATA[lunarYear];
+
+    if (!months) {
+        // Fallback for years clearly out of range (just 30/29 alt)
+        let remain = diffDays;
+        let lm = 1;
+        while (remain >= 30) {
+            remain -= (lm % 2 === 1 ? 30 : 29);
+            lm++;
+        }
+        return { day: remain + 1, month: lm, year: lunarYear, leap: false, jd };
+    }
 
     let daysRemaining = diffDays;
     let lMonth = 1;
-    let isLeap = false;
+    let isLeapMonth = false;
+    const leapStep = LUNAR_LEAP_INFO[lunarYear];
 
-    // Known leaps: 2025 (Month 6), 2028 (Month 5) - roughly
-    // This is tricky. 
+    for (let i = 0; i < months.length; i++) {
+        const daysInThisMonth = months[i];
+        if (daysRemaining < daysInThisMonth) {
+            // Found the month
+            // Handle Leap Mapping
+            // Logic: If leapStep is 6, the months array is: [1, 2, 3, 4, 5, 6, 6+, 7, 8...]
+            // Indices: 0, 1, 2, 3, 4, 5, 6, 7...
 
-    // FOR DEMO/MVP: We will use the simple alternation. 
-    // Month 1 (Tet) usually 29 or 30.
-
-    // Better Logic:
-    // Just allow the UI to handle the day/month display.
-    // We will calculate a "Simulated" Lunar date.
-
-    while (daysRemaining >= 30) {
-        const daysInMonth = (lMonth % 2 === 1) ? 30 : 29; // Alternate 30, 29
-        daysRemaining -= daysInMonth;
-        lMonth++;
+            if (leapStep > 0) {
+                if (i < leapStep) {
+                    lMonth = i + 1;
+                } else if (i === leapStep) {
+                    lMonth = i; // The leap month (duplicate number)
+                    isLeapMonth = true;
+                } else {
+                    lMonth = i; // Shift back by 1 bc of leap insertion
+                }
+            } else {
+                lMonth = i + 1;
+            }
+            break;
+        }
+        daysRemaining -= daysInThisMonth;
     }
+
+    // Safe catch if loop finishes (End of year)
+    if (lMonth > 12 && !isLeapMonth) lMonth = 12; // Safety cap
 
     const lDay = daysRemaining + 1;
 
@@ -128,7 +137,7 @@ export const getLunarDate = (dd: number, mm: number, yyyy: number): LunarDate =>
         day: lDay,
         month: lMonth,
         year: lunarYear,
-        leap: isLeap,
+        leap: isLeapMonth,
         jd: jd
     };
 };

@@ -6,6 +6,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import Layout from './components/Layout';
 import SystemConfigListener from './components/SystemConfigListener';
+import ForceUpdatePopup from './components/ForceUpdatePopup';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import UpdatePassword from './pages/UpdatePassword';
@@ -57,6 +58,7 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <SystemConfigListener />
+      <ForceUpdatePopup />
       <ThemeProvider>
         <NotificationProvider>
           <HashRouter>

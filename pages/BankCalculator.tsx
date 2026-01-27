@@ -3,9 +3,10 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     Calculator, Landmark, Calendar, DollarSign, Percent, ArrowRight, Download,
-    FileImage, Settings2, Info, ChevronDown, CheckCircle2, TableProperties, Loader2, ArrowLeft, Lock, ArrowUpCircle
+    FileImage, Settings2, Info, ChevronDown, CheckCircle2, TableProperties, Loader2, ArrowLeft, Lock, ArrowUpCircle, FileText
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 import { useAuth } from '../contexts/AuthContext';
 import { MembershipTier } from '../types';
 
@@ -169,9 +170,6 @@ const BankCalculator: React.FC = () => {
 
         setIsExporting(true);
         try {
-            // Kỹ thuật: html2canvas chụp ảnh element. 
-            // Ta sử dụng 'onclone' để can thiệp vào bản sao của DOM trước khi chụp, 
-            // giúp bỏ qua scrollbar và chụp toàn bộ nội dung.
             const canvas = await html2canvas(resultRef.current, {
                 scale: 2,
                 useCORS: true,
@@ -183,7 +181,7 @@ const BankCalculator: React.FC = () => {
                         tableContainer.style.maxHeight = 'none';
                         tableContainer.style.overflow = 'visible';
                     }
-                    // Thêm tiêu đề chuyên nghiệp vào bản clone (chỉ hiện trong ảnh)
+                    // Thêm tiêu đề chuyên nghiệp vào bản clone
                     const header = clonedDoc.createElement('div');
                     header.innerHTML = `
                     <div style="padding: 20px; border-bottom: 2px solid #2462bd; margin-bottom: 20px; text-align: center;">
@@ -207,6 +205,64 @@ const BankCalculator: React.FC = () => {
         }
     };
 
+    const handleExportPDF = async () => {
+        if (!resultRef.current || isExporting) return;
+        setIsExporting(true);
+        try {
+            const canvas = await html2canvas(resultRef.current, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                logging: false,
+                onclone: (clonedDoc) => {
+                    const tableContainer = clonedDoc.getElementById('repayment-table-container');
+                    if (tableContainer) {
+                        tableContainer.style.maxHeight = 'none';
+                        tableContainer.style.overflow = 'visible';
+                    }
+                    const header = clonedDoc.createElement('div');
+                    header.innerHTML = `
+                        <div style="padding: 20px; border-bottom: 2px solid #2462bd; margin-bottom: 20px; text-align: center;">
+                             <h1 style="color: #2462bd; font-size: 24px; font-weight: bold; margin: 0;">BẢNG TÍNH LÃI SUẤT TRẢ GÓP VINFAST</h1>
+                             <p style="color: #666; margin: 5px 0;">Ngày xuất: ${new Date().toLocaleString('vi-VN')}</p>
+                        </div>
+                    `;
+                    clonedDoc.getElementById('export-container')?.prepend(header);
+                }
+            });
+
+            const imgData = canvas.toDataURL('image/jpeg', 1.0);
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+            const imgWidth = pdfWidth;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+            let heightLeft = imgHeight;
+            let position = 0;
+
+            // Page 1
+            pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+            heightLeft -= pdfHeight;
+
+            // Subsequent Pages
+            while (heightLeft > 0) {
+                position = heightLeft - imgHeight; // Calculate position for negative offset
+                pdf.addPage();
+                pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pdfHeight;
+            }
+
+            pdf.save(`BangTinhLai_VinFast_${new Date().getTime()}.pdf`);
+
+        } catch (err) {
+            console.error("Export PDF failed", err);
+            alert("Lỗi khi xuất PDF. Vui lòng thử lại.");
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -225,14 +281,24 @@ const BankCalculator: React.FC = () => {
                         <p className="text-gray-500">Phân tích dòng tiền trả nợ theo dư nợ giảm dần.</p>
                     </div>
                 </div>
-                <button
-                    onClick={handleExportImage}
-                    disabled={isExporting}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg disabled:opacity-50 transition-all"
-                >
-                    {isExporting ? <Loader2 className="animate-spin" size={18} /> : <FileImage size={18} />}
-                    {isExporting ? 'Đang tạo ảnh...' : 'Xuất Ảnh Toàn Bộ Các Kỳ'}
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={handleExportImage}
+                        disabled={isExporting}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-xl font-bold hover:bg-blue-200 transition-all disabled:opacity-50"
+                    >
+                        {isExporting ? <Loader2 className="animate-spin" size={18} /> : <FileImage size={18} />}
+                        Xuất Ảnh
+                    </button>
+                    <button
+                        onClick={handleExportPDF}
+                        disabled={isExporting}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-lg disabled:opacity-50 transition-all"
+                    >
+                        {isExporting ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
+                        Xuất PDF
+                    </button>
+                </div>
             </div>
 
             {/* Pre-filled Source Notice */}

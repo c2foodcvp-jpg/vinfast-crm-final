@@ -101,7 +101,10 @@ const FullCalendar: React.FC<FullCalendarProps> = ({ onClose }) => {
                                 </div>
 
                                 <div className="text-right mt-1">
-                                    <div className="text-sm font-bold text-gray-500">{cell.lunar.day}/{cell.lunar.month}</div>
+                                    <div className="text-sm font-bold text-gray-500">
+                                        {String(cell.lunar.day).padStart(2, '0')}/{String(cell.lunar.month).padStart(2, '0')}
+                                        {cell.lunar.leap && <span className="text-[9px] text-red-500 ml-1">(N)</span>}
+                                    </div>
                                     <div className="text-[10px] text-gray-400 font-medium">{cell.dayCanChi}</div>
                                 </div>
 

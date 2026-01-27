@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import { CarModel, CarVersion, QuoteConfig, BankConfig, BankPackage, MembershipTier } from '../types';
+import { CarModel, CarVersion, QuoteConfig, BankConfig, BankPackage, MembershipTier, RegistrationService } from '../types';
 import {
     Car, Calculator, Check, ChevronDown, DollarSign, Calendar, Landmark, Download, FileText, Loader2, CheckCircle2, AlertCircle, FileImage, Gift, Crown, Coins, ShieldCheck, Phone, MapPin, Search, TableProperties, Lock, ArrowUpCircle
 } from 'lucide-react';
@@ -12,116 +12,7 @@ import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
-// --- DATA: BẢNG GIÁ DỊCH VỤ ĐĂNG KÝ 2025 ---
-const REGISTRATION_SERVICES = [
-    { label: '[Hà Nội] VNEID TOÀN TRÌNH', value: 3000000 },
-    { label: '[Hà Nội] VNEID - TRUYỀN THỐNG', value: 3000000 },
-    { label: '[Hà Nội] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[HCM] VNEID TOÀN TRÌNH - KHÔNG XE', value: 3000000 },
-    { label: '[HCM] VNEID - TRUYỀN THỐNG (KHÔNG XE)', value: 3000000 },
-    { label: '[HCM] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Bình Dương] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3000000 },
-    { label: '[Bình Dương] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3100000 },
-    { label: '[Bình Dương] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Đồng Nai] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3200000 },
-    { label: '[Đồng Nai] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3400000 },
-    { label: '[Đồng Nai] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Bình Phước] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3700000 },
-    { label: '[Bình Phước] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3900000 },
-    { label: '[Bình Phước] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Vũng Tàu] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3700000 },
-    { label: '[Vũng Tàu] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3900000 },
-    { label: '[Vũng Tàu] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Tây Ninh] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3500000 },
-    { label: '[Tây Ninh] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
-    { label: '[Tây Ninh] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Đắk Lắk] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Đắk Lắk] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6000000 },
-    { label: '[Đắk Lắk] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Quy Nhơn] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6000000 },
-    { label: '[Quy Nhơn] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6500000 },
-    { label: '[Quy Nhơn] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Đắk Nông] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6500000 },
-    { label: '[Đắk Nông] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6800000 },
-    { label: '[Đắk Nông] PHÍ CÀ VẸT NHANH', value: 1000000 },
-    { label: '[Gia Lai] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 6500000 },
-    { label: '[Gia Lai] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 7500000 },
-    { label: '[Gia Lai] PHÍ CÀ VẸT NHANH', value: 1000000 },
-    { label: '[Cần Thơ] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
-    { label: '[Cần Thơ] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
-    { label: '[Cần Thơ] PHÍ CÀ VẸT NHANH', value: 1000000 },
-    { label: '[Kom Tum] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 7000000 },
-    { label: '[Kom Tum] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 8000000 },
-    { label: '[Lâm Đồng] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5200000 },
-    { label: '[Lâm Đồng] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5700000 },
-    { label: '[Lâm Đồng] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[An Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
-    { label: '[An Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
-    { label: '[An Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Bạc Liêu] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Bạc Liêu] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5300000 },
-    { label: '[Bạc Liêu] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Bến Tre] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3700000 },
-    { label: '[Bến Tre] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
-    { label: '[Bến Tre] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Cà Mau] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Cà Mau] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5500000 },
-    { label: '[Cà Mau] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Long An] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3500000 },
-    { label: '[Long An] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
-    { label: '[Long An] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Sóc Trăng] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
-    { label: '[Sóc Trăng] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
-    { label: '[Sóc Trăng] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Quảng Trị] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 9000000 },
-    { label: '[Quảng Trị] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 9000000 },
-    { label: '[Quảng Trị] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Tiền Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3500000 },
-    { label: '[Tiền Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 3800000 },
-    { label: '[Tiền Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Vĩnh Long] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3800000 },
-    { label: '[Vĩnh Long] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4100000 },
-    { label: '[Vĩnh Long] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Bình Thuận] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Bình Thuận] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5200000 },
-    { label: '[Bình Thuận] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Đà Nắng] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 11000000 },
-    { label: '[Đà Nắng] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 1100000 },
-    { label: '[Đà Nắng] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Nha Trang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 62000000 },
-    { label: '[Nha Trang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 7500000 },
-    { label: '[Nha Trang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Ninh Thuận] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 57000000 },
-    { label: '[Ninh Thuận] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 6200000 },
-    { label: '[Ninh Thuận] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Phú Yên] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 90000000 },
-    { label: '[Phú Yên] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 9000000 },
-    { label: '[Phú Yên] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Quãng Nam] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 11000000 },
-    { label: '[Quãng Nam] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 11000000 },
-    { label: '[Quãng Nam] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Quãng Ngãi] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 11000000 },
-    { label: '[Quãng Ngãi] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 11000000 },
-    { label: '[Quãng Ngãi] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Kiên Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 5000000 },
-    { label: '[Kiên Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 5300000 },
-    { label: '[Kiên Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Đồng Tháp] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 3800000 },
-    { label: '[Đồng Tháp] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4000000 },
-    { label: '[Đồng Tháp] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Hà Tĩnh] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 11000000 },
-    { label: '[Hà Tĩnh] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 11000000 },
-    { label: '[Hà Tĩnh] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Hậu Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
-    { label: '[Hậu Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
-    { label: '[Hậu Giang] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Trà Vinh] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 4500000 },
-    { label: '[Trà Vinh] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 4800000 },
-    { label: '[Trà Vinh] PHÍ CÀ VẸT NHANH', value: 1500000 },
-    { label: '[Huế] VNEID - TOÀN TRÌNH (KHÔNG XE)', value: 12000000 },
-    { label: '[Huế] VNEID - TRUYỀN THỐNG (CÓ XE)', value: 12000000 },
-    { label: '[Huế] PHÍ CÀ VẸT NHANH', value: 1500000 },
-];
+// Registration services will be fetched from database
 
 // --- HELPER: WARRANTY TEXT LOGIC ---
 const getWarrantyText = (modelName: string) => {
@@ -405,6 +296,7 @@ const OnlineQuote: React.FC = () => {
     const [gifts, setGifts] = useState<QuoteConfig[]>([]);
     const [memberships, setMemberships] = useState<QuoteConfig[]>([]);
     const [warranties, setWarranties] = useState<QuoteConfig[]>([]);
+    const [registrationServices, setRegistrationServices] = useState<RegistrationService[]>([]);
 
     // --- LOCAL STORAGE PERSISTENCE ---
     const STORAGE_KEY = 'vinfast_quote_state';
@@ -449,13 +341,16 @@ const OnlineQuote: React.FC = () => {
     // NEW: FREE REGISTRATION FLAG
     const [isRegistrationFree, setIsRegistrationFree] = useState(() => getSavedState('isRegistrationFree', false));
 
+    // NEW: PREMIUM COLOR FLAG
+    const [includePremiumColor, setIncludePremiumColor] = useState(() => getSavedState('includePremiumColor', false));
+
     // --- SAVE STATE TO LOCALSTORAGE ---
     useEffect(() => {
         const stateToSave = {
             selectedModelId, selectedVersionId, selectedBankId, selectedMembershipId,
             selectedPackageIndex, prepaidPercent, manualPrepaidAmount,
             appliedPromos, customFees, feeOptions, manualDiscount, manualServiceFee,
-            includeInsurance, insuranceRate, isRegistrationFree
+            includeInsurance, insuranceRate, isRegistrationFree, includePremiumColor
         };
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
@@ -464,7 +359,7 @@ const OnlineQuote: React.FC = () => {
         selectedModelId, selectedVersionId, selectedBankId, selectedMembershipId,
         selectedPackageIndex, prepaidPercent, manualPrepaidAmount,
         appliedPromos, customFees, feeOptions, manualDiscount, manualServiceFee,
-        includeInsurance, insuranceRate, isRegistrationFree
+        includeInsurance, insuranceRate, isRegistrationFree, includePremiumColor
     ]);
 
     useEffect(() => {
@@ -553,7 +448,7 @@ const OnlineQuote: React.FC = () => {
     const fetchQuoteData = async () => {
         setLoading(true);
         try {
-            const [modelsRes, versionsRes, promosRes, feesRes, banksRes, giftsRes, memberRes, warrantyRes] = await Promise.all([
+            const [modelsRes, versionsRes, promosRes, feesRes, banksRes, giftsRes, memberRes, warrantyRes, regServicesRes] = await Promise.all([
                 supabase.from('car_models').select('*'),
                 supabase.from('car_versions').select('*'),
                 supabase.from('quote_configs').select('*').eq('type', 'promotion').eq('is_active', true).order('priority', { ascending: true }),
@@ -562,6 +457,7 @@ const OnlineQuote: React.FC = () => {
                 supabase.from('quote_configs').select('*').eq('type', 'gift').eq('is_active', true).order('priority', { ascending: true }),
                 supabase.from('quote_configs').select('*').eq('type', 'membership').eq('is_active', true).order('priority', { ascending: true }),
                 supabase.from('quote_configs').select('*').eq('type', 'warranty').eq('is_active', true).order('created_at', { ascending: false }),
+                supabase.from('registration_services').select('*').eq('is_active', true).order('priority', { ascending: true }),
             ]);
 
             setCarModels((modelsRes.data as CarModel[]) || []);
@@ -572,6 +468,7 @@ const OnlineQuote: React.FC = () => {
             setGifts((giftsRes.data as QuoteConfig[]) || []);
             setMemberships((memberRes.data as QuoteConfig[]) || []);
             setWarranties((warrantyRes.data as QuoteConfig[]) || []);
+            setRegistrationServices((regServicesRes.data as RegistrationService[]) || []);
 
             if (banksRes.data && banksRes.data.length > 0) {
                 // Only set default bank if no saved bankId
@@ -609,8 +506,8 @@ const OnlineQuote: React.FC = () => {
     const filteredRegFees = useMemo(() => {
         if (!feeSearch) return [];
         const lower = feeSearch.toLowerCase();
-        return REGISTRATION_SERVICES.filter(s => s.label.toLowerCase().includes(lower));
-    }, [feeSearch]);
+        return registrationServices.filter((s: RegistrationService) => s.label.toLowerCase().includes(lower));
+    }, [feeSearch, registrationServices]);
 
     // --- REGION DETECTION LOGIC ---
     const currentRegion = useMemo(() => {
@@ -630,7 +527,10 @@ const OnlineQuote: React.FC = () => {
     }, [fees, feeOptions]);
 
     // --- CALCULATIONS ---
-    const listPrice = selectedVersion?.price || 0;
+    // Calculate listPrice with optional premium color
+    const basePrice = selectedVersion?.price || 0;
+    const premiumColorAmount = (includePremiumColor && selectedVersion?.premium_color_amount) ? selectedVersion.premium_color_amount : 0;
+    const listPrice = basePrice + premiumColorAmount;
 
     // Membership Logic
     const membershipCalculation = useMemo(() => {
@@ -932,9 +832,25 @@ const OnlineQuote: React.FC = () => {
             } else {
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                const pdfHeight = pdf.internal.pageSize.getHeight();
+                const imgWidth = pdfWidth;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-                pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+                let heightLeft = imgHeight;
+                let position = 0;
+
+                // Page 1
+                pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pdfHeight;
+
+                // Subsequent Pages
+                while (heightLeft > 0) {
+                    position = heightLeft - imgHeight; // This will start becoming negative to shift image up
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pdfHeight;
+                }
+
                 pdf.save(`BaoGia_VinFast_${new Date().getTime()}.pdf`);
             }
         } catch (err) {
@@ -983,8 +899,11 @@ const OnlineQuote: React.FC = () => {
                         Tính lãi Bank
                     </button>
                     <div className="w-px h-8 bg-gray-300 mx-1"></div>
-                    <button onClick={() => handleExportQuote('image')} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg text-sm">
+                    <button onClick={() => handleExportQuote('image')} className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-600 border border-blue-200 rounded-xl font-bold hover:bg-blue-100 shadow-sm text-sm transition-all">
                         <FileImage size={16} /> Lưu Ảnh
+                    </button>
+                    <button onClick={() => handleExportQuote('pdf')} className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-lg text-sm transition-all">
+                        <FileText size={16} /> Xuất PDF
                     </button>
                 </div>
             </div>
@@ -1011,6 +930,24 @@ const OnlineQuote: React.FC = () => {
                                     {carVersions.filter(v => v.model_id === selectedModelId).map(v => <option key={v.id} value={v.id}>{v.name} ({formatCurrency(v.price)})</option>)}
                                 </select>
                             </div>
+
+                            {/* PREMIUM COLOR CHECKBOX */}
+                            {selectedVersion && selectedVersion.premium_color_amount && selectedVersion.premium_color_amount > 0 && (
+                                <div className="pt-3 border-t border-gray-100 mt-3">
+                                    <label className="flex items-center justify-between cursor-pointer p-3 border border-orange-200 bg-orange-50 rounded-xl hover:bg-orange-100 transition-colors">
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={includePremiumColor}
+                                                onChange={(e) => setIncludePremiumColor(e.target.checked)}
+                                                className="w-5 h-5 text-orange-600 rounded focus:ring-orange-500"
+                                            />
+                                            <span className="text-sm font-bold text-orange-800">Màu nâng cao</span>
+                                        </div>
+                                        <span className="text-sm font-bold text-orange-600">+{formatCurrency(selectedVersion.premium_color_amount)} VNĐ</span>
+                                    </label>
+                                </div>
+                            )}
                         </div>
                     </div>
 

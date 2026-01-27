@@ -84,7 +84,7 @@ const CustomerDetail: React.FC = () => {
     const [repayForm, setRepayForm] = useState({ amount: '', reason: 'Nộp lại tiền ứng' });
 
     const [showDealerDebtModal, setShowDealerDebtModal] = useState(false);
-    const [dealerDebtForm, setDealerDebtForm] = useState({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền' });
+    const [dealerDebtForm, setDealerDebtForm] = useState({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền', isNewDebt: true });
 
     const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
     const [dealerDebtToConfirm, setDealerDebtToConfirm] = useState<Transaction | null>(null);
@@ -511,24 +511,32 @@ const CustomerDetail: React.FC = () => {
     const handleRequestExpense = async () => { const amount = Number(expenseForm.amount.replace(/\./g, '')); if (!amount || amount <= 0) { showToast("Vui lòng nhập số tiền hợp lệ!", 'error'); return; } if (!expenseForm.reason.trim()) { showToast("Vui lòng nhập lý do chi/ứng!", 'error'); return; } const status = (isAdmin || isMod) ? 'approved' : 'pending'; const approvedBy = (isAdmin || isMod) ? userProfile?.id : null; try { const { data, error } = await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: expenseForm.type, amount: amount, reason: expenseForm.reason, status: status, approved_by: approvedBy }]).select().single(); if (error) throw error; setTransactions(prev => [data as Transaction, ...prev]); setShowExpenseModal(false); setExpenseForm({ type: 'expense', amount: '', reason: '' }); const actionText = expenseForm.type === 'advance' ? `ứng tiền` : 'chi tiền'; const statusText = status === 'approved' ? ' (Đã duyệt)' : ' (Chờ duyệt)'; handleAddNote('note', `Đã gửi yêu cầu ${actionText}: ${formatCurrency(amount)} VNĐ.${statusText}`); showToast(`Gửi yêu cầu thành công! ${status === 'pending' ? 'Vui lòng chờ duyệt.' : 'Đã được duyệt.'}`, 'success'); } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); } };
     const handleRepayAdvance = async () => { const amount = Number(repayForm.amount.replace(/\./g, '')); if (!amount || amount <= 0) return; try { const { data, error } = await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'repayment', amount: amount, reason: `${repayForm.reason} [Ref:Self]`, status: 'pending' }]).select().single(); if (error) throw error; setTransactions(prev => [data as Transaction, ...prev]); setShowRepayModal(false); setRepayForm({ amount: '', reason: 'Nộp lại tiền ứng' }); handleAddNote('note', `Đã gửi yêu cầu nộp lại tiền ứng: ${formatCurrency(amount)} VNĐ.`); showToast("Đã gửi yêu cầu nộp tiền! Chờ Admin duyệt.", 'success'); } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); } };
 
-    // UPDATED: Create Dealer Debt -> Increase Actual Revenue
+    // UPDATED: Create Dealer Debt with checkbox option
     const handleSubmitDealerDebt = async () => {
         const amount = Number(dealerDebtForm.amount.replace(/\./g, ''));
         if (!amount || amount <= 0 || !dealerDebtForm.targetDate) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; }
         try {
             const { data, error } = await supabase.from('transactions').insert([{
                 customer_id: id, customer_name: customer?.name, user_id: customer?.creator_id || userProfile?.id, user_name: customer?.sales_rep || userProfile?.full_name,
-                type: 'dealer_debt', target_date: dealerDebtForm.targetDate, amount: amount, reason: dealerDebtForm.reason, status: 'approved'
+                type: 'dealer_debt', target_date: dealerDebtForm.targetDate, amount: amount,
+                reason: `${dealerDebtForm.reason}${dealerDebtForm.isNewDebt ? ' [Nợ mới]' : ' [Từ DT đã báo]'}`,
+                status: 'approved'
             }]).select().single();
             if (error) throw error;
 
-            // CRITICAL: Update actual_revenue (add debt amount)
             const currentPredicted = customer?.deal_details?.revenue || 0;
             const currentActual = customer?.deal_details?.actual_revenue || 0;
+
+            // Calculate new actual revenue: only add if isNewDebt is true
+            const newActualRevenue = dealerDebtForm.isNewDebt ? currentActual + amount : currentActual;
+
+            // Auto-update predicted revenue if actual > predicted
+            const newPredictedRevenue = newActualRevenue > currentPredicted ? newActualRevenue : currentPredicted;
+
             const newDealDetails = {
                 ...customer?.deal_details,
-                revenue: currentPredicted + amount, // Optional: Increase forecast or keep same? User said "Revenue (Total) increases".
-                actual_revenue: currentActual + amount // Increase actual revenue -> Pending Deposit increases
+                revenue: newPredictedRevenue,
+                actual_revenue: newActualRevenue
             };
 
             await updateCustomerField({ deal_details: newDealDetails as any });
@@ -536,9 +544,10 @@ const CustomerDetail: React.FC = () => {
 
             setTransactions(prev => [data as Transaction, ...prev]);
             setShowDealerDebtModal(false);
-            setDealerDebtForm({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền' });
-            handleAddNote('note', `Tạo khoản Đại lý nợ: ${formatCurrency(amount)} VNĐ. Dự kiến thu: ${new Date(dealerDebtForm.targetDate).toLocaleDateString('vi-VN')}`);
-            showToast("Đã tạo khoản nợ! Doanh thu thực tế đã tăng.");
+            setDealerDebtForm({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền', isNewDebt: true });
+            const debtType = dealerDebtForm.isNewDebt ? 'Nợ mới (cộng DT thực tế)' : 'Từ DT đã báo';
+            handleAddNote('note', `Tạo khoản Đại lý nợ: ${formatCurrency(amount)} VNĐ. Loại: ${debtType}. Dự kiến thu: ${new Date(dealerDebtForm.targetDate).toLocaleDateString('vi-VN')}`);
+            showToast(dealerDebtForm.isNewDebt ? "Đã tạo khoản nợ! Doanh thu thực tế đã tăng." : "Đã tạo khoản nợ! (Không cộng thêm DT)");
         } catch (e) { showToast("Lỗi tạo khoản nợ", 'error'); }
     };
 
@@ -595,16 +604,23 @@ const CustomerDetail: React.FC = () => {
     const totalIncurredExpenses = transactions.filter(t => t.type === 'incurred_expense' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
     const rawActualRevenue = customer?.deal_details?.actual_revenue || 0;
     const moneyInTotal = rawActualRevenue - totalIncurredExpenses;
-    const totalDeposited = transactions.filter(t => (t.type === 'deposit' || t.type === 'repayment') && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
+    // FIXED: totalDeposited only counts 'deposit' (revenue deposited to fund)
+    // 'repayment' is separate - it only reduces outstandingAdvance, not pendingDeposit
+    const totalDeposited = transactions.filter(t => t.type === 'deposit' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
 
-    // Pending Deposit = Total Actual Money - Total Money Deposited
-    const pendingDeposit = Math.max(0, moneyInTotal - totalDeposited);
+    // Calculate expense (chi ra) - no repayment, reduces what's owed to fund
+    const totalPureExpense = transactions.filter(t => t.type === 'expense' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
+
+    // FIXED: Pending Deposit = Total Actual Money - Deposited - Pure Expense
+    // Expense reduces the fund debt because it's money spent that won't be repaid
+    const pendingDeposit = Math.max(0, moneyInTotal - totalDeposited - totalPureExpense);
 
     const refundableAdvances = transactions.filter(t => t.type === 'advance' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
     const repayments = transactions.filter(t => t.type === 'repayment' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
     const outstandingAdvance = Math.max(0, refundableAdvances - repayments);
     const pendingRepaymentExists = transactions.some(t => t.type === 'repayment' && t.status === 'pending');
-    const totalExpense = transactions.filter(t => (t.type === 'expense' || t.type === 'advance') && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
+    // totalExpense for display = expense + outstanding advance (unpaid advances)
+    const totalExpense = totalPureExpense + outstandingAdvance;
     const netRevenue = totalDeposited - totalExpense;
     const callCount = useMemo(() => interactions.filter(i => i.type === 'call').length, [interactions]);
     const messageCount = useMemo(() => interactions.filter(i => ['zalo', 'email', 'message'].includes(i.type) || i.content.toLowerCase().includes('zalo') || i.content.toLowerCase().includes('nhắn tin')).length, [interactions]);
@@ -1114,6 +1130,24 @@ const CustomerDetail: React.FC = () => {
                             <button onClick={() => setShowDealerDebtModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                         </div>
                         <div className="space-y-4">
+                            {/* Debt Type Selection */}
+                            <div className="space-y-2">
+                                <label className="block text-sm font-bold text-gray-700 mb-2">Loại khoản nợ</label>
+                                <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${dealerDebtForm.isNewDebt ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                                    <input type="radio" name="debtType" checked={dealerDebtForm.isNewDebt === true} onChange={() => setDealerDebtForm({ ...dealerDebtForm, isNewDebt: true })} className="mt-1 accent-green-600" />
+                                    <div>
+                                        <p className="font-bold text-gray-900 text-sm">Khoản nợ mới</p>
+                                        <p className="text-xs text-gray-500">Cộng thêm vào doanh thu thực tế tổng</p>
+                                    </div>
+                                </label>
+                                <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${dealerDebtForm.isNewDebt === false ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                                    <input type="radio" name="debtType" checked={dealerDebtForm.isNewDebt === false} onChange={() => setDealerDebtForm({ ...dealerDebtForm, isNewDebt: false })} className="mt-1 accent-orange-600" />
+                                    <div>
+                                        <p className="font-bold text-gray-900 text-sm">Nợ từ doanh thu đã báo</p>
+                                        <p className="text-xs text-gray-500">Đã nằm trong DT thực tế, không cộng thêm</p>
+                                    </div>
+                                </label>
+                            </div>
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
                                 <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={dealerDebtForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealerDebtForm({ ...dealerDebtForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />

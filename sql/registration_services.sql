@@ -1,0 +1,137 @@
+-- ================================================
+-- BẢNG GIÁ DỊCH VỤ ĐĂNG KÝ 2025
+-- RUN THIS IN SUPABASE SQL EDITOR
+-- ================================================
+
+-- 1. Create table
+CREATE TABLE IF NOT EXISTS public.registration_services (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    label text NOT NULL,
+    value numeric NOT NULL DEFAULT 0,
+    is_active boolean DEFAULT true,
+    priority integer DEFAULT 0,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+-- 2. Enable RLS
+ALTER TABLE public.registration_services ENABLE ROW LEVEL SECURITY;
+
+-- 3. RLS Policies (drop if exists to avoid conflicts)
+DROP POLICY IF EXISTS "Authenticated users can read registration_services" ON public.registration_services;
+DROP POLICY IF EXISTS "Admin can manage registration_services" ON public.registration_services;
+
+CREATE POLICY "Authenticated users can read registration_services" ON public.registration_services
+    FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "Admin can manage registration_services" ON public.registration_services
+    FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- 4. Insert existing data (108 services)
+INSERT INTO public.registration_services (label, value, priority) VALUES
+    ('[Hà Nội] VNEID TOÀN TRÌNH', 3000000, 1),
+    ('[Hà Nội] VNEID - TRUYỀN THỐNG', 3000000, 2),
+    ('[Hà Nội] PHÍ CÀ VẸT NHANH', 1500000, 3),
+    ('[HCM] VNEID TOÀN TRÌNH - KHÔNG XE', 3000000, 4),
+    ('[HCM] VNEID - TRUYỀN THỐNG (KHÔNG XE)', 3000000, 5),
+    ('[HCM] PHÍ CÀ VẸT NHANH', 1500000, 6),
+    ('[Bình Dương] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3000000, 7),
+    ('[Bình Dương] VNEID - TRUYỀN THỐNG (CÓ XE)', 3100000, 8),
+    ('[Bình Dương] PHÍ CÀ VẸT NHANH', 1500000, 9),
+    ('[Đồng Nai] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3200000, 10),
+    ('[Đồng Nai] VNEID - TRUYỀN THỐNG (CÓ XE)', 3400000, 11),
+    ('[Đồng Nai] PHÍ CÀ VẸT NHANH', 1500000, 12),
+    ('[Bình Phước] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3700000, 13),
+    ('[Bình Phước] VNEID - TRUYỀN THỐNG (CÓ XE)', 3900000, 14),
+    ('[Bình Phước] PHÍ CÀ VẸT NHANH', 1500000, 15),
+    ('[Vũng Tàu] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3700000, 16),
+    ('[Vũng Tàu] VNEID - TRUYỀN THỐNG (CÓ XE)', 3900000, 17),
+    ('[Vũng Tàu] PHÍ CÀ VẸT NHANH', 1500000, 18),
+    ('[Tây Ninh] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3500000, 19),
+    ('[Tây Ninh] VNEID - TRUYỀN THỐNG (CÓ XE)', 3800000, 20),
+    ('[Tây Ninh] PHÍ CÀ VẸT NHANH', 1500000, 21),
+    ('[Đắk Lắk] VNEID - TOÀN TRÌNH (KHÔNG XE)', 5000000, 22),
+    ('[Đắk Lắk] VNEID - TRUYỀN THỐNG (CÓ XE)', 6000000, 23),
+    ('[Đắk Lắk] PHÍ CÀ VẸT NHANH', 1500000, 24),
+    ('[Quy Nhơn] VNEID - TOÀN TRÌNH (KHÔNG XE)', 6000000, 25),
+    ('[Quy Nhơn] VNEID - TRUYỀN THỐNG (CÓ XE)', 6500000, 26),
+    ('[Quy Nhơn] PHÍ CÀ VẸT NHANH', 1500000, 27),
+    ('[Đắk Nông] VNEID - TOÀN TRÌNH (KHÔNG XE)', 6500000, 28),
+    ('[Đắk Nông] VNEID - TRUYỀN THỐNG (CÓ XE)', 6800000, 29),
+    ('[Đắk Nông] PHÍ CÀ VẸT NHANH', 1000000, 30),
+    ('[Gia Lai] VNEID - TOÀN TRÌNH (KHÔNG XE)', 6500000, 31),
+    ('[Gia Lai] VNEID - TRUYỀN THỐNG (CÓ XE)', 7500000, 32),
+    ('[Gia Lai] PHÍ CÀ VẸT NHANH', 1000000, 33),
+    ('[Cần Thơ] VNEID - TOÀN TRÌNH (KHÔNG XE)', 4500000, 34),
+    ('[Cần Thơ] VNEID - TRUYỀN THỐNG (CÓ XE)', 4800000, 35),
+    ('[Cần Thơ] PHÍ CÀ VẸT NHANH', 1000000, 36),
+    ('[Kom Tum] VNEID - TOÀN TRÌNH (KHÔNG XE)', 7000000, 37),
+    ('[Kom Tum] VNEID - TRUYỀN THỐNG (CÓ XE)', 8000000, 38),
+    ('[Lâm Đồng] VNEID - TOÀN TRÌNH (KHÔNG XE)', 5200000, 39),
+    ('[Lâm Đồng] VNEID - TRUYỀN THỐNG (CÓ XE)', 5700000, 40),
+    ('[Lâm Đồng] PHÍ CÀ VẸT NHANH', 1500000, 41),
+    ('[An Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', 4500000, 42),
+    ('[An Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', 4800000, 43),
+    ('[An Giang] PHÍ CÀ VẸT NHANH', 1500000, 44),
+    ('[Bạc Liêu] VNEID - TOÀN TRÌNH (KHÔNG XE)', 5000000, 45),
+    ('[Bạc Liêu] VNEID - TRUYỀN THỐNG (CÓ XE)', 5300000, 46),
+    ('[Bạc Liêu] PHÍ CÀ VẸT NHANH', 1500000, 47),
+    ('[Bến Tre] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3700000, 48),
+    ('[Bến Tre] VNEID - TRUYỀN THỐNG (CÓ XE)', 3800000, 49),
+    ('[Bến Tre] PHÍ CÀ VẸT NHANH', 1500000, 50),
+    ('[Cà Mau] VNEID - TOÀN TRÌNH (KHÔNG XE)', 5000000, 51),
+    ('[Cà Mau] VNEID - TRUYỀN THỐNG (CÓ XE)', 5500000, 52),
+    ('[Cà Mau] PHÍ CÀ VẼT NHANH', 1500000, 53),
+    ('[Long An] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3500000, 54),
+    ('[Long An] VNEID - TRUYỀN THỐNG (CÓ XE)', 3800000, 55),
+    ('[Long An] PHÍ CÀ VẸT NHANH', 1500000, 56),
+    ('[Sóc Trăng] VNEID - TOÀN TRÌNH (KHÔNG XE)', 4500000, 57),
+    ('[Sóc Trăng] VNEID - TRUYỀN THỐNG (CÓ XE)', 4800000, 58),
+    ('[Sóc Trăng] PHÍ CÀ VẸT NHANH', 1500000, 59),
+    ('[Quảng Trị] VNEID - TOÀN TRÌNH (KHÔNG XE)', 9000000, 60),
+    ('[Quảng Trị] VNEID - TRUYỀN THỐNG (CÓ XE)', 9000000, 61),
+    ('[Quảng Trị] PHÍ CÀ VẸT NHANH', 1500000, 62),
+    ('[Tiền Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3500000, 63),
+    ('[Tiền Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', 3800000, 64),
+    ('[Tiền Giang] PHÍ CÀ VẸT NHANH', 1500000, 65),
+    ('[Vĩnh Long] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3800000, 66),
+    ('[Vĩnh Long] VNEID - TRUYỀN THỐNG (CÓ XE)', 4100000, 67),
+    ('[Vĩnh Long] PHÍ CÀ VẸT NHANH', 1500000, 68),
+    ('[Bình Thuận] VNEID - TOÀN TRÌNH (KHÔNG XE)', 5000000, 69),
+    ('[Bình Thuận] VNEID - TRUYỀN THỐNG (CÓ XE)', 5200000, 70),
+    ('[Bình Thuận] PHÍ CÀ VẸT NHANH', 1500000, 71),
+    ('[Đà Nẵng] VNEID - TOÀN TRÌNH (KHÔNG XE)', 11000000, 72),
+    ('[Đà Nẵng] VNEID - TRUYỀN THỐNG (CÓ XE)', 11000000, 73),
+    ('[Đà Nẵng] PHÍ CÀ VẸT NHANH', 1500000, 74),
+    ('[Nha Trang] VNEID - TOÀN TRÌNH (KHÔNG XE)', 6200000, 75),
+    ('[Nha Trang] VNEID - TRUYỀN THỐNG (CÓ XE)', 7500000, 76),
+    ('[Nha Trang] PHÍ CÀ VẸT NHANH', 1500000, 77),
+    ('[Ninh Thuận] VNEID - TOÀN TRÌNH (KHÔNG XE)', 5700000, 78),
+    ('[Ninh Thuận] VNEID - TRUYỀN THỐNG (CÓ XE)', 6200000, 79),
+    ('[Ninh Thuận] PHÍ CÀ VẸT NHANH', 1500000, 80),
+    ('[Phú Yên] VNEID - TOÀN TRÌNH (KHÔNG XE)', 9000000, 81),
+    ('[Phú Yên] VNEID - TRUYỀN THỐNG (CÓ XE)', 9000000, 82),
+    ('[Phú Yên] PHÍ CÀ VẸT NHANH', 1500000, 83),
+    ('[Quảng Nam] VNEID - TOÀN TRÌNH (KHÔNG XE)', 11000000, 84),
+    ('[Quảng Nam] VNEID - TRUYỀN THỐNG (CÓ XE)', 11000000, 85),
+    ('[Quảng Nam] PHÍ CÀ VẸT NHANH', 1500000, 86),
+    ('[Quảng Ngãi] VNEID - TOÀN TRÌNH (KHÔNG XE)', 11000000, 87),
+    ('[Quảng Ngãi] VNEID - TRUYỀN THỐNG (CÓ XE)', 11000000, 88),
+    ('[Quảng Ngãi] PHÍ CÀ VẸT NHANH', 1500000, 89),
+    ('[Kiên Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', 5000000, 90),
+    ('[Kiên Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', 5300000, 91),
+    ('[Kiên Giang] PHÍ CÀ VẸT NHANH', 1500000, 92),
+    ('[Đồng Tháp] VNEID - TOÀN TRÌNH (KHÔNG XE)', 3800000, 93),
+    ('[Đồng Tháp] VNEID - TRUYỀN THỐNG (CÓ XE)', 4000000, 94),
+    ('[Đồng Tháp] PHÍ CÀ VẸT NHANH', 1500000, 95),
+    ('[Hà Tĩnh] VNEID - TOÀN TRÌNH (KHÔNG XE)', 11000000, 96),
+    ('[Hà Tĩnh] VNEID - TRUYỀN THỐNG (CÓ XE)', 11000000, 97),
+    ('[Hà Tĩnh] PHÍ CÀ VẸT NHANH', 1500000, 98),
+    ('[Hậu Giang] VNEID - TOÀN TRÌNH (KHÔNG XE)', 4500000, 99),
+    ('[Hậu Giang] VNEID - TRUYỀN THỐNG (CÓ XE)', 4800000, 100),
+    ('[Hậu Giang] PHÍ CÀ VẸT NHANH', 1500000, 101),
+    ('[Trà Vinh] VNEID - TOÀN TRÌNH (KHÔNG XE)', 4500000, 102),
+    ('[Trà Vinh] VNEID - TRUYỀN THỐNG (CÓ XE)', 4800000, 103),
+    ('[Trà Vinh] PHÍ CÀ VẸT NHANH', 1500000, 104),
+    ('[Huế] VNEID - TOÀN TRÌNH (KHÔNG XE)', 12000000, 105),
+    ('[Huế] VNEID - TRUYỀN THỐNG (CÓ XE)', 12000000, 106),
+    ('[Huế] PHÍ CÀ VẸT NHANH', 1500000, 107);

@@ -143,9 +143,9 @@ const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
             )}
 
             {/* Trigger Button */}
-            <button
+            <div
                 onClick={() => setIsOpen(!isOpen)}
-                className={`relative z-50 flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-all text-sm font-medium min-w-[160px]
+                className={`relative z-50 flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-all text-sm font-medium min-w-[160px] cursor-pointer selection:bg-none
                     ${hasValue
                         ? 'bg-primary-50 border-primary-300 text-primary-700'
                         : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
@@ -166,7 +166,7 @@ const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                 ) : (
                     <ChevronDown size={16} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                 )}
-            </button>
+            </div>
 
             {/* Dropdown Panel */}
             {isOpen && (

@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { CarModel, CarVersion, QuoteConfig, BankConfig, QuoteConfigOption, BankPackage, Distributor, DemoCar, UserProfile } from '../types';
+import { CarModel, CarVersion, QuoteConfig, BankConfig, QuoteConfigOption, BankPackage, Distributor, DemoCar, UserProfile, RegistrationService } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, Trash2, Edit2, X, MapPin, Building2, Loader2, Copy, Terminal, Database, Car, Settings, CheckCircle2, AlertTriangle, Key, ChevronDown, Percent, Landmark, Wallet, Layers, Gift, Crown, ShieldCheck, Coins, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -38,7 +38,7 @@ const Configuration: React.FC = () => {
     const { userProfile, isAdmin, isMod } = useAuth();
     const navigate = useNavigate();
     // Enhanced tabs
-    const [activeTab, setActiveTab] = useState<'distributors' | 'cars' | 'versions' | 'promos' | 'fees' | 'banks' | 'demo_cars' | 'gifts' | 'membership' | 'warranties' | 'system'>('distributors');
+    const [activeTab, setActiveTab] = useState<'distributors' | 'cars' | 'versions' | 'promos' | 'fees' | 'banks' | 'demo_cars' | 'gifts' | 'membership' | 'warranties' | 'regservices' | 'system'>('distributors');
 
     const [distributors, setDistributors] = useState<Distributor[]>([]);
     const [carModels, setCarModels] = useState<CarModel[]>([]);
@@ -48,6 +48,7 @@ const Configuration: React.FC = () => {
     const [demoCars, setDemoCars] = useState<DemoCar[]>([]);
     const [profiles, setProfiles] = useState<UserProfile[]>([]);
     const [allManagers, setAllManagers] = useState<{ id: string, name: string }[]>([]);
+    const [regServices, setRegServices] = useState<RegistrationService[]>([]);
 
     const [loading, setLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -184,6 +185,10 @@ const Configuration: React.FC = () => {
                 const { data, error } = await getQuery('demo_cars');
                 if (error) throw error;
                 setDemoCars(data as DemoCar[]);
+            } else if (activeTab === 'regservices') {
+                const { data, error } = await supabase.from('registration_services').select('*').eq('is_active', true).order('priority', { ascending: true });
+                if (error) throw error;
+                setRegServices(data as RegistrationService[]);
             }
         } catch (err: any) {
             console.error("Error fetching data:", err);
@@ -292,7 +297,11 @@ const Configuration: React.FC = () => {
 
             if (activeTab === 'distributors') table = 'distributors';
             else if (activeTab === 'cars') { table = 'car_models'; }
-            else if (activeTab === 'versions') { table = 'car_versions'; payload.price = Number(String(payload.price).replace(/\D/g, '')); }
+            else if (activeTab === 'versions') {
+                table = 'car_versions';
+                payload.price = Number(String(payload.price).replace(/\D/g, ''));
+                payload.premium_color_amount = Number(String(payload.premium_color_amount || 0).replace(/\D/g, ''));
+            }
             else if (activeTab === 'promos') {
                 table = 'quote_configs';
                 payload.type = 'promotion';
@@ -371,6 +380,12 @@ const Configuration: React.FC = () => {
                 payload.max_loan_ratio = Number(payload.max_loan_ratio);
             }
             else if (activeTab === 'demo_cars') { table = 'demo_cars'; payload.price = Number(String(payload.price).replace(/\D/g, '')); }
+            else if (activeTab === 'regservices') {
+                table = 'registration_services';
+                payload.value = Number(String(payload.value).replace(/\D/g, ''));
+                payload.priority = Number(payload.priority || 0);
+                payload.is_active = true;
+            }
 
             if (formData.id) {
                 const { error } = await supabase.from(table).update(payload).eq('id', formData.id);
@@ -497,6 +512,9 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                 </button>
                 <button onClick={() => setActiveTab('demo_cars')} className={`px-4 py-3 font-bold text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === 'demo_cars' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                     <Key size={18} /> Xe Demo
+                </button>
+                <button onClick={() => setActiveTab('regservices')} className={`px-4 py-3 font-bold text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === 'regservices' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                    <MapPin size={18} /> Dịch vụ ĐK
                 </button>
                 {isAdmin && (
                     <button onClick={() => setActiveTab('system')} className={`px-4 py-3 font-bold text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === 'system' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
@@ -763,6 +781,24 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                         );
                     })}
 
+                    {activeTab === 'regservices' && regServices.map(svc => (
+                        <div key={svc.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 group hover:shadow-md transition-all">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3 flex-1">
+                                    <div className="bg-emerald-50 p-2 rounded-lg"><MapPin size={18} className="text-emerald-600" /></div>
+                                    <div className="flex-1">
+                                        <h3 className="font-bold text-gray-900 text-sm">{svc.label}</h3>
+                                        <p className="text-sm text-emerald-600 font-bold">{svc.value?.toLocaleString('vi-VN')} VNĐ</p>
+                                    </div>
+                                </div>
+                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => handleOpenModal(svc)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 size={16} /></button>
+                                    <button onClick={() => handleDeleteClick(svc, 'registration_services')} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+
                     {activeTab === 'system' && isAdmin && (
                         <div className="col-span-1 md:col-span-2 lg:col-span-3">
                             <SystemSettingsPanel />
@@ -793,6 +829,17 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                                 <>
                                     <div><label className="block text-sm font-bold text-gray-700 mb-1">Dòng xe</label><select required value={formData.model_id || ''} onChange={e => setFormData({ ...formData, model_id: e.target.value })} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none"><option value="">-- Chọn --</option>{carModels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                                     <div><label className="block text-sm font-bold text-gray-700 mb-1">Giá niêm yết</label><input required type="text" value={formData.price ? Number(formData.price).toLocaleString() : ''} onChange={e => setFormData({ ...formData, price: e.target.value.replace(/\D/g, '') })} className="w-full border border-gray-300 rounded-xl px-3 py-2 font-bold text-gray-900 outline-none" /></div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">Giá màu nâng cao (VNĐ)</label>
+                                        <input
+                                            type="text"
+                                            value={formData.premium_color_amount ? Number(formData.premium_color_amount).toLocaleString() : ''}
+                                            onChange={e => setFormData({ ...formData, premium_color_amount: e.target.value.replace(/\D/g, '') })}
+                                            className="w-full border border-gray-300 rounded-xl px-3 py-2 font-bold text-orange-600 outline-none"
+                                            placeholder="VD: 8.000.000"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Để trống hoặc 0 nếu không có màu nâng cao</p>
+                                    </div>
                                 </>
                             )}
 
@@ -981,6 +1028,43 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                                         <p className="text-xs text-gray-500 mt-1">Để trống = Tất cả dòng xe</p>
                                     </div>
                                     <div className="flex items-center gap-2 mt-2"><input type="checkbox" checked={formData.is_active !== false} onChange={e => setFormData({ ...formData, is_active: e.target.checked })} className="w-4 h-4" /><label className="text-sm">Đang kích hoạt</label></div>
+                                </>
+                            )}
+
+                            {activeTab === 'regservices' && (
+                                <>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">Tên dịch vụ</label>
+                                        <input
+                                            required
+                                            type="text"
+                                            value={formData.label || ''}
+                                            onChange={e => setFormData({ ...formData, label: e.target.value })}
+                                            className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none"
+                                            placeholder="VD: [Hà Nội] VNEID TOÀN TRÌNH"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">Giá dịch vụ (VNĐ)</label>
+                                        <input
+                                            required
+                                            type="text"
+                                            value={formData.value ? Number(formData.value).toLocaleString() : ''}
+                                            onChange={e => setFormData({ ...formData, value: e.target.value.replace(/\D/g, '') })}
+                                            className="w-full border border-gray-300 rounded-xl px-3 py-2 font-bold text-emerald-600 outline-none"
+                                            placeholder="VD: 3.000.000"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">Thứ tự ưu tiên</label>
+                                        <input
+                                            type="number"
+                                            value={formData.priority || 0}
+                                            onChange={e => setFormData({ ...formData, priority: parseInt(e.target.value) })}
+                                            className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Số nhỏ hơn = hiển thị trước</p>
+                                    </div>
                                 </>
                             )}
 

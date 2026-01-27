@@ -17,8 +17,8 @@ const getFullLunarDetails = (date: Date) => {
     const canChiDay = getCanChiDay(dd, mm, yyyy);
 
     return {
-        solarDate: `${dd}/${mm}/${yyyy}`,
-        lunarDateStr: `${lunar.day}/${lunar.month}`,
+        solarDate: `${String(dd).padStart(2, '0')}/${String(mm).padStart(2, '0')}/${yyyy}`,
+        lunarDateStr: `${String(lunar.day).padStart(2, '0')}/${String(lunar.month).padStart(2, '0')}${lunar.leap ? ' (Nhuận)' : ''}`,
         lunarYearCanChi: canChiYear,
         lunarMonthCanChi: `Tháng ${lunar.month} (${canChiMonth})`,
         lunarDayCanChi: canChiDay,
@@ -56,7 +56,7 @@ const LunarCalendar: React.FC = () => {
             const lunar = getLunarDate(d, m, y);
             const canChiY = getCanChiYear(y);
             setConvertedLunar({
-                str: `${lunar.day}/${lunar.month}/${lunar.year}`,
+                str: `${String(lunar.day).padStart(2, '0')}/${String(lunar.month).padStart(2, '0')}/${lunar.year}${lunar.leap ? ' (Nhuận)' : ''}`,
                 canChi: canChiY
             });
         }

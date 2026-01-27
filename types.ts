@@ -41,7 +41,17 @@ export interface CarVersion {
   model_id: string;
   name: string; // e.g. "Plus", "Eco"
   price: number; // Giá niêm yết
+  premium_color_amount?: number; // Số tiền màu nâng cao
   manager_id?: string;
+}
+
+// NEW: Registration Service (Dịch vụ đăng ký xe)
+export interface RegistrationService {
+  id: string;
+  label: string;
+  value: number;
+  is_active?: boolean;
+  priority?: number;
 }
 
 // NEW: Fee Options & VinPoint Mapping

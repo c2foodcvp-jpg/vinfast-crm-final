@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Upload, Save, Loader2, Image as ImageIcon, AlertCircle, CheckCircle2, LayoutTemplate, LogIn } from 'lucide-react';
+import { Upload, Save, Loader2, Image as ImageIcon, AlertCircle, CheckCircle2, LayoutTemplate, LogIn, RefreshCw, Bell } from 'lucide-react';
 
 type LogoType = 'favicon' | 'login' | 'menu';
 
@@ -18,6 +18,8 @@ const SystemSettingsPanel: React.FC = () => {
     const [uploading, setUploading] = useState<Record<string, boolean>>({});
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+    const [forceUpdate, setForceUpdate] = useState(false);
+    const [forceUpdateSaving, setForceUpdateSaving] = useState(false);
 
     useEffect(() => {
         fetchSettings();
@@ -25,13 +27,14 @@ const SystemSettingsPanel: React.FC = () => {
 
     const fetchSettings = async () => {
         try {
-            const { data } = await supabase.from('app_settings').select('key, value').in('key', ['system_favicon', 'system_logo_login', 'system_logo_menu']);
+            const { data } = await supabase.from('app_settings').select('key, value').in('key', ['system_favicon', 'system_logo_login', 'system_logo_menu', 'force_update']);
 
             const newSettings = { ...settings };
             data?.forEach(item => {
                 if (item.key === 'system_favicon') newSettings.favicon = item.value;
                 if (item.key === 'system_logo_login') newSettings.loginLogo = item.value;
                 if (item.key === 'system_logo_menu') newSettings.menuLogo = item.value;
+                if (item.key === 'force_update') setForceUpdate(item.value === 'true' || item.value === true);
             });
             setSettings(newSettings);
         } catch (error) {
@@ -208,6 +211,65 @@ with check ( bucket_id = 'system-assets' );
                         {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
                         Lưu Thay Đổi
                     </button>
+                </div>
+            </div>
+
+            {/* Force Update Section */}
+            <div className="mt-8 pt-6 border-t border-gray-200">
+                <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <Bell className="text-orange-500" /> Thông báo Bắt buộc Cập nhật
+                </h3>
+
+                <div className={`p-5 rounded-2xl border-2 ${forceUpdate ? 'bg-orange-50 border-orange-300' : 'bg-gray-50 border-gray-200'}`}>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="font-bold text-gray-900">
+                                {forceUpdate ? '🔴 Đang bật thông báo' : '⚪ Thông báo đang tắt'}
+                            </p>
+                            <p className="text-sm text-gray-500 mt-1">
+                                {forceUpdate
+                                    ? 'Tất cả user sẽ thấy popup bắt buộc cập nhật khi mở app'
+                                    : 'User có thể sử dụng bình thường'}
+                            </p>
+                        </div>
+                        <button
+                            onClick={async () => {
+                                setForceUpdateSaving(true);
+                                const newValue = !forceUpdate;
+                                try {
+                                    const { error } = await supabase
+                                        .from('app_settings')
+                                        .upsert({ key: 'force_update', value: newValue.toString() }, { onConflict: 'key' });
+                                    if (error) throw error;
+                                    setForceUpdate(newValue);
+                                    setMsg({ type: 'success', text: newValue ? 'Đã BẬT thông báo cập nhật!' : 'Đã TẮT thông báo cập nhật' });
+                                } catch (e: any) {
+                                    setMsg({ type: 'error', text: 'Lỗi: ' + e.message });
+                                } finally {
+                                    setForceUpdateSaving(false);
+                                }
+                            }}
+                            disabled={forceUpdateSaving}
+                            className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${forceUpdate
+                                    ? 'bg-gray-600 hover:bg-gray-700 text-white'
+                                    : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-200'
+                                } disabled:opacity-50`}
+                        >
+                            {forceUpdateSaving ? (
+                                <Loader2 size={18} className="animate-spin" />
+                            ) : (
+                                <RefreshCw size={18} />
+                            )}
+                            {forceUpdate ? 'Tắt thông báo' : 'Bật thông báo'}
+                        </button>
+                    </div>
+
+                    {forceUpdate && (
+                        <div className="mt-4 p-3 bg-orange-100 rounded-xl text-sm text-orange-800">
+                            <strong>⚠️ Lưu ý:</strong> User sẽ không thể sử dụng app cho đến khi nhấn "Đồng ý" (reload trang).
+                            Sau khi deploy xong phiên bản mới, hãy TẮT thông báo này.
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

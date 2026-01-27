@@ -46,12 +46,19 @@ const LeadsQueue: React.FC = () => {
             setLeads(leadData as Customer[]);
 
             // 2. Fetch Active Employees for Assignment
-            const { data: empData } = await supabase
+            // Admin sees all, MOD only sees their team members
+            let empQuery = supabase
                 .from('profiles')
                 .select('*')
                 .eq('status', 'active')
                 .order('full_name');
 
+            // MOD only sees their team (manager_id = their own id)
+            if (isMod && !isAdmin && userProfile?.id) {
+                empQuery = empQuery.eq('manager_id', userProfile.id);
+            }
+
+            const { data: empData } = await empQuery;
             if (empData) setEmployees(empData as UserProfile[]);
 
         } catch (e) {

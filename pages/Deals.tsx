@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, DealStatus, UserRole, UserProfile } from '../types';
+import { Customer, CustomerStatus, DealStatus, UserRole, UserProfile, Distributor, Transaction } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { exportToExcel } from '../utils/excelExport';
@@ -26,7 +26,10 @@ import {
     Edit,
     Download,
     ChevronLeft,
-    ChevronRight
+    ChevronRight,
+    Building2,
+    AlertTriangle,
+    Wallet
 } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 12;
@@ -37,6 +40,8 @@ const Deals: React.FC = () => {
     const location = useLocation() as any;
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [employees, setEmployees] = useState<UserProfile[]>([]);
+    const [distributors, setDistributors] = useState<Distributor[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loading, setLoading] = useState(true);
 
     // States initialized with default values
@@ -47,6 +52,7 @@ const Deals: React.FC = () => {
     const [selectedTeam, setSelectedTeam] = useState<string>('all');
     const [filterMonth, setFilterMonth] = useState<string>('all');
     const [filterYear, setFilterYear] = useState<number | 'all'>('all');
+    const [selectedDistributor, setSelectedDistributor] = useState<string>('all');
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
@@ -99,7 +105,7 @@ const Deals: React.FC = () => {
     // Reset pagination when filters change
     useEffect(() => {
         setCurrentPage(1);
-    }, [activeTab, searchTerm, sourceFilter, selectedRep, selectedTeam, filterMonth, filterYear]);
+    }, [activeTab, searchTerm, sourceFilter, selectedRep, selectedTeam, filterMonth, filterYear, selectedDistributor]);
 
     useEffect(() => {
         fetchDataWithIsolation();
@@ -165,6 +171,14 @@ const Deals: React.FC = () => {
             });
 
             setCustomers(sortedData);
+
+            // 3. Fetch Distributors
+            const { data: distData } = await supabase.from('distributors').select('*').order('name');
+            if (distData) setDistributors(distData as Distributor[]);
+
+            // 4. Fetch Transactions (for dealer_debt and deposit calculations)
+            const { data: transData } = await supabase.from('transactions').select('*').in('type', ['dealer_debt', 'deposit', 'incurred_expense']);
+            if (transData) setTransactions(transData as Transaction[]);
 
         } catch (err) {
             console.warn("Error fetching data:", err);
@@ -281,7 +295,13 @@ const Deals: React.FC = () => {
         }
         // If filterYear is 'all', we don't care about the date, show everything (matchesDate = true)
 
-        return matchesSearch && matchesSource && matchesRep && matchesStatus && matchesTeam && matchesDate;
+        // Distributor Filter
+        let matchesDistributor = true;
+        if (selectedDistributor !== 'all') {
+            matchesDistributor = c.deal_details?.distributor === selectedDistributor;
+        }
+
+        return matchesSearch && matchesSource && matchesRep && matchesStatus && matchesTeam && matchesDate && matchesDistributor;
     });
 
     // PAGINATION LOGIC
@@ -335,6 +355,27 @@ const Deals: React.FC = () => {
             case 'suspended': return <span className="bg-gray-600 text-white px-2 py-1 rounded-md text-xs font-bold">Hồ sơ Treo</span>;
             default: return <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-md text-xs font-bold border border-yellow-200">Đang xử lý</span>;
         }
+    };
+
+    // Format currency helper
+    const formatCurrency = (value: number) => value.toLocaleString('vi-VN');
+
+    // Calculate dealer debt for a specific customer (by customer_id)
+    const getDealerDebtByCustomer = (customerId: string) => {
+        return transactions
+            .filter(t => t.customer_id === customerId && t.type === 'dealer_debt' && !t.reason.includes('(Đã thu)'))
+            .reduce((sum, t) => sum + t.amount, 0);
+    };
+
+    // Calculate sale debt for a customer (collected - incurred - deposited)
+    const getCustomerDebt = (customerId: string, actualRevenue: number) => {
+        const incurred = transactions
+            .filter(t => t.customer_id === customerId && t.type === 'incurred_expense' && t.status === 'approved')
+            .reduce((sum, t) => sum + t.amount, 0);
+        const deposited = transactions
+            .filter(t => t.customer_id === customerId && t.type === 'deposit' && t.status === 'approved')
+            .reduce((sum, t) => sum + t.amount, 0);
+        return Math.max(0, (actualRevenue - incurred) - deposited);
     };
 
     if (loading) return <div className="p-8 text-center text-gray-500">Đang tải danh sách...</div>;
@@ -422,6 +463,21 @@ const Deals: React.FC = () => {
                             <option value="other">Nguồn Khác</option>
                         </select>
                         <Filter size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+
+                    {/* Distributor Filter */}
+                    <div className="relative h-10">
+                        <select
+                            value={selectedDistributor}
+                            onChange={(e) => setSelectedDistributor(e.target.value)}
+                            className="appearance-none bg-orange-50 border border-orange-200 text-orange-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 text-sm font-bold shadow-sm cursor-pointer h-full"
+                        >
+                            <option value="all">Tất cả đại lý</option>
+                            {distributors.map(d => (
+                                <option key={d.id} value={d.name}>{d.name}</option>
+                            ))}
+                        </select>
+                        <Building2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-orange-400 pointer-events-none" />
                     </div>
 
                     {/* EXPORT BUTTON - Only for Admin/Mod */}
@@ -567,6 +623,34 @@ const Deals: React.FC = () => {
                                             <span className="text-gray-500 text-xs">Nguồn:</span>
                                             <span className="font-bold text-gray-700">{c.source || 'N/A'}</span>
                                         </div>
+                                        {/* Distributor */}
+                                        <div className="flex items-center gap-2">
+                                            <Building2 size={12} className="text-orange-500" />
+                                            <span className="text-xs text-orange-600 font-bold">{c.deal_details?.distributor || 'N/A'}</span>
+                                            {/* Dealer Debt Badge - Now based on customer_id */}
+                                            {(() => {
+                                                const dealerDebt = getDealerDebtByCustomer(c.id);
+                                                return dealerDebt > 0 ? (
+                                                    <span className="bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5 rounded-md font-bold flex items-center gap-1 animate-pulse">
+                                                        <AlertTriangle size={10} /> Nợ: {formatCurrency(dealerDebt)}
+                                                    </span>
+                                                ) : null;
+                                            })()}
+                                        </div>
+                                        {/* Sale Debt to Fund */}
+                                        {(() => {
+                                            const actualRev = c.deal_details?.actual_revenue || 0;
+                                            if (actualRev > 0) {
+                                                const saleDebt = getCustomerDebt(c.id, actualRev);
+                                                return saleDebt > 0 ? (
+                                                    <div className="flex items-center gap-2 bg-yellow-50 px-2 py-1 rounded-lg border border-yellow-200">
+                                                        <Wallet size={12} className="text-yellow-600" />
+                                                        <span className="text-[11px] text-yellow-700 font-bold">Nợ quỹ: {formatCurrency(saleDebt)} VNĐ</span>
+                                                    </div>
+                                                ) : null;
+                                            }
+                                            return null;
+                                        })()}
                                         {(isAdmin || isMod) && c.sales_rep && (
                                             <div className="flex items-center gap-2 mt-1 pt-1 border-t border-gray-50">
                                                 <User size={12} className="text-blue-500" />
