@@ -2,12 +2,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import { Customer, CustomerStatus } from '../types';
+import { Customer, CustomerStatus, MembershipTier } from '../types';
 import { useNavigate } from 'react-router-dom';
 import {
     Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2, Phone, User, Clock,
     Plus, CheckCircle2, Flame, AlertCircle, X, CalendarDays,
-    AlertTriangle, Timer, ListTodo, Flag, Activity, Calendar, Star, Bell, BellRing
+    AlertTriangle, Timer, ListTodo, Flag, Activity, Calendar, Star, Bell, BellRing,
+    Users, UserCircle, Lock
 } from 'lucide-react';
 
 // Task interface
@@ -66,23 +67,64 @@ const CalendarPage: React.FC = () => {
 
     const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
+    // MOD Consultant Mode: Switch between team view and personal view
+    const [isConsultantMode, setIsConsultantMode] = useState(false);
+    const [togglingMode, setTogglingMode] = useState(false);
+
+    // Initialize consultant mode from user profile
+    useEffect(() => {
+        if (userProfile?.is_consultant_mode !== undefined) {
+            setIsConsultantMode(userProfile.is_consultant_mode);
+        }
+    }, [userProfile?.is_consultant_mode]);
+
+    // Toggle consultant mode and save to database
+    const toggleConsultantMode = async () => {
+        if (!userProfile || !isMod || togglingMode) return;
+        setTogglingMode(true);
+        try {
+            const newMode = !isConsultantMode;
+            const { error } = await supabase
+                .from('profiles')
+                .update({ is_consultant_mode: newMode })
+                .eq('id', userProfile.id);
+
+            if (error) throw error;
+            setIsConsultantMode(newMode);
+            // Refetch data with new mode
+            fetchDataWithMode(newMode);
+        } catch (e) {
+            console.error('Error toggling consultant mode:', e);
+            alert('Lỗi khi chuyển chế độ');
+        } finally {
+            setTogglingMode(false);
+        }
+    };
+
     useEffect(() => {
         fetchData();
     }, [userProfile]);
 
-    const fetchData = async () => {
+    const fetchData = async (consultantModeOverride?: boolean) => {
         if (!userProfile) return;
         setLoading(true);
         try {
+            // Determine if consultant mode should be used
+            const useConsultantMode = consultantModeOverride !== undefined
+                ? consultantModeOverride
+                : isConsultantMode;
+
             // --- Fetch Team IDs (Isolation Logic) ---
             let teamIds: string[] = [];
             if (isAdmin) {
                 const { data: profiles } = await supabase.from('profiles').select('id');
                 teamIds = profiles?.map(p => p.id) || [];
-            } else if (isMod) {
+            } else if (isMod && !useConsultantMode) {
+                // MOD in Manager mode: see team
                 const { data: profiles } = await supabase.from('profiles').select('id').or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
                 teamIds = profiles?.map(p => p.id) || [];
             } else {
+                // EMPLOYEE or MOD in Consultant mode: only own customers
                 teamIds = [userProfile.id];
             }
 
@@ -122,6 +164,9 @@ const CalendarPage: React.FC = () => {
             setLoading(false);
         }
     };
+
+    // Helper for toggling mode
+    const fetchDataWithMode = (mode: boolean) => fetchData(mode);
 
     // --- Computed Customer Lists ---
     // CS Đặc biệt - khách có is_special_care = true
@@ -197,11 +242,29 @@ const CalendarPage: React.FC = () => {
         return grid;
     }, [currentDate]);
 
-    const getTasksForDate = (dateStr: string) => {
-        const customerTasks = customers.filter(c => c.recare_date === dateStr);
-        const customTasks = userTasks.filter(t => t.deadline === dateStr);
-        return { customerTasks, customTasks };
-    };
+    const tasksByDate = useMemo(() => {
+        const map: Record<string, { customerTasks: Customer[], customTasks: UserTask[] }> = {};
+
+        // Populate with customers
+        customers.forEach(c => {
+            if (c.recare_date) {
+                if (!map[c.recare_date]) map[c.recare_date] = { customerTasks: [], customTasks: [] };
+                map[c.recare_date].customerTasks.push(c);
+            }
+        });
+
+        // Populate with tasks
+        userTasks.forEach(t => {
+            if (t.deadline) {
+                // deadline is ISO timestamp, we need YYYY-MM-DD
+                const dateStr = t.deadline.split('T')[0];
+                if (!map[dateStr]) map[dateStr] = { customerTasks: [], customTasks: [] };
+                map[dateStr].customTasks.push(t);
+            }
+        });
+
+        return map;
+    }, [customers, userTasks]);
 
     const handleDayClick = (day: number) => {
         const month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
@@ -209,9 +272,27 @@ const CalendarPage: React.FC = () => {
         setSelectedDateStr(`${currentDate.getFullYear()}-${month}-${d}`);
     };
 
+    // --- Permission Check ---
+    const canCreateTask = useMemo(() => {
+        if (!userProfile) return false;
+        // Admin & Mod always allowed
+        if (isAdmin || isMod) return true;
+
+        // Members: Gold/Platinum/Diamond allowed
+        const tier = userProfile.member_tier;
+        return tier === MembershipTier.GOLD || tier === MembershipTier.PLATINUM || tier === MembershipTier.DIAMOND;
+    }, [userProfile, isAdmin, isMod]);
+
     // --- Task Creation ---
     const handleCreateTask = async () => {
         if (!taskForm.title.trim() || !userProfile) return;
+
+        // Permission Gate
+        if (!canCreateTask) {
+            alert('🔒 Tính năng này chỉ dành cho thành viên Gold trở lên!');
+            return;
+        }
+
         setSaving(true);
         try {
             // Combine date + time into TIMESTAMPTZ with Vietnam timezone (GMT+7)
@@ -272,7 +353,10 @@ const CalendarPage: React.FC = () => {
     };
 
     const grid = calendarGrid;
-    const selectedTasks = getTasksForDate(selectedDateStr);
+    // Use optimized lookup
+    const selectedTasks = useMemo(() => {
+        return tasksByDate[selectedDateStr] || { customerTasks: [], customTasks: [] };
+    }, [tasksByDate, selectedDateStr]);
 
     // --- Get Customer Status Display ---
     const getCustomerStatusDisplay = (customer: Customer) => {
@@ -519,11 +603,17 @@ const CalendarPage: React.FC = () => {
                         <div className="flex items-center gap-2">
                             <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">{userTasks.length}</span>
                             <button
-                                onClick={() => setShowTaskModal(true)}
-                                className="p-1.5 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
-                                title="Tạo công việc mới"
+                                onClick={() => {
+                                    if (!canCreateTask) {
+                                        alert('🔒 Tính năng này chỉ dành cho thành viên Gold trở lên!');
+                                        return;
+                                    }
+                                    setShowTaskModal(true);
+                                }}
+                                className={`p-1.5 rounded-lg transition-colors ${!canCreateTask ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-purple-500 text-white hover:bg-purple-600'}`}
+                                title={!canCreateTask ? "Chỉ dành cho thành viên Gold trở lên" : "Tạo công việc mới"}
                             >
-                                <Plus size={14} />
+                                {!canCreateTask ? <Lock size={14} /> : <Plus size={14} />}
                             </button>
                         </div>
                     </div>
@@ -542,7 +632,7 @@ const CalendarPage: React.FC = () => {
 
             {/* CALENDAR MODAL */}
             {showCalendarModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 pl-4 lg:pl-[220px] animate-fade-in">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 pl-4 lg:pl-[220px] animate-fade-in">
                     <div className="bg-white rounded-3xl shadow-2xl w-full max-w-[85vw] xl:max-w-[1200px] h-[90vh] overflow-hidden flex flex-col lg:flex-row border border-gray-100">
                         {/* LEFT: Calendar */}
                         <div className="w-full lg:w-[45%] xl:w-[40%] border-r border-gray-100 flex flex-col bg-white min-w-0">
@@ -573,8 +663,8 @@ const CalendarPage: React.FC = () => {
                                             const cellDateStr = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
                                             const isSelected = cellDateStr === selectedDateStr;
                                             const isToday = cellDateStr === todayStr;
-                                            const { customerTasks, customTasks } = getTasksForDate(cellDateStr);
-                                            const hasItems = customerTasks.length > 0 || customTasks.length > 0;
+                                            const data = tasksByDate[cellDateStr] || { customerTasks: [], customTasks: [] };
+                                            const hasItems = data.customerTasks.length > 0 || data.customTasks.length > 0;
 
                                             return (
                                                 <div
@@ -644,8 +734,18 @@ const CalendarPage: React.FC = () => {
                                         <h4 className="font-bold text-purple-800 text-sm flex items-center gap-2 uppercase tracking-wide">
                                             <ListTodo size={16} /> Ghi chú <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-md text-xs">{selectedTasks.customTasks.length}</span>
                                         </h4>
-                                        <button onClick={() => setShowTaskModal(true)} className="p-1.5 hover:bg-purple-100 text-purple-600 rounded-lg transition-colors" title="Thêm ghi chú">
-                                            <Plus size={16} />
+                                        <button
+                                            onClick={() => {
+                                                if (!canCreateTask) {
+                                                    alert('🔒 Tính năng này chỉ dành cho thành viên Gold trở lên!');
+                                                    return;
+                                                }
+                                                setShowTaskModal(true);
+                                            }}
+                                            className={`p-1.5 rounded-lg transition-colors ${!canCreateTask ? 'text-gray-400 hover:bg-gray-100 cursor-not-allowed' : 'hover:bg-purple-100 text-purple-600'}`}
+                                            title={!canCreateTask ? "Chỉ dành cho thành viên Gold trở lên" : "Thêm ghi chú"}
+                                        >
+                                            {!canCreateTask ? <Lock size={16} /> : <Plus size={16} />}
                                         </button>
                                     </div>
                                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
@@ -867,6 +967,30 @@ const CalendarPage: React.FC = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* MOD CONSULTANT MODE TOGGLE - Floating Button */}
+            {userProfile?.role === 'mod' && (
+                <button
+                    onClick={toggleConsultantMode}
+                    disabled={togglingMode}
+                    className={`fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-2xl shadow-lg font-bold text-sm transition-all duration-300 ${isConsultantMode
+                        ? 'bg-gradient-to-r from-purple-600 to-purple-700 text-white hover:from-purple-700 hover:to-purple-800'
+                        : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-700 hover:to-blue-800'
+                        } ${togglingMode ? 'opacity-60 cursor-wait' : ''}`}
+                    title={isConsultantMode ? 'Đang ở chế độ Tư vấn - Click để chuyển sang Quản lý' : 'Đang ở chế độ Quản lý - Click để chuyển sang Tư vấn'}
+                >
+                    {togglingMode ? (
+                        <Loader2 size={18} className="animate-spin" />
+                    ) : isConsultantMode ? (
+                        <UserCircle size={18} />
+                    ) : (
+                        <Users size={18} />
+                    )}
+                    <span className="hidden sm:inline">
+                        {isConsultantMode ? 'Chế độ Tư vấn' : 'Chế độ Quản lý'}
+                    </span>
+                </button>
             )}
         </div>
     );

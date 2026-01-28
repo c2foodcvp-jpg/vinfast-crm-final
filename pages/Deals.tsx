@@ -29,8 +29,10 @@ import {
     ChevronRight,
     Building2,
     AlertTriangle,
-    Wallet
+    BarChart2
 } from 'lucide-react';
+
+import ProgressMonitorModal from '../components/ProgressMonitorModal';
 
 const ITEMS_PER_PAGE = 15;
 
@@ -56,6 +58,15 @@ const Deals: React.FC = () => {
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
+    const [defaultAvatar, setDefaultAvatar] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchDefaultAvatar = async () => {
+            const { data } = await supabase.from('app_settings').select('value').eq('key', 'default_customer_avatar').single();
+            if (data) setDefaultAvatar(data.value);
+        };
+        fetchDefaultAvatar();
+    }, []);
 
     // Confirmation Modal
     const [confirmAction, setConfirmAction] = useState<{ id: string, type: 'completed' | 'refunded' | 'suspended' } | null>(null);
@@ -63,6 +74,9 @@ const Deals: React.FC = () => {
     // --- NEW: Manual Date Edit Modal State ---
     const [showDateModal, setShowDateModal] = useState(false);
     const [dateForm, setDateForm] = useState<{ id: string, date: string, name: string }>({ id: '', date: '', name: '' });
+
+    // --- NEW: Progress Monitor Modal State ---
+    const [showProgressMonitor, setShowProgressMonitor] = useState(false);
 
     // --- RESTORE STATE LOGIC (SessionStorage) ---
     const [isRestored, setIsRestored] = useState(false); // NEW: Guard flag
@@ -217,7 +231,8 @@ const Deals: React.FC = () => {
             const newDateISO = new Date(dateForm.date + 'T12:00:00').toISOString();
 
             const { error } = await supabase.from('customers').update({
-                updated_at: newDateISO
+                won_at: newDateISO,
+                updated_at: new Date().toISOString() // Also update updated_at to bump sort order
             }).eq('id', dateForm.id);
 
             if (error) throw error;
@@ -277,12 +292,12 @@ const Deals: React.FC = () => {
             matchesStatus = ds === 'suspended' || ds === 'suspended_pending';
         }
 
-        // Date Filter (Month/Year) - Based on Updated At (Closing Date)
+        // Date Filter (Month/Year) - Based on Won At (Closing Date)
         let matchesDate = true;
 
         // Only filter date if Year is NOT 'all'
         if (filterYear !== 'all') {
-            const dateToUse = c.updated_at || c.created_at;
+            const dateToUse = c.won_at || c.updated_at || c.created_at;
             const d = new Date(dateToUse);
             const yearMatch = d.getFullYear() === filterYear;
 
@@ -329,7 +344,7 @@ const Deals: React.FC = () => {
             "Nguồn": c.source || '',
             "TVBH": c.sales_rep || '',
             "Trạng thái": c.deal_status === 'completed' ? 'Hoàn thành' : c.deal_status === 'refunded' ? 'Đã trả cọc' : 'Đang xử lý',
-            "Ngày chốt/CN": new Date(c.updated_at || c.created_at).toLocaleDateString('vi-VN')
+            "Ngày chốt/CN": new Date(c.won_at || c.updated_at || c.created_at).toLocaleDateString('vi-VN')
         }));
 
         const fileName = `Danh_sach_don_hang_${filterMonth}_${filterYear}_${new Date().getTime()}`;
@@ -482,16 +497,38 @@ const Deals: React.FC = () => {
 
                     {/* EXPORT BUTTON - Only for Admin/Mod */}
                     {(isAdmin || isMod) && (
-                        <button
-                            onClick={handleExport}
-                            className="flex items-center gap-2 h-10 px-4 bg-green-600 text-white rounded-xl font-bold shadow-md hover:bg-green-700 transition-colors"
-                            title="Xuất danh sách ra Excel"
-                        >
-                            <Download size={18} /> <span className="hidden sm:inline">Xuất Excel</span>
-                        </button>
+                        <div className='flex gap-2 items-center'>
+                            <button
+                                onClick={() => setShowProgressMonitor(true)}
+                                className="flex items-center gap-2 h-10 px-4 bg-purple-600 text-white rounded-xl font-bold shadow-md hover:bg-purple-700 transition-colors"
+                                title="Kiểm tra tiến độ giao xe"
+                            >
+                                <BarChart2 size={18} /> <span className="hidden sm:inline">Kiểm tra tiến độ</span>
+                            </button>
+                            <button
+                                onClick={handleExport}
+                                className="flex items-center gap-2 h-10 px-4 bg-green-600 text-white rounded-xl font-bold shadow-md hover:bg-green-700 transition-colors"
+                                title="Xuất danh sách ra Excel"
+                            >
+                                <Download size={18} /> <span className="hidden sm:inline">Xuất Excel</span>
+                            </button>
+                        </div>
                     )}
                 </div>
             </div>
+
+            {/* PROGRESS MONITOR MODAL */}
+            {showProgressMonitor && (
+                <ProgressMonitorModal
+                    isOpen={showProgressMonitor}
+                    onClose={() => setShowProgressMonitor(false)}
+                    customers={customers} // List of WON customers
+                    employees={employees}
+                    userProfile={userProfile}
+                    isAdmin={isAdmin}
+                    isMod={isMod}
+                />
+            )}
 
             {/* Search */}
             <div className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100">
@@ -550,8 +587,8 @@ const Deals: React.FC = () => {
                     </div>
                 ) : (
                     paginatedCustomers.map(c => {
-                        const dateToUse = c.updated_at || c.created_at;
-                        const displayDate = new Date(dateToUse).toLocaleDateString('vi-VN');
+                        const dateToUse = c.won_at || c.updated_at || c.created_at;
+
                         const isoDate = new Date(dateToUse).toISOString().split('T')[0];
 
                         return (
@@ -598,17 +635,71 @@ const Deals: React.FC = () => {
                                 )}
 
                                 <div>
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <div className="h-10 w-10 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">
-                                            {c.name.charAt(0).toUpperCase()}
-                                        </div>
+                                    <div className="flex items-center gap-3 mb-3 pr-4"> {/* Added pr-4 to avoid overlap */}
+                                        {defaultAvatar ? (
+                                            <img src={defaultAvatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover bg-green-100 border border-green-200" />
+                                        ) : (
+                                            <div className="h-10 w-10 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">
+                                                {c.name.charAt(0).toUpperCase()}
+                                            </div>
+                                        )}
                                         <div>
                                             <h3 className="font-bold text-gray-900 group-hover:text-primary-600">{c.name}</h3>
                                             <p className="text-xs text-gray-500">{c.phone}</p>
                                         </div>
                                     </div>
 
-                                    <div className="space-y-2 text-sm text-gray-700 mb-3">
+                                    {/* Vertical Progress Bar */}
+                                    {(() => {
+                                        // Calculate Progress
+                                        const DELIVERY_STEPS = [
+                                            { key: 'deposited', condition: () => true },
+                                            { key: 'contract_signed', condition: () => true },
+                                            { key: 'bank_approved', condition: (cust: Customer) => cust.deal_details?.payment_method === 'Ngân hàng' },
+                                            { key: 'payment_invoice', condition: () => true },
+                                            { key: 'invoiced', condition: () => true },
+                                            { key: 'plate_registration', condition: () => true },
+                                            { key: 'accessories_pdi', condition: () => true },
+                                            { key: 'handover', condition: () => true },
+                                            { key: 'collection_return', condition: () => true },
+                                            { key: 'money_recovered', condition: () => true }
+                                        ];
+
+                                        const progressData = c.delivery_progress || {};
+                                        const applicableSteps = DELIVERY_STEPS.filter(step => step.condition(c));
+
+                                        if (applicableSteps.length === 0) return null;
+
+                                        const completedCount = applicableSteps.filter(step => progressData[step.key]?.completed).length;
+                                        const percent = Math.round((completedCount / applicableSteps.length) * 100);
+
+                                        // Color logic: Red -> Orange -> Green
+                                        let colorClass = 'bg-red-500';
+                                        if (percent >= 50 && percent < 100) colorClass = 'bg-orange-500';
+                                        if (percent === 100) colorClass = 'bg-green-500';
+
+                                        return (
+                                            <>
+                                                <div className="absolute right-0 top-10 bottom-10 w-1.5 bg-gray-100 rounded-l-full overflow-hidden" title={`Tiến trình: ${percent}%`}>
+                                                    <div
+                                                        className={`absolute bottom-0 left-0 right-0 transition-all duration-700 ease-out ${colorClass}`}
+                                                        style={{ height: `${percent}%` }}
+                                                    />
+                                                </div>
+
+                                                {/* 0% Reminder Tag - Positioned Top Right */}
+                                                {percent === 0 && !['refunded', 'suspended'].includes(c.deal_status || '') && (
+                                                    <div className="absolute right-2 top-2 z-10">
+                                                        <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded-lg border border-red-200 shadow-sm flex items-center gap-1 animate-pulse" title="Khách chưa có tiến trình nào">
+                                                            <AlertTriangle size={12} /> Cập nhật
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
+
+                                    <div className="space-y-2 text-sm text-gray-700 mb-3 pr-3">
                                         <div className="flex items-center gap-2">
                                             <CarFront size={14} className="text-gray-400" />
                                             <span className="font-bold">{c.interest?.toUpperCase() || 'CHƯA RÕ'}</span>
@@ -637,17 +728,19 @@ const Deals: React.FC = () => {
                                                 ) : null;
                                             })()}
                                         </div>
-                                        {/* Sale Debt to Fund */}
+                                        {/* Sale Debt to Fund - Modified for visibility */}
                                         {(() => {
-                                            const actualRev = c.deal_details?.actual_revenue || 0;
-                                            if (actualRev > 0) {
-                                                const saleDebt = getCustomerDebt(c.id, actualRev);
-                                                return saleDebt > 0 ? (
-                                                    <div className="flex items-center gap-2 bg-yellow-50 px-2 py-1 rounded-lg border border-yellow-200">
-                                                        <Wallet size={12} className="text-yellow-600" />
-                                                        <span className="text-[11px] text-yellow-700 font-bold">Nợ quỹ: {formatCurrency(saleDebt)} VNĐ</span>
+                                            const baseRevenue = c.deal_details?.actual_revenue || c.deal_details?.revenue || 0;
+                                            if (baseRevenue > 0) {
+                                                const saleDebt = getCustomerDebt(c.id, baseRevenue);
+                                                return (
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-gray-500 text-xs">Nợ quỹ:</span>
+                                                        <span className={`font-bold ${saleDebt > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                                            {formatCurrency(saleDebt)} VNĐ
+                                                        </span>
                                                     </div>
-                                                ) : null;
+                                                );
                                             }
                                             return null;
                                         })()}
@@ -665,9 +758,15 @@ const Deals: React.FC = () => {
 
                                 {/* Display Closing/Update Date & Edit Button */}
                                 <div className="mt-3 pt-2 border-t border-gray-50 flex justify-between items-center text-xs text-gray-400">
-                                    <span className="flex items-center gap-1">
-                                        <Calendar size={12} /> {c.deal_status === 'processing' ? 'Bắt đầu:' : 'Ngày chốt:'} {displayDate}
-                                    </span>
+                                    <div className="flex flex-col gap-1">
+                                        <span className="flex items-center gap-1" title="Ngày tạo đơn">
+                                            <Calendar size={12} /> Bắt đầu: {new Date(c.created_at).toLocaleDateString('vi-VN')}
+                                        </span>
+                                        {/* Always show closing date, preferring won_at */}
+                                        <span className="flex items-center gap-1 text-green-600 font-bold" title="Ngày chốt đơn (won_at)">
+                                            <CheckCircle2 size={12} /> Chốt: {new Date(c.won_at || c.updated_at || c.created_at).toLocaleDateString('vi-VN')}
+                                        </span>
+                                    </div>
 
                                     {isAdmin && (
                                         <button

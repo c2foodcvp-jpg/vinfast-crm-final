@@ -1,18 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Upload, Save, Loader2, Image as ImageIcon, AlertCircle, CheckCircle2, LayoutTemplate, LogIn, RefreshCw, Bell } from 'lucide-react';
+import { Upload, Save, Loader2, Image as ImageIcon, AlertCircle, CheckCircle2, LayoutTemplate, LogIn, RefreshCw, Bell, User } from 'lucide-react';
 
-type LogoType = 'favicon' | 'login' | 'menu';
+type LogoType = 'favicon' | 'login' | 'menu' | 'customer_avatar';
 
 const SystemSettingsPanel: React.FC = () => {
     const [settings, setSettings] = useState<{
         favicon: string | null;
         loginLogo: string | null;
         menuLogo: string | null;
+        defaultCustomerAvatar: string | null;
     }>({
         favicon: null,
         loginLogo: null,
         menuLogo: null,
+        defaultCustomerAvatar: null,
     });
 
     const [uploading, setUploading] = useState<Record<string, boolean>>({});
@@ -27,13 +29,14 @@ const SystemSettingsPanel: React.FC = () => {
 
     const fetchSettings = async () => {
         try {
-            const { data } = await supabase.from('app_settings').select('key, value').in('key', ['system_favicon', 'system_logo_login', 'system_logo_menu', 'force_update']);
+            const { data } = await supabase.from('app_settings').select('key, value').in('key', ['system_favicon', 'system_logo_login', 'system_logo_menu', 'force_update', 'default_customer_avatar']);
 
             const newSettings = { ...settings };
             data?.forEach(item => {
                 if (item.key === 'system_favicon') newSettings.favicon = item.value;
                 if (item.key === 'system_logo_login') newSettings.loginLogo = item.value;
                 if (item.key === 'system_logo_menu') newSettings.menuLogo = item.value;
+                if (item.key === 'default_customer_avatar') newSettings.defaultCustomerAvatar = item.value;
                 if (item.key === 'force_update') setForceUpdate(item.value === 'true' || item.value === true);
             });
             setSettings(newSettings);
@@ -44,10 +47,16 @@ const SystemSettingsPanel: React.FC = () => {
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: LogoType) => {
         if (!e.target.files || e.target.files.length === 0) return;
+        const file = e.target.files[0];
+
+        // Check file size (Max 1MB)
+        if (file.size > 1024 * 1024) {
+            setMsg({ type: 'error', text: `Ảnh quá lớn (${(file.size / 1024 / 1024).toFixed(2)}MB). Vui lòng chọn ảnh dưới 1MB.` });
+            return;
+        }
+
         setUploading(prev => ({ ...prev, [type]: true }));
         setMsg(null);
-
-        const file = e.target.files[0];
         const fileExt = file.name.split('.').pop();
         const fileName = `${type}_${Date.now()}.${fileExt}`;
         const filePath = `${fileName}`;
@@ -67,7 +76,8 @@ const SystemSettingsPanel: React.FC = () => {
 
             setSettings(prev => ({
                 ...prev,
-                [type === 'favicon' ? 'favicon' : type === 'login' ? 'loginLogo' : 'menuLogo']: publicUrl
+                ...prev,
+                [type === 'favicon' ? 'favicon' : type === 'login' ? 'loginLogo' : type === 'menu' ? 'menuLogo' : 'defaultCustomerAvatar']: publicUrl
             }));
 
             // Auto-save logic can be here, or user clicks Save. To keep it simple, let user click Save.
@@ -92,6 +102,7 @@ const SystemSettingsPanel: React.FC = () => {
                 { key: 'system_favicon', value: settings.favicon },
                 { key: 'system_logo_login', value: settings.loginLogo },
                 { key: 'system_logo_menu', value: settings.menuLogo },
+                { key: 'default_customer_avatar', value: settings.defaultCustomerAvatar },
             ].filter(i => i.value !== null); // Only save what we have
 
             const { error } = await supabase.from('app_settings').upsert(updates, { onConflict: 'key' });
@@ -180,6 +191,28 @@ with check ( bucket_id = 'system-assets' );
                 />
             </div>
 
+            {/* Customer Avatar Config */}
+            <div className="mb-8 border-t border-gray-100 pt-6">
+                <h4 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2"><User size={16} className="text-blue-600" /> Avatar Khách hàng Mặc định</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <ImageUploader
+                        type="customer_avatar"
+                        label="Avatar Mặc định"
+                        icon={User}
+                        value={settings.defaultCustomerAvatar}
+                        desc="Thay thế avatar chữ cái mặc định. Nên dùng ảnh vuông, trong suốt."
+                    />
+                    <div className="col-span-2 bg-gray-50 rounded-xl p-4 border border-gray-100 text-sm text-gray-600">
+                        <p className="font-bold mb-2">Thông tin:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                            <li>Ảnh này sẽ hiển thị cho tất cả khách hàng thay vì chữ cái đầu tiên của tên.</li>
+                            <li>Kích thước tối đa: <strong>1MB</strong>.</li>
+                            <li>Định dạng khuyên dùng: <strong>PNG, JPG (Vuông 128x128px)</strong>.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
             <div className="space-y-4">
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
                     <h4 className="font-bold text-blue-900 text-sm mb-1">Lưu ý</h4>
@@ -251,8 +284,8 @@ with check ( bucket_id = 'system-assets' );
                             }}
                             disabled={forceUpdateSaving}
                             className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${forceUpdate
-                                    ? 'bg-gray-600 hover:bg-gray-700 text-white'
-                                    : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-200'
+                                ? 'bg-gray-600 hover:bg-gray-700 text-white'
+                                : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-200'
                                 } disabled:opacity-50`}
                         >
                             {forceUpdateSaving ? (

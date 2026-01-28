@@ -34,6 +34,15 @@ const CustomerList: React.FC = () => {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [employees, setEmployees] = useState<UserProfile[]>([]);
     const [loading, setLoading] = useState(true);
+    const [defaultAvatar, setDefaultAvatar] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchDefaultAvatar = async () => {
+            const { data } = await supabase.from('app_settings').select('value').eq('key', 'default_customer_avatar').single();
+            if (data) setDefaultAvatar(data.value);
+        };
+        fetchDefaultAvatar();
+    }, []);
 
     // Initialize States
     const [searchTerm, setSearchTerm] = useState('');
@@ -893,7 +902,11 @@ const CustomerList: React.FC = () => {
                                 )}
                                 <div className="flex items-start justify-between mb-3">
                                     <div className="flex items-center gap-3">
-                                        <div className={`h-10 w-10 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-sm ${customer.classification === 'Hot' ? 'bg-gradient-to-br from-red-500 to-orange-500' : customer.classification === 'Cool' ? 'bg-gradient-to-br from-blue-400 to-cyan-400' : 'bg-gradient-to-br from-orange-400 to-yellow-400'}`}>{customer.name.charAt(0).toUpperCase()}</div>
+                                        {defaultAvatar ? (
+                                            <img src={defaultAvatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover shadow-sm bg-gray-100 border border-gray-200" />
+                                        ) : (
+                                            <div className={`h-10 w-10 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-sm ${customer.classification === 'Hot' ? 'bg-gradient-to-br from-red-500 to-orange-500' : customer.classification === 'Cool' ? 'bg-gradient-to-br from-blue-400 to-cyan-400' : 'bg-gradient-to-br from-orange-400 to-yellow-400'}`}>{customer.name.charAt(0).toUpperCase()}</div>
+                                        )}
                                         <div>
                                             <h3 className="font-bold text-gray-900 group-hover:text-primary-700 transition-colors line-clamp-1">{customer.name}</h3>
                                             <p className={`text-xs font-medium flex items-center gap-1 ${isPhoneHidden ? 'text-gray-400 italic' : 'text-gray-500'}`}>

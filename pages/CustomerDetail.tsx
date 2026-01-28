@@ -2,11 +2,12 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, Interaction, CustomerClassification, DealDetails, UserProfile, UserRole, Distributor, DealStatus, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType } from '../types';
+import { Customer, CustomerStatus, Interaction, CustomerClassification, DealDetails, UserProfile, UserRole, Distributor, DealStatus, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType, DeliveryProgress } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
-    ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye, Share2, Lock, Users, Archive, EyeOff, Bug, Calculator
+    ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye, Share2, Lock, Users, Archive, EyeOff, Bug, Calculator, Truck
 } from 'lucide-react';
+import CustomerProgressModal, { DELIVERY_STEPS } from '../components/CustomerProgressModal';
 
 const { useParams, useNavigate, useLocation } = ReactRouterDOM as any;
 
@@ -88,6 +89,9 @@ const CustomerDetail: React.FC = () => {
 
     const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
     const [dealerDebtToConfirm, setDealerDebtToConfirm] = useState<Transaction | null>(null);
+
+    // Progress Modal
+    const [showProgressModal, setShowProgressModal] = useState(false);
 
     const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
     const longTermTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -196,9 +200,9 @@ const CustomerDetail: React.FC = () => {
         } catch (e) { console.error("Error fetching car models", e); }
     };
 
-    const fetchCustomerData = async () => {
+    const fetchCustomerData = async (silent = false) => {
         try {
-            setLoading(true);
+            if (!silent) setLoading(true);
             if (!id) return;
             const { data, error } = await supabase.from('customers').select('*').eq('id', id).single();
             if (error) throw error;
@@ -257,7 +261,7 @@ const CustomerDetail: React.FC = () => {
             const { data: transData } = await supabase.from('transactions').select('*').eq('customer_id', id).order('created_at', { ascending: false });
             if (transData) setTransactions(transData as Transaction[]);
 
-        } catch (e) { console.error(e); } finally { setLoading(false); }
+        } catch (e) { console.error(e); } finally { if (!silent) setLoading(false); }
     };
 
     const fetchSiblingCustomers = async () => {
@@ -429,24 +433,77 @@ const CustomerDetail: React.FC = () => {
         }
     };
 
+
+    // LONG TERM MODAL
+    const [showLongTermModal, setShowLongTermModal] = useState(false);
+    const [longTermDate, setLongTermDate] = useState('');
+
     const toggleLongTerm = async () => {
         const newVal = !isLongTerm;
-        setIsLongTerm(newVal);
         if (longTermTimeoutRef.current) { clearTimeout(longTermTimeoutRef.current); longTermTimeoutRef.current = null; }
 
         if (newVal) {
-            setIsSpecialCare(false); setRecareDate(''); setClassification('Cool');
-            await updateCustomerField({ is_long_term: true, is_special_care: false, recare_date: null, classification: 'Cool' });
-            handleAddNote('note', "Đã chuyển sang: Chăm sóc dài hạn (Phân loại: Cool)");
-            longTermTimeoutRef.current = setTimeout(async () => {
-                setIsLongTerm(false); await updateCustomerField({ is_long_term: false }); showToast("Tự động tắt CS dài hạn do không chọn ngày (5s)", 'error');
-            }, 5000);
+            // Turning ON -> Open Modal to choose date first
+            setIsSpecialCare(false);
+            setLongTermDate(''); // Reset
+            setShowLongTermModal(true);
         } else {
-            // When turning OFF Long Term -> Auto set date to TODAY
+            // Turning OFF -> Auto set date to TODAY and Save
+            setIsLongTerm(false);
             setRecareDate(todayStr);
             await updateCustomerField({ is_long_term: false, recare_date: todayStr });
+            showToast("Đã tắt CS Dài hạn. Ngày CS về hôm nay.");
         }
     };
+
+    const handleSaveLongTerm = async () => {
+        if (!longTermDate) {
+            showToast("Vui lòng chọn ngày chăm sóc!", 'error');
+            return;
+        }
+
+        // Validation: Not past, Max 3 months
+        // todayStr is set at component level as today+7
+        // Let's use robust comparison
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const selected = new Date(longTermDate);
+        selected.setHours(0, 0, 0, 0); // normalize
+
+        const maxDate = new Date();
+        maxDate.setMonth(maxDate.getMonth() + 3);
+        maxDate.setHours(0, 0, 0, 0);
+
+        // Check if selected < today (Past)
+        // User said "không được chọn quá khứ" (not past). >= today is OK.
+        if (selected < today) {
+            showToast("Ngày chăm sóc không được chọn quá khứ!", 'error');
+            return;
+        }
+
+        if (selected > maxDate) {
+            showToast("Ngày chăm sóc không được quá 3 tháng!", 'error');
+            return;
+        }
+
+        // Apply
+        setIsLongTerm(true);
+        setRecareDate(longTermDate);
+        setClassification('Cool');
+
+        await updateCustomerField({
+            is_long_term: true,
+            is_special_care: false,
+            recare_date: longTermDate,
+            classification: 'Cool'
+        });
+
+        handleAddNote('note', `Đã chuyển sang: Chăm sóc dài hạn (Ngày: ${new Date(longTermDate).toLocaleDateString('vi-VN')}, Phân loại: Cool)`);
+        setShowLongTermModal(false);
+        showToast("Đã kích hoạt CS Dài hạn!");
+    };
+
 
     const handleStopCare = async () => {
         if (!stopReason.trim()) { showToast("Vui lòng nhập lý do ngưng chăm sóc.", 'error'); return; }
@@ -473,11 +530,19 @@ const CustomerDetail: React.FC = () => {
     const handleApproveRequest = async () => {
         if (!customer) return;
         if (customer.status === CustomerStatus.WON_PENDING) {
-            await updateCustomerField({ status: CustomerStatus.WON, deal_status: 'processing' });
+            await updateCustomerField({
+                status: CustomerStatus.WON,
+                deal_status: 'processing',
+                // Auto-activate 'deposited' step
+                delivery_progress: {
+                    ...customer.delivery_progress,
+                    deposited: { completed: true, timestamp: new Date().toISOString() }
+                }
+            });
             if (customer.deal_details?.revenue && isMKTSource) {
                 await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'revenue', amount: customer.deal_details.revenue, reason: 'Doanh thu dự kiến (Duyệt chốt)', status: 'approved' }]);
             }
-            showToast("Đã duyệt Chốt Deal!");
+            showToast("Đã duyệt Chốt Deal & Kích hoạt tiến trình!");
         } else if (customer.status === CustomerStatus.LOST_PENDING) {
             await updateCustomerField({ status: CustomerStatus.LOST });
             showToast("Đã duyệt Ngưng Chăm Sóc!");
@@ -504,7 +569,53 @@ const CustomerDetail: React.FC = () => {
     const handleShareCustomer = async () => { if (!shareForm.recipientId || !id) return; if (shareForm.recipientId === userProfile?.id) { alert("Không thể chia sẻ cho chính mình."); return; } try { const { data: existing } = await supabase.from('customer_shares').select('id').eq('customer_id', id).eq('shared_with', shareForm.recipientId).maybeSingle(); if (existing) { await supabase.from('customer_shares').update({ permission: shareForm.permission }).eq('id', existing.id); } else { await supabase.from('customer_shares').insert([{ customer_id: id, shared_by: userProfile?.id, shared_with: shareForm.recipientId, permission: shareForm.permission }]); } const recipient = employees.find(e => e.id === shareForm.recipientId); handleAddNote('note', `Đã chia sẻ quyền truy cập (${shareForm.permission === 'view' ? 'Xem' : 'Sửa'}) cho: ${recipient?.full_name}`); alert("Đã chia sẻ thành công!"); handleOpenShareModal(); } catch (e: any) { if (e.code === '42P01') alert("Lỗi: Bảng chia sẻ chưa được tạo trong Database. Vui lòng báo Admin."); else alert("Lỗi chia sẻ: " + e.message); } };
     const executeRevokeShare = async (shareId: string, userName: string) => { try { await supabase.from('customer_shares').delete().eq('id', shareId); handleAddNote('note', `Đã hủy quyền truy cập của: ${userName}`); handleOpenShareModal(); } catch (e) { alert("Lỗi hủy chia sẻ."); } setRevokeConfirmId(null); };
     const executeDeleteCustomer = async () => { if (!id) return; try { await supabase.from('interactions').delete().eq('customer_id', id); await supabase.from('transactions').delete().eq('customer_id', id); await supabase.from('customer_shares').delete().eq('customer_id', id); const { error } = await supabase.from('customers').delete().eq('id', id); if (error) { throw new Error(error.message); } navigate('/customers'); } catch (e: any) { showToast("Lỗi xóa: " + e.message, 'error'); setShowDeleteConfirm(false); } };
-    const handleDealAction = async (action: 'complete' | 'refund' | 'cancel' | 'reopen' | 'suspend') => { if (action === 'cancel') { await updateCustomerField({ status: CustomerStatus.POTENTIAL, deal_status: undefined }); handleAddNote('note', "Đã hủy chốt đơn, quay lại chăm sóc."); return; } if (action === 'reopen') { await updateCustomerField({ deal_status: 'processing' }); handleAddNote('note', "Đã mở lại xử lý đơn hàng."); showToast("Đã mở lại xử lý!"); return; } if (action === 'suspend') { setShowSuspendModal(true); return; } const statusMap: any = { 'complete': (isAdmin || isMod) ? 'completed' : 'completed_pending', 'refund': (isAdmin || isMod) ? 'refunded' : 'refund_pending', }; await updateCustomerField({ deal_status: statusMap[action] }); showToast("Đã cập nhật trạng thái đơn hàng!"); };
+    const handleDealAction = async (action: 'complete' | 'refund' | 'cancel' | 'reopen' | 'suspend') => {
+        if (action === 'cancel') {
+            await updateCustomerField({ status: CustomerStatus.POTENTIAL, deal_status: undefined });
+            handleAddNote('note', "Đã hủy chốt đơn, quay lại chăm sóc.");
+            return;
+        }
+        if (action === 'reopen') {
+            await updateCustomerField({ deal_status: 'processing' });
+            handleAddNote('note', "Đã mở lại xử lý đơn hàng.");
+            showToast("Đã mở lại xử lý!");
+            return;
+        }
+        if (action === 'suspend') {
+            setShowSuspendModal(true);
+            return;
+        }
+
+        const statusMap: any = {
+            'complete': (isAdmin || isMod) ? 'completed' : 'completed_pending',
+            'refund': (isAdmin || isMod) ? 'refunded' : 'refund_pending',
+        };
+
+        const targetStatus = statusMap[action];
+        let updates: Partial<Customer> = { deal_status: targetStatus };
+
+        // Auto-complete progress if deal is officially completed
+        if (targetStatus === 'completed') {
+            const applicableSteps = DELIVERY_STEPS.filter(step => !step.condition || (customer && step.condition(customer)));
+            const fullProgress: DeliveryProgress = {};
+            // Use existing progress if available, but overwrite checks to true?
+            // User said: "cũng được process 100% các giai đoạn" -> implying set all to true.
+            const now = new Date().toISOString();
+
+            applicableSteps.forEach(step => {
+                // If already completed, keep original timestamp. If not, set to now.
+                const existing = customer?.delivery_progress?.[step.key];
+                fullProgress[step.key] = {
+                    completed: true,
+                    timestamp: existing?.completed ? existing.timestamp : now
+                };
+            });
+            updates.delivery_progress = fullProgress;
+        }
+
+        await updateCustomerField(updates);
+        showToast("Đã cập nhật trạng thái đơn hàng!");
+    };
     const confirmSuspend = async () => { if (!suspendReason.trim()) { showToast("Vui lòng nhập lý do treo hồ sơ.", 'error'); return; } const newStatus = (isAdmin || isMod) ? 'suspended' : 'suspended_pending'; await updateCustomerField({ deal_status: newStatus }); handleAddNote('note', `Treo hồ sơ. Lý do: ${suspendReason}`); setShowSuspendModal(false); setSuspendReason(''); showToast("Đã cập nhật trạng thái hồ sơ!"); };
     const handleAddRevenue = async () => { const amount = Number(revenueForm.amount.replace(/\./g, '')); if (!amount || amount <= 0) return; try { const currentActual = customer?.deal_details?.actual_revenue || 0; const newActual = currentActual + amount; const newDealDetails = { ...customer?.deal_details, actual_revenue: newActual }; const { error } = await supabase.from('customers').update({ deal_details: newDealDetails }).eq('id', id); if (error) throw error; setCustomer(prev => { if (!prev) return null; return { ...prev, deal_details: newDealDetails as any }; }); setShowAddRevenueModal(false); setRevenueForm({ amount: '', note: '' }); showToast("Đã thêm doanh thu thực tế!"); if (revenueForm.note) handleAddNote('note', `Thêm doanh thu thực tế: +${formatCurrency(amount)} VNĐ. Ghi chú: ${revenueForm.note}`); } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); } };
     const handleAddIncurredExpense = async () => { const amount = Number(incurredExpenseForm.amount.replace(/\./g, '')); if (!amount || amount <= 0 || !incurredExpenseForm.reason) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; } try { const { data, error } = await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'incurred_expense', amount: amount, reason: incurredExpenseForm.reason, status: 'approved' }]).select().single(); if (error) throw error; setTransactions(prev => [data as Transaction, ...prev]); setShowIncurredExpenseModal(false); setIncurredExpenseForm({ amount: '', reason: '' }); handleAddNote('note', `Thêm khoản chi phát sinh: ${formatCurrency(amount)} VNĐ. Lý do: ${incurredExpenseForm.reason}`); showToast("Đã thêm khoản chi phát sinh!"); } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); } };
@@ -579,7 +690,13 @@ const CustomerDetail: React.FC = () => {
         if (!dealForm.payment_method || !dealForm.plate_type || !dealForm.distributor || !dealForm.car_availability || !dealForm.revenue) { showToast("Vui lòng nhập đầy đủ thông tin bắt buộc (*) trước khi chốt deal!", 'error'); return; }
         const newStatus = (isAdmin || isMod) ? CustomerStatus.WON : CustomerStatus.WON_PENDING;
         const revenueNum = Number(dealForm.revenue.replace(/\./g, ''));
-        await updateCustomerField({ status: newStatus, deal_details: { ...dealForm, revenue: revenueNum }, deal_status: newStatus === CustomerStatus.WON ? 'processing' : undefined });
+        // Set won_at to NOW for accurate progress tracking
+        await updateCustomerField({
+            status: newStatus,
+            deal_details: { ...dealForm, revenue: revenueNum },
+            deal_status: newStatus === CustomerStatus.WON ? 'processing' : undefined,
+            won_at: new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().replace('Z', '+07:00')
+        });
         if (newStatus === CustomerStatus.WON && isMKTSource) {
             await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'revenue', amount: revenueNum, reason: 'Doanh thu dự kiến (Chốt đơn)', status: 'approved' }]);
         }
@@ -679,6 +796,21 @@ const CustomerDetail: React.FC = () => {
                         {/* NEW: Quote Button */}
                         <button onClick={() => navigate('/quote')} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><Calculator size={16} /> Báo giá</button>
 
+                        {/* NEW: Delivery Progress Button - Hide if Completed */}
+                        {/* NEW: Delivery Progress Button - Hide if Completed/Refunded/Suspended */}
+                        {isWon && !isCompleted && !isRefunded && !isSuspended && (
+                            <button
+                                onClick={() => setShowProgressModal(true)}
+                                className={`px-3 py-2 font-bold rounded-lg shadow-md flex items-center gap-2 transition-all 
+                                    ${(!customer.delivery_progress || Object.values(customer.delivery_progress).length === 0 || Object.values(customer.delivery_progress).every(v => !v.completed))
+                                        ? 'bg-red-600 text-white animate-pulse hover:bg-red-700 shadow-red-200'
+                                        : 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white hover:from-blue-700 hover:to-cyan-600 animate-pulse-slow'
+                                    }`}
+                            >
+                                <Truck size={16} /> Tiến trình
+                            </button>
+                        )}
+
                         {/* FORCE SHOW BUTTONS IF AUTHORIZED */}
                         {(showActionButtons || isAssignedRep) && (
                             <>
@@ -731,12 +863,35 @@ const CustomerDetail: React.FC = () => {
                             {isSpecialCare ? (
                                 <div className="mb-4 bg-white border border-red-200 rounded-xl p-4 shadow-sm animate-fade-in"><p className="text-xs font-bold text-gray-500 uppercase mb-1">TRẠNG THÁI ĐẶC BIỆT</p><div className="flex items-center gap-2 text-red-600 font-bold"><Flame size={18} className="fill-red-600 animate-pulse" /><span>Đang CS Đặc biệt</span></div><p className="text-gray-400 italic text-sm mt-1">Ngày chăm sóc tiếp theo bị ẩn.</p></div>
                             ) : (
-                                <div className="mb-4">
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">{isLongTerm ? 'Ngày CS Dài hạn' : 'Ngày chăm sóc tiếp theo'}</label>
-                                    <div className="relative"><input disabled={isDelegatedViewOnly} type="date" min={getMinDate()} max={getMaxDate()} value={recareDate} onChange={handleDateChange} className={`w-full border rounded-xl px-4 py-2.5 bg-white text-gray-900 font-bold focus:border-primary-500 outline-none ${isLongTerm ? 'border-blue-300 ring-2 ring-blue-50' : 'border-gray-300'} disabled:bg-gray-100 disabled:text-gray-500`} /></div>
-                                    {isLongTerm && <p className="text-xs text-blue-500 mt-1 italic">Chọn ngày xa nhất (Tối thiểu 10 ngày từ hôm nay).</p>}
-                                    {!isLongTerm && <p className="text-xs text-gray-400 mt-1 italic">Giới hạn chọn: Tối đa 4 ngày từ hôm nay.</p>}
-                                </div>
+                                <>
+                                    {isLongTerm ? (
+                                        <div className="mb-4 bg-white border border-blue-200 rounded-xl p-4 shadow-sm animate-fade-in relative">
+                                            <p className="text-xs font-bold text-gray-500 uppercase mb-1">TRẠNG THÁI DÀI HẠN</p>
+                                            <div className="flex items-center gap-2 text-blue-600 font-bold mb-1">
+                                                <Calendar size={18} className="text-blue-600" />
+                                                <span>Đang CS Dài hạn</span>
+                                            </div>
+                                            <p className="text-gray-900 font-bold text-sm">
+                                                Ngày CS: {recareDate ? new Date(recareDate).toLocaleDateString('vi-VN') : 'Chưa chọn'}
+                                            </p>
+                                            {!isDelegatedViewOnly && (
+                                                <button
+                                                    onClick={() => { setLongTermDate(recareDate); setShowLongTermModal(true); }}
+                                                    className="absolute top-2 right-2 p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+                                                    title="Sửa ngày CS"
+                                                >
+                                                    <Edit size={14} />
+                                                </button>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="mb-4">
+                                            <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Ngày chăm sóc tiếp theo</label>
+                                            <div className="relative"><input disabled={isDelegatedViewOnly} type="date" min={todayStr} max={getMaxDate()} value={recareDate} onChange={handleDateChange} className={`w-full border rounded-xl px-4 py-2.5 bg-white text-gray-900 font-bold focus:border-primary-500 outline-none border-gray-300 disabled:bg-gray-100 disabled:text-gray-500`} /></div>
+                                            <p className="text-xs text-gray-400 mt-1 italic">Giới hạn chọn: Tối đa 4 ngày từ hôm nay.</p>
+                                        </div>
+                                    )}
+                                </>
                             )}
                             <div className="space-y-3"><button className="w-full py-2.5 bg-gray-800 text-white rounded-xl font-bold text-sm hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200"><Mail size={16} /> Đặt lịch Lái thử</button><div className="grid grid-cols-2 gap-3"><button disabled={(isDelegatedViewOnly)} onClick={() => setShowStopModal(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"><Ban size={16} /> Ngưng CS</button><button disabled={(isDelegatedViewOnly)} onClick={() => setShowWinModal(true)} className="py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-1 disabled:opacity-50"><CheckCircle2 size={16} /> Chốt Deal</button></div></div>
                         </div>
@@ -849,401 +1004,465 @@ const CustomerDetail: React.FC = () => {
             </div>
 
             {/* ... Modals ... */}
-            {showSuspendModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Yêu cầu treo hồ sơ</h3>
-                            <button onClick={() => setShowSuspendModal(false)}><X size={24} className="text-gray-400" /></button>
-                        </div>
-                        <textarea
-                            value={suspendReason}
-                            onChange={(e) => setSuspendReason(e.target.value)}
-                            className="w-full border border-gray-300 rounded-xl p-3 mb-4 outline-none focus:border-gray-500 h-24 resize-none"
-                            placeholder="Lý do treo hồ sơ (VD: Khách đi nước ngoài, chờ ngân hàng...)"
-                        />
-                        <div className="bg-yellow-50 text-yellow-800 text-xs p-3 rounded-lg mb-4">
-                            Hồ sơ sẽ chuyển sang trạng thái <strong>Treo</strong> và không tính vào doanh thu dự kiến trong tháng này.
-                        </div>
-                        <div className="flex gap-2">
-                            <button onClick={() => setShowSuspendModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl">Hủy</button>
-                            <button onClick={confirmSuspend} className="flex-1 py-2 bg-gray-800 text-white font-bold rounded-xl">Xác nhận</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {showChangeSalesModal && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 max-h-[80vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Chuyển quyền chăm sóc</h3>
-                            <button onClick={() => setShowChangeSalesModal(false)}><X size={24} className="text-gray-400" /></button>
-                        </div>
-                        <div className="space-y-2">
-                            {availableUsersToChange.map(emp => (
-                                <button
-                                    key={emp.id}
-                                    type="button"
-                                    onClick={() => prepareChangeSales(emp)}
-                                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors text-left group cursor-pointer"
-                                >
-                                    <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center font-bold text-gray-600 group-hover:bg-primary-100 group-hover:text-primary-700">
-                                        {emp.full_name.charAt(0)}
-                                    </div>
-                                    <div>
-                                        <p className="font-bold text-gray-900">{emp.full_name}</p>
-                                        <p className="text-xs text-gray-500 capitalize">{emp.role}</p>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {showChangeSalesConfirm && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                        <div className="flex flex-col items-center text-center">
-                            <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4">
-                                <ArrowRightLeft size={24} />
+            {
+                showSuspendModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900">Yêu cầu treo hồ sơ</h3>
+                                <button onClick={() => setShowSuspendModal(false)}><X size={24} className="text-gray-400" /></button>
                             </div>
-                            <h3 className="text-xl font-bold text-gray-900 mb-2">
-                                {showChangeSalesConfirm.type === 'direct' ? 'Xác nhận chuyển Sales?' : 'Gửi yêu cầu chuyển?'}
-                            </h3>
-                            <p className="text-gray-500 text-sm mb-6">
-                                {showChangeSalesConfirm.type === 'direct'
-                                    ? <>Chuyển khách hàng cho <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</>
-                                    : <>Gửi yêu cầu chuyển cho <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</>
-                                }
-                            </p>
-                            <div className="flex gap-3 w-full">
-                                <button onClick={() => setShowChangeSalesConfirm(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy</button>
-                                <button onClick={executeChangeSales} className="flex-1 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-colors">Xác nhận</button>
+                            <textarea
+                                value={suspendReason}
+                                onChange={(e) => setSuspendReason(e.target.value)}
+                                className="w-full border border-gray-300 rounded-xl p-3 mb-4 outline-none focus:border-gray-500 h-24 resize-none"
+                                placeholder="Lý do treo hồ sơ (VD: Khách đi nước ngoài, chờ ngân hàng...)"
+                            />
+                            <div className="bg-yellow-50 text-yellow-800 text-xs p-3 rounded-lg mb-4">
+                                Hồ sơ sẽ chuyển sang trạng thái <strong>Treo</strong> và không tính vào doanh thu dự kiến trong tháng này.
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => setShowSuspendModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl">Hủy</button>
+                                <button onClick={confirmSuspend} className="flex-1 py-2 bg-gray-800 text-white font-bold rounded-xl">Xác nhận</button>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
+
+            {
+                showChangeSalesModal && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 max-h-[80vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900">Chuyển quyền chăm sóc</h3>
+                                <button onClick={() => setShowChangeSalesModal(false)}><X size={24} className="text-gray-400" /></button>
+                            </div>
+                            <div className="space-y-2">
+                                {availableUsersToChange.map(emp => (
+                                    <button
+                                        key={emp.id}
+                                        type="button"
+                                        onClick={() => prepareChangeSales(emp)}
+                                        className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors text-left group cursor-pointer"
+                                    >
+                                        <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center font-bold text-gray-600 group-hover:bg-primary-100 group-hover:text-primary-700">
+                                            {emp.full_name.charAt(0)}
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-gray-900">{emp.full_name}</p>
+                                            <p className="text-xs text-gray-500 capitalize">{emp.role}</p>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {
+                showChangeSalesConfirm && (
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex flex-col items-center text-center">
+                                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4">
+                                    <ArrowRightLeft size={24} />
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">
+                                    {showChangeSalesConfirm.type === 'direct' ? 'Xác nhận chuyển Sales?' : 'Gửi yêu cầu chuyển?'}
+                                </h3>
+                                <p className="text-gray-500 text-sm mb-6">
+                                    {showChangeSalesConfirm.type === 'direct'
+                                        ? <>Chuyển khách hàng cho <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</>
+                                        : <>Gửi yêu cầu chuyển cho <strong>{showChangeSalesConfirm.rep.full_name}</strong>?</>
+                                    }
+                                </p>
+                                <div className="flex gap-3 w-full">
+                                    <button onClick={() => setShowChangeSalesConfirm(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy</button>
+                                    <button onClick={executeChangeSales} className="flex-1 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-colors">Xác nhận</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
 
             {showDeleteConfirm && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl"><div className="flex flex-col items-center text-center"><div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4"><Trash2 size={24} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xóa khách hàng?</h3><p className="text-gray-500 text-sm mb-6">Hành động này không thể hoàn tác. Toàn bộ dữ liệu tương tác và giao dịch sẽ bị xóa.</p><div className="flex gap-3 w-full"><button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDeleteCustomer} className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Xóa vĩnh viễn</button></div></div></div></div>)}
 
             {/* ... SHARE MODAL ... */}
-            {showShareModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Share2 className="text-teal-600" /> Chia sẻ Khách hàng</h3>
-                            <button onClick={() => setShowShareModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                        </div>
-
-                        {/* Share Form */}
-                        <div className="bg-teal-50 p-4 rounded-xl border border-teal-100 mb-4 space-y-3">
-                            <div>
-                                <label className="text-xs font-bold text-teal-800 uppercase mb-1 block">Người nhận (TVBH)</label>
-                                <select className="w-full border border-teal-200 rounded-lg p-2 text-sm outline-none" value={shareForm.recipientId} onChange={e => setShareForm({ ...shareForm, recipientId: e.target.value })}>
-                                    <option value="">-- Chọn người nhận --</option>
-                                    {availableUsersToShare.map(u => (
-                                        <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
-                                    ))}
-                                </select>
+            {
+                showShareModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Share2 className="text-teal-600" /> Chia sẻ Khách hàng</h3>
+                                <button onClick={() => setShowShareModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                             </div>
-                            <div>
-                                <label className="text-xs font-bold text-teal-800 uppercase mb-1 block">Quyền hạn</label>
-                                <div className="flex gap-2">
-                                    <select className="flex-1 border border-teal-200 rounded-lg p-2 text-sm outline-none" value={shareForm.permission} onChange={e => setShareForm({ ...shareForm, permission: e.target.value as any })}>
-                                        <option value="view">Chỉ xem</option>
-                                        <option value="edit">Được chỉnh sửa</option>
+
+                            {/* Share Form */}
+                            <div className="bg-teal-50 p-4 rounded-xl border border-teal-100 mb-4 space-y-3">
+                                <div>
+                                    <label className="text-xs font-bold text-teal-800 uppercase mb-1 block">Người nhận (TVBH)</label>
+                                    <select className="w-full border border-teal-200 rounded-lg p-2 text-sm outline-none" value={shareForm.recipientId} onChange={e => setShareForm({ ...shareForm, recipientId: e.target.value })}>
+                                        <option value="">-- Chọn người nhận --</option>
+                                        {availableUsersToShare.map(u => (
+                                            <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
+                                        ))}
                                     </select>
-                                    <button onClick={handleShareCustomer} className="bg-teal-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-teal-700 shadow-sm">Chia sẻ</button>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-teal-800 uppercase mb-1 block">Quyền hạn</label>
+                                    <div className="flex gap-2">
+                                        <select className="flex-1 border border-teal-200 rounded-lg p-2 text-sm outline-none" value={shareForm.permission} onChange={e => setShareForm({ ...shareForm, permission: e.target.value as any })}>
+                                            <option value="view">Chỉ xem</option>
+                                            <option value="edit">Được chỉnh sửa</option>
+                                        </select>
+                                        <button onClick={handleShareCustomer} className="bg-teal-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-teal-700 shadow-sm">Chia sẻ</button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        {/* Existing Shares List */}
-                        <div>
-                            <h4 className="font-bold text-gray-800 text-sm mb-2">Đang chia sẻ với:</h4>
-                            {existingShares.length === 0 ? (
-                                <p className="text-sm text-gray-400 text-center py-4 bg-gray-50 rounded-lg border border-dashed border-gray-200">Chưa chia sẻ với ai.</p>
-                            ) : (
-                                <div className="space-y-2">
-                                    {existingShares.map(share => (
-                                        <div key={share.id} className="flex justify-between items-center p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
-                                            {revokeConfirmId === share.id ? (
-                                                <div className="flex items-center justify-between w-full gap-2 animate-fade-in">
-                                                    <span className="text-xs font-bold text-red-600">Hủy quyền của {share.user_name}?</span>
-                                                    <div className="flex gap-1">
-                                                        <button onClick={() => setRevokeConfirmId(null)} className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded font-bold">Hủy</button>
-                                                        <button onClick={() => executeRevokeShare(share.id, share.user_name)} className="px-2 py-1 bg-red-600 text-white text-xs rounded font-bold">Đồng ý</button>
+                            {/* Existing Shares List */}
+                            <div>
+                                <h4 className="font-bold text-gray-800 text-sm mb-2">Đang chia sẻ với:</h4>
+                                {existingShares.length === 0 ? (
+                                    <p className="text-sm text-gray-400 text-center py-4 bg-gray-50 rounded-lg border border-dashed border-gray-200">Chưa chia sẻ với ai.</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {existingShares.map(share => (
+                                            <div key={share.id} className="flex justify-between items-center p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
+                                                {revokeConfirmId === share.id ? (
+                                                    <div className="flex items-center justify-between w-full gap-2 animate-fade-in">
+                                                        <span className="text-xs font-bold text-red-600">Hủy quyền của {share.user_name}?</span>
+                                                        <div className="flex gap-1">
+                                                            <button onClick={() => setRevokeConfirmId(null)} className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded font-bold">Hủy</button>
+                                                            <button onClick={() => executeRevokeShare(share.id, share.user_name)} className="px-2 py-1 bg-red-600 text-white text-xs rounded font-bold">Đồng ý</button>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    <div>
-                                                        <p className="text-sm font-bold text-gray-800">{share.user_name}</p>
-                                                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${share.permission === 'edit' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{share.permission === 'edit' ? 'Được sửa' : 'Chỉ xem'}</span>
-                                                    </div>
-                                                    <button onClick={() => setRevokeConfirmId(share.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={16} /></button>
-                                                </>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                                                ) : (
+                                                    <>
+                                                        <div>
+                                                            <p className="text-sm font-bold text-gray-800">{share.user_name}</p>
+                                                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${share.permission === 'edit' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{share.permission === 'edit' ? 'Được sửa' : 'Chỉ xem'}</span>
+                                                        </div>
+                                                        <button onClick={() => setRevokeConfirmId(share.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={16} /></button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* WIN DEAL MODAL */}
-            {showWinModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><CheckCircle2 className="text-green-600" /> Xác nhận Chốt Đơn</h3>
-                            <button onClick={() => setShowWinModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                        </div>
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+            {
+                showWinModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><CheckCircle2 className="text-green-600" /> Xác nhận Chốt Đơn</h3>
+                                <button onClick={() => setShowWinModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
+                            </div>
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">Hình thức thanh toán <span className="text-red-500">*</span></label>
+                                        <select className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-white" value={dealForm.payment_method} onChange={e => setDealForm({ ...dealForm, payment_method: e.target.value })}>
+                                            <option value="Tiền mặt">Tiền mặt</option>
+                                            <option value="Ngân hàng">Ngân hàng</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">Loại biển số <span className="text-red-500">*</span></label>
+                                        <select className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-white" value={dealForm.plate_type} onChange={e => setDealForm({ ...dealForm, plate_type: e.target.value })}>
+                                            <option value="Biển trắng">Biển trắng</option>
+                                            <option value="Biển vàng">Biển vàng</option>
+                                        </select>
+                                    </div>
+                                </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Hình thức thanh toán <span className="text-red-500">*</span></label>
-                                    <select className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-white" value={dealForm.payment_method} onChange={e => setDealForm({ ...dealForm, payment_method: e.target.value })}>
-                                        <option value="Tiền mặt">Tiền mặt</option>
-                                        <option value="Ngân hàng">Ngân hàng</option>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Doanh thu dự kiến (VNĐ) <span className="text-red-500">*</span></label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold text-green-700" value={dealForm.revenue} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealForm({ ...dealForm, revenue: v ? Number(v).toLocaleString('vi-VN') : '' }); }} placeholder="500.000.000" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Đại lý xuất xe <span className="text-red-500">*</span></label>
+                                    <select className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-white" value={dealForm.distributor} onChange={e => setDealForm({ ...dealForm, distributor: e.target.value })}>
+                                        <option value="">-- Chọn đại lý --</option>
+                                        {distributors.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Loại biển số <span className="text-red-500">*</span></label>
-                                    <select className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-white" value={dealForm.plate_type} onChange={e => setDealForm({ ...dealForm, plate_type: e.target.value })}>
-                                        <option value="Biển trắng">Biển trắng</option>
-                                        <option value="Biển vàng">Biển vàng</option>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Tình trạng xe <span className="text-red-500">*</span></label>
+                                    <select className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-white" value={dealForm.car_availability} onChange={e => setDealForm({ ...dealForm, car_availability: e.target.value })}>
+                                        <option value="Sẵn xe">Sẵn xe</option>
+                                        <option value="Đợi xe">Đợi xe</option>
                                     </select>
                                 </div>
+                                <div className="flex items-center gap-2 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                                    <input type="checkbox" id="acc" checked={dealForm.has_accessories} onChange={e => setDealForm({ ...dealForm, has_accessories: e.target.checked })} className="w-5 h-5 text-green-600 rounded focus:ring-green-500" />
+                                    <label htmlFor="acc" className="text-sm font-bold text-gray-700 cursor-pointer">Khách có làm phụ kiện?</label>
+                                </div>
+                                <button onClick={handleRequestWin} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 flex items-center justify-center gap-2 mt-2">
+                                    <CheckCircle2 size={18} /> Xác nhận Chốt
+                                </button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Doanh thu dự kiến (VNĐ) <span className="text-red-500">*</span></label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold text-green-700" value={dealForm.revenue} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealForm({ ...dealForm, revenue: v ? Number(v).toLocaleString('vi-VN') : '' }); }} placeholder="500.000.000" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Đại lý xuất xe <span className="text-red-500">*</span></label>
-                                <select className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-white" value={dealForm.distributor} onChange={e => setDealForm({ ...dealForm, distributor: e.target.value })}>
-                                    <option value="">-- Chọn đại lý --</option>
-                                    {distributors.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Tình trạng xe <span className="text-red-500">*</span></label>
-                                <select className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-white" value={dealForm.car_availability} onChange={e => setDealForm({ ...dealForm, car_availability: e.target.value })}>
-                                    <option value="Sẵn xe">Sẵn xe</option>
-                                    <option value="Đợi xe">Đợi xe</option>
-                                </select>
-                            </div>
-                            <div className="flex items-center gap-2 bg-gray-50 p-3 rounded-xl border border-gray-200">
-                                <input type="checkbox" id="acc" checked={dealForm.has_accessories} onChange={e => setDealForm({ ...dealForm, has_accessories: e.target.checked })} className="w-5 h-5 text-green-600 rounded focus:ring-green-500" />
-                                <label htmlFor="acc" className="text-sm font-bold text-gray-700 cursor-pointer">Khách có làm phụ kiện?</label>
-                            </div>
-                            <button onClick={handleRequestWin} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 flex items-center justify-center gap-2 mt-2">
-                                <CheckCircle2 size={18} /> Xác nhận Chốt
-                            </button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* --- ADD REVENUE MODAL --- */}
-            {showAddRevenueModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Thêm Doanh thu Thực tế</h3>
-                            <button onClick={() => setShowAddRevenueModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={revenueForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setRevenueForm({ ...revenueForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+            {
+                showAddRevenueModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900">Thêm Doanh thu Thực tế</h3>
+                                <button onClick={() => setShowAddRevenueModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={revenueForm.note} onChange={e => setRevenueForm({ ...revenueForm, note: e.target.value })} placeholder="Đợt 2, Phụ kiện..." />
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={revenueForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setRevenueForm({ ...revenueForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={revenueForm.note} onChange={e => setRevenueForm({ ...revenueForm, note: e.target.value })} placeholder="Đợt 2, Phụ kiện..." />
+                                </div>
+                                <button onClick={handleAddRevenue} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận Thêm</button>
                             </div>
-                            <button onClick={handleAddRevenue} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận Thêm</button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* --- INCURRED EXPENSE MODAL --- */}
-            {showIncurredExpenseModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Chi phí Phát sinh (Đơn hàng)</h3>
-                            <button onClick={() => setShowIncurredExpenseModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500 font-bold" value={incurredExpenseForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setIncurredExpenseForm({ ...incurredExpenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+            {
+                showIncurredExpenseModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900">Chi phí Phát sinh (Đơn hàng)</h3>
+                                <button onClick={() => setShowIncurredExpenseModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Lý do chi</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500" value={incurredExpenseForm.reason} onChange={e => setIncurredExpenseForm({ ...incurredExpenseForm, reason: e.target.value })} placeholder="Hoa hồng ngoài, phí..." />
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500 font-bold" value={incurredExpenseForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setIncurredExpenseForm({ ...incurredExpenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Lý do chi</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500" value={incurredExpenseForm.reason} onChange={e => setIncurredExpenseForm({ ...incurredExpenseForm, reason: e.target.value })} placeholder="Hoa hồng ngoài, phí..." />
+                                </div>
+                                <div className="text-xs bg-gray-50 p-2 rounded text-gray-500">
+                                    Khoản này sẽ được trừ vào <strong>Doanh thu thực tế</strong> của đơn hàng này, không ảnh hưởng quỹ nhóm chung.
+                                </div>
+                                <button onClick={handleAddIncurredExpense} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Xác nhận Chi</button>
                             </div>
-                            <div className="text-xs bg-gray-50 p-2 rounded text-gray-500">
-                                Khoản này sẽ được trừ vào <strong>Doanh thu thực tế</strong> của đơn hàng này, không ảnh hưởng quỹ nhóm chung.
-                            </div>
-                            <button onClick={handleAddIncurredExpense} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Xác nhận Chi</button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {showRepayModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Hoàn ứng / Nộp tiền</h3>
-                            <button onClick={() => setShowRepayModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền nộp (VNĐ)</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={repayForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setRepayForm({ ...repayForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+            {
+                showRepayModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900">Hoàn ứng / Nộp tiền</h3>
+                                <button onClick={() => setShowRepayModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Nội dung</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-gray-100" value={repayForm.reason} disabled />
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền nộp (VNĐ)</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={repayForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setRepayForm({ ...repayForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Nội dung</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-gray-100" value={repayForm.reason} disabled />
+                                </div>
+                                <button onClick={handleRepayAdvance} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Gửi yêu cầu Nộp</button>
                             </div>
-                            <button onClick={handleRepayAdvance} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Gửi yêu cầu Nộp</button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {showDealerDebtModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Đại lý Nợ</h3>
-                            <button onClick={() => setShowDealerDebtModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                        </div>
-                        <div className="space-y-4">
-                            {/* Debt Type Selection */}
-                            <div className="space-y-2">
-                                <label className="block text-sm font-bold text-gray-700 mb-2">Loại khoản nợ</label>
-                                <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${dealerDebtForm.isNewDebt ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                                    <input type="radio" name="debtType" checked={dealerDebtForm.isNewDebt === true} onChange={() => setDealerDebtForm({ ...dealerDebtForm, isNewDebt: true })} className="mt-1 accent-green-600" />
-                                    <div>
-                                        <p className="font-bold text-gray-900 text-sm">Khoản nợ mới</p>
-                                        <p className="text-xs text-gray-500">Cộng thêm vào doanh thu thực tế tổng</p>
-                                    </div>
-                                </label>
-                                <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${dealerDebtForm.isNewDebt === false ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                                    <input type="radio" name="debtType" checked={dealerDebtForm.isNewDebt === false} onChange={() => setDealerDebtForm({ ...dealerDebtForm, isNewDebt: false })} className="mt-1 accent-orange-600" />
-                                    <div>
-                                        <p className="font-bold text-gray-900 text-sm">Nợ từ doanh thu đã báo</p>
-                                        <p className="text-xs text-gray-500">Đã nằm trong DT thực tế, không cộng thêm</p>
-                                    </div>
-                                </label>
+            {
+                showDealerDebtModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900">Đại lý Nợ</h3>
+                                <button onClick={() => setShowDealerDebtModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={dealerDebtForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealerDebtForm({ ...dealerDebtForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+                            <div className="space-y-4">
+                                {/* Debt Type Selection */}
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-bold text-gray-700 mb-2">Loại khoản nợ</label>
+                                    <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${dealerDebtForm.isNewDebt ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                                        <input type="radio" name="debtType" checked={dealerDebtForm.isNewDebt === true} onChange={() => setDealerDebtForm({ ...dealerDebtForm, isNewDebt: true })} className="mt-1 accent-green-600" />
+                                        <div>
+                                            <p className="font-bold text-gray-900 text-sm">Khoản nợ mới</p>
+                                            <p className="text-xs text-gray-500">Cộng thêm vào doanh thu thực tế tổng</p>
+                                        </div>
+                                    </label>
+                                    <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${dealerDebtForm.isNewDebt === false ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                                        <input type="radio" name="debtType" checked={dealerDebtForm.isNewDebt === false} onChange={() => setDealerDebtForm({ ...dealerDebtForm, isNewDebt: false })} className="mt-1 accent-orange-600" />
+                                        <div>
+                                            <p className="font-bold text-gray-900 text-sm">Nợ từ doanh thu đã báo</p>
+                                            <p className="text-xs text-gray-500">Đã nằm trong DT thực tế, không cộng thêm</p>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={dealerDebtForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealerDebtForm({ ...dealerDebtForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Hạn thanh toán</label>
+                                    <input type="date" min={todayStr} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.targetDate} onChange={e => setDealerDebtForm({ ...dealerDebtForm, targetDate: e.target.value })} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.reason} onChange={e => setDealerDebtForm({ ...dealerDebtForm, reason: e.target.value })} />
+                                </div>
+                                <button onClick={handleSubmitDealerDebt} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận</button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Hạn thanh toán</label>
-                                <input type="date" min={todayStr} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.targetDate} onChange={e => setDealerDebtForm({ ...dealerDebtForm, targetDate: e.target.value })} />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.reason} onChange={e => setDealerDebtForm({ ...dealerDebtForm, reason: e.target.value })} />
-                            </div>
-                            <button onClick={handleSubmitDealerDebt} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận</button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {dealerDebtToConfirm && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-green-100">
-                        <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600"><CheckCircle2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Đại lý đã trả nợ?</h3><div className="bg-green-50 p-4 rounded-xl text-left w-full mb-4 border border-green-100 space-y-2"><div><p className="text-xs text-gray-500">Khoản nợ</p><p className="font-bold text-gray-900">{dealerDebtToConfirm.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền</p><p className="font-bold text-green-600 text-lg">{formatCurrency(dealerDebtToConfirm.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ ghi nhận <strong>Doanh thu/Nộp tiền</strong> vào hệ thống.</p><div className="flex gap-3 w-full"><button onClick={() => setDealerDebtToConfirm(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDealerDebtPaid} className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">Xác nhận</button></div></div>
+            {
+                dealerDebtToConfirm && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-green-100">
+                            <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600"><CheckCircle2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Đại lý đã trả nợ?</h3><div className="bg-green-50 p-4 rounded-xl text-left w-full mb-4 border border-green-100 space-y-2"><div><p className="text-xs text-gray-500">Khoản nợ</p><p className="font-bold text-gray-900">{dealerDebtToConfirm.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền</p><p className="font-bold text-green-600 text-lg">{formatCurrency(dealerDebtToConfirm.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ ghi nhận <strong>Doanh thu/Nộp tiền</strong> vào hệ thống.</p><div className="flex gap-3 w-full"><button onClick={() => setDealerDebtToConfirm(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDealerDebtPaid} className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">Xác nhận</button></div></div>
+                        </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* NEW EXPENSE MODAL - FIX 1 */}
-            {showExpenseModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-red-700">Yêu cầu {expenseForm.type === 'advance' ? 'Ứng tiền' : 'Chi tiền'}</h3>
-                            <button onClick={() => setShowExpenseModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                <input
-                                    type="text"
-                                    className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500 font-bold"
-                                    value={expenseForm.amount}
-                                    onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({ ...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }}
-                                />
+            {
+                showExpenseModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-red-700">Yêu cầu {expenseForm.type === 'advance' ? 'Ứng tiền' : 'Chi tiền'}</h3>
+                                <button onClick={() => setShowExpenseModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Lý do</label>
-                                <input
-                                    type="text"
-                                    className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500"
-                                    value={expenseForm.reason}
-                                    onChange={e => setExpenseForm({ ...expenseForm, reason: e.target.value })}
-                                    placeholder="VD: Tiếp khách, mua đồ..."
-                                />
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500 font-bold"
+                                        value={expenseForm.amount}
+                                        onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({ ...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Lý do</label>
+                                    <input
+                                        type="text"
+                                        className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500"
+                                        value={expenseForm.reason}
+                                        onChange={e => setExpenseForm({ ...expenseForm, reason: e.target.value })}
+                                        placeholder="VD: Tiếp khách, mua đồ..."
+                                    />
+                                </div>
+                                <div className="text-xs bg-gray-50 p-2 rounded text-gray-500 italic">
+                                    {expenseForm.type === 'advance'
+                                        ? 'Khoản này sẽ tạo thành Nợ Tạm Ứng cần hoàn trả.'
+                                        : 'Khoản này là chi phí chung, trừ thẳng vào quỹ.'}
+                                </div>
+                                <button
+                                    onClick={handleRequestExpense}
+                                    className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors"
+                                >
+                                    Gửi yêu cầu
+                                </button>
                             </div>
-                            <div className="text-xs bg-gray-50 p-2 rounded text-gray-500 italic">
-                                {expenseForm.type === 'advance'
-                                    ? 'Khoản này sẽ tạo thành Nợ Tạm Ứng cần hoàn trả.'
-                                    : 'Khoản này là chi phí chung, trừ thẳng vào quỹ.'}
-                            </div>
-                            <button
-                                onClick={handleRequestExpense}
-                                className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors"
-                            >
-                                Gửi yêu cầu
-                            </button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* STOP CARE MODAL - FIX 2 */}
-            {showStopModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+            {
+                showStopModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900">Ngưng chăm sóc khách</h3>
+                                <button onClick={() => setShowStopModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
+                            </div>
+                            <textarea
+                                value={stopReason}
+                                onChange={(e) => setStopReason(e.target.value)}
+                                className="w-full border border-gray-300 rounded-xl p-3 mb-4 outline-none focus:border-red-500 h-24 resize-none"
+                                placeholder="Lý do ngưng (VD: Đã mua hãng khác, Sai số...)"
+                            />
+                            <div className="bg-red-50 text-red-800 text-xs p-3 rounded-lg mb-4">
+                                Khách hàng sẽ chuyển sang trạng thái <strong>{isAdmin || isMod ? 'Đã hủy' : 'Chờ duyệt hủy'}</strong> và phân loại <strong>Cool</strong>.
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => setShowStopModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl">Hủy</button>
+                                <button onClick={handleStopCare} className="flex-1 py-2 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Xác nhận</button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            <CustomerProgressModal
+                customer={customer}
+                visible={showProgressModal}
+                onClose={() => setShowProgressModal(false)}
+                onUpdate={() => fetchCustomerData(true)}
+            />
+
+            {/* LONG TERM CARE SELECTION MODAL */}
+            {showLongTermModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
                     <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                         <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Ngưng chăm sóc khách</h3>
-                            <button onClick={() => setShowStopModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
+                            <h3 className="text-lg font-bold text-blue-700 flex items-center gap-2"><Calendar size={20} /> Chọn ngày CS Dài hạn</h3>
+                            <button onClick={() => { setShowLongTermModal(false); if (!isLongTerm) setIsLongTerm(false); }}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                         </div>
-                        <textarea
-                            value={stopReason}
-                            onChange={(e) => setStopReason(e.target.value)}
-                            className="w-full border border-gray-300 rounded-xl p-3 mb-4 outline-none focus:border-red-500 h-24 resize-none"
-                            placeholder="Lý do ngưng (VD: Đã mua hãng khác, Sai số...)"
-                        />
-                        <div className="bg-red-50 text-red-800 text-xs p-3 rounded-lg mb-4">
-                            Khách hàng sẽ chuyển sang trạng thái <strong>{isAdmin || isMod ? 'Đã hủy' : 'Chờ duyệt hủy'}</strong> và phân loại <strong>Cool</strong>.
+
+                        <div className="mb-6">
+                            <label className="block text-sm font-bold text-gray-700 mb-2">Ngày nhắc lại (Tối đa 3 tháng)</label>
+                            <input
+                                type="date"
+                                className="w-full border-2 border-blue-100 rounded-xl px-4 py-3 outline-none focus:border-blue-500 font-bold text-gray-800"
+                                value={longTermDate}
+                                onChange={(e) => setLongTermDate(e.target.value)}
+                                min={todayStr}
+                            />
+                            <p className="text-xs text-blue-500 mt-2 italic bg-blue-50 p-2 rounded-lg">
+                                * Lưu ý: Khách hàng sẽ được chuyển sang danh sách <strong>Cool</strong>.
+                            </p>
                         </div>
-                        <div className="flex gap-2">
-                            <button onClick={() => setShowStopModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl">Hủy</button>
-                            <button onClick={handleStopCare} className="flex-1 py-2 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Xác nhận</button>
-                        </div>
+
+                        <button
+                            onClick={handleSaveLongTerm}
+                            disabled={!longTermDate}
+                            className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-200 transition-all"
+                        >
+                            Lưu cấu hình
+                        </button>
                     </div>
                 </div>
             )}
-
-        </div>
+        </div >
     );
 };
 

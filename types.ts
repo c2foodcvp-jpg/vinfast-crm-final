@@ -153,6 +153,9 @@ export interface UserProfile {
   is_locked_advance?: boolean; // Block salary advance requests
   can_access_leads_queue?: boolean; // MOD permission to access Leads Queue page
 
+  // MOD Consultant Mode: When true, MOD only sees their own customers instead of team
+  is_consultant_mode?: boolean;
+
   created_at?: string;
   discord_config?: any;
 }
@@ -197,10 +200,22 @@ export interface Customer {
 
   created_at: string;
   updated_at?: string;
+  won_at?: string; // NEW: Official "Closing Date" for Progress Calculation
 
   // Virtual field for UI
   _is_delegated?: boolean;
   _shared_permission?: 'view' | 'edit'; // New field for per-customer share
+
+  // Delivery Progress Tracking
+  delivery_progress?: DeliveryProgress;
+}
+
+export interface DeliveryProgress {
+  [key: string]: {
+    completed: boolean;
+    timestamp?: string; // ISO date string
+    note?: string;
+  };
 }
 
 export interface Interaction {
