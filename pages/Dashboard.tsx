@@ -52,7 +52,7 @@ const Dashboard: React.FC = () => {
     }, []);
 
     // Stats States
-    const [stats, setStats] = useState({ total: 0, new: 0, won: 0, potential: 0 });
+    const [stats, setStats] = useState({ total: 0, new: 0, won: 0, potential: 0, stopped: 0 });
     const [alerts, setAlerts] = useState({
         due: 0, overdue: 0, pendingCustomers: 0, pendingEmployees: 0, pendingTransfers: 0, pendingDeals: 0, assignedTodayToMe: 0, pendingAckCount: 0, pendingAckReps: 0, expiredLongTerm: 0, pendingFinance: 0, duplicateLeadsToday: 0
     });
@@ -258,8 +258,9 @@ const Dashboard: React.FC = () => {
         const newLeads = filteredCustomers.filter(c => c.status === CustomerStatus.NEW || c.status === CustomerStatus.CONTACTED).length; // "New" in period context usually means added
         const won = filteredCustomers.filter(c => c.status === CustomerStatus.WON).length;
         const potential = filteredCustomers.filter(c => c.is_special_care === true).length;
+        const stopped = filteredCustomers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING).length;
 
-        setStats({ total, new: newLeads, won, potential });
+        setStats({ total, new: newLeads, won, potential, stopped });
 
         // 3. Status Pie Chart
         const countWon = filteredCustomers.filter(c => c.status === CustomerStatus.WON).length;
@@ -419,10 +420,11 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* STAT CARDS */}
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
                 <StatCard title="Tổng khách hàng (Lọc)" value={stats.total} icon={Users} color="bg-blue-500" onClick={() => navigate('/customers', { state: { initialTab: 'all' } })} />
                 <StatCard title="Khách mới (Trong kỳ)" value={stats.new} icon={Plus} color="bg-emerald-500" onClick={() => navigate('/customers', { state: { filterType: 'today' } })} />
                 <StatCard title="Tiềm năng (Hot/Special)" value={stats.potential} icon={TrendingUp} color="bg-red-500" onClick={() => navigate('/customers', { state: { initialTab: 'special' } })} />
+                <StatCard title="Khách ngưng CS" value={stats.stopped} icon={UserX} color="bg-gray-500" onClick={() => navigate('/customers', { state: { initialTab: 'lost' } })} />
                 <StatCard title="Đã chốt đơn" value={stats.won} icon={CheckCircle} color="bg-green-500" onClick={() => navigate('/customers', { state: { initialTab: 'won' } })} />
             </div>
 

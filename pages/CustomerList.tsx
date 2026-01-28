@@ -843,7 +843,7 @@ const CustomerList: React.FC = () => {
             </div>
 
             {/* List content */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {paginatedCustomers.length === 0 ? (
                     <div className="col-span-full py-12 text-center text-gray-500 bg-white rounded-2xl border border-gray-100 border-dashed">
                         <User size={48} className="mx-auto text-gray-300 mb-3" /> <p>Không tìm thấy khách hàng nào.</p>

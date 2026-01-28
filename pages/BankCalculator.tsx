@@ -1,14 +1,13 @@
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-    Calculator, Landmark, Calendar, DollarSign, Percent, ArrowRight, Download,
-    FileImage, Settings2, Info, ChevronDown, CheckCircle2, TableProperties, Loader2, ArrowLeft, Lock, ArrowUpCircle, FileText
+    Calculator, Percent, FileImage, Settings2, TableProperties, Loader2, ArrowLeft, Lock, ArrowUpCircle, FileText
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { useAuth } from '../contexts/AuthContext';
-import { MembershipTier } from '../types';
+import { MembershipTier, UserRole } from '../types';
 
 const BankCalculator: React.FC = () => {
     const { userProfile } = useAuth();
@@ -21,7 +20,7 @@ const BankCalculator: React.FC = () => {
     const isPlatinumOrHigher =
         userProfile?.member_tier === MembershipTier.PLATINUM ||
         userProfile?.member_tier === MembershipTier.DIAMOND ||
-        userProfile?.role === 'admin' || userProfile?.role === 'moderator'; // Allow Admin/Mod
+        userProfile?.role === UserRole.ADMIN || userProfile?.role === UserRole.MOD; // Allow Admin/Mod
 
     if (!isPlatinumOrHigher) {
         return (
@@ -175,12 +174,20 @@ const BankCalculator: React.FC = () => {
                 useCORS: true,
                 backgroundColor: '#ffffff',
                 logging: false,
+                windowWidth: 1600, // Force desktop width
                 onclone: (clonedDoc) => {
                     const tableContainer = clonedDoc.getElementById('repayment-table-container');
                     if (tableContainer) {
                         tableContainer.style.maxHeight = 'none';
                         tableContainer.style.overflow = 'visible';
+                        tableContainer.style.width = 'auto'; // Allow expansion
                     }
+
+                    // Hide summary section if requested, but for Image user might want it? 
+                    // User said "Xuất PDF... không cần hiện 3 ô". I will keep it in Image for now unless asked.
+                    // Wait, usually users want consistency. But specifically PDF was mentioned.
+                    // I will leave Image alone for now regarding hiding, but fix the cut-off/overflow logic.
+
                     // Thêm tiêu đề chuyên nghiệp vào bản clone
                     const header = clonedDoc.createElement('div');
                     header.innerHTML = `
@@ -214,12 +221,21 @@ const BankCalculator: React.FC = () => {
                 useCORS: true,
                 backgroundColor: '#ffffff',
                 logging: false,
+                windowWidth: 1600, // Force desktop width to prevent cut-off
                 onclone: (clonedDoc) => {
                     const tableContainer = clonedDoc.getElementById('repayment-table-container');
                     if (tableContainer) {
                         tableContainer.style.maxHeight = 'none';
                         tableContainer.style.overflow = 'visible';
+                        tableContainer.style.width = '100%'; // Ensure table takes full width
                     }
+
+                    // Hide summary section for PDF
+                    const summary = clonedDoc.getElementById('summary-section');
+                    if (summary) {
+                        summary.remove();
+                    }
+
                     const header = clonedDoc.createElement('div');
                     header.innerHTML = `
                         <div style="padding: 20px; border-bottom: 2px solid #2462bd; margin-bottom: 20px; text-align: center;">
@@ -474,7 +490,7 @@ const BankCalculator: React.FC = () => {
 
                 {/* RIGHT: SUMMARY & TABLE */}
                 <div className="lg:col-span-8 space-y-6" id="export-container" ref={resultRef}>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div id="summary-section" className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="bg-gradient-to-br from-primary-50 to-blue-100 p-5 rounded-2xl border border-primary-100">
                             <p className="text-primary-800 text-xs font-bold uppercase mb-1">Tháng trả cao nhất</p>
                             <h4 className="text-2xl font-bold text-primary-900">{formatCurrency(totals.firstMonth)} đ</h4>

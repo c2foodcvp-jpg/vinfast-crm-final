@@ -32,7 +32,7 @@ import {
     Wallet
 } from 'lucide-react';
 
-const ITEMS_PER_PAGE = 12;
+const ITEMS_PER_PAGE = 15;
 
 const Deals: React.FC = () => {
     const { userProfile, isAdmin, isMod } = useAuth();
@@ -540,7 +540,7 @@ const Deals: React.FC = () => {
             </div>
 
             {/* List */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {paginatedCustomers.length === 0 ? (
                     <div className="col-span-full py-12 text-center text-gray-500 bg-white rounded-2xl border border-gray-100 border-dashed">
                         {filterYear === 'all'

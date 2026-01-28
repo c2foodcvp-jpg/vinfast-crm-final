@@ -780,7 +780,14 @@ const Finance: React.FC = () => {
 
 
     const expenses = filteredTransactions.filter(t => t.type === 'expense' || t.type === 'advance');
-    const deposits = filteredTransactions.filter(t => ['deposit', 'revenue', 'adjustment', 'repayment', 'personal_bonus'].includes(t.type));
+    const expectedRevenueCustomers = filteredCustomers
+        .filter(c => (c.deal_details?.revenue || 0) > 0)
+        .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
+    const approvedDeposits = filteredTransactions.filter(t =>
+        ['deposit', 'revenue', 'adjustment', 'repayment', 'personal_bonus'].includes(t.type) &&
+        t.status === 'approved' &&
+        !t.reason.toLowerCase().includes('dự kiến')
+    );
     const refundableAdvancesList = filteredTransactions.filter(t => t.type === 'advance' && !t.reason.toLowerCase().includes('ứng lương'));
 
     const allRepayments = transactions.filter(t => t.type === 'repayment');
@@ -1042,7 +1049,7 @@ const Finance: React.FC = () => {
             </div>
 
             {/* DASHBOARD HISTORY TABLES */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <div className="p-4 bg-red-50 border-b border-red-100 flex justify-between items-center"><h3 className="font-bold text-red-800 flex items-center gap-2"><ArrowUpRight /> Lịch sử Chi/Tạm Ứng</h3>
                         <button onClick={() => setShowExpenseModal(true)} className="px-3 py-1 bg-red-600 text-white text-xs font-bold rounded-lg shadow hover:bg-red-700 flex items-center gap-1"><ArrowUpRight size={14} /> Xuất tiền (Chi)</button>
@@ -1051,8 +1058,13 @@ const Finance: React.FC = () => {
                 </div>
 
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div className="p-4 bg-green-50 border-b border-green-100 flex justify-between items-center"><h3 className="font-bold text-green-800 flex items-center gap-2"><ArrowDownLeft /> Hoạt động Nộp tiền</h3><button onClick={() => setShowDepositModal(true)} className="px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-lg shadow hover:bg-green-700 flex items-center gap-1"><QrCode size={14} /> Nộp quỹ</button></div>
-                    <div className="p-4 max-h-[600px] overflow-y-auto space-y-3">{deposits.map(t => (<div key={t.id} className="p-3 border border-gray-100 rounded-xl transition-all hover:shadow-sm"><div className="flex justify-between items-center"><div><p className="font-bold text-gray-900 flex items-center gap-2">{t.reason} {t._is_part_time_creator && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 rounded uppercase">Part-time (30% lương)</span>}</p><p className="text-xs text-gray-500">{t.user_name} • {new Date(t.created_at).toLocaleDateString()}</p>{t.customer_name && <p className="text-xs text-green-600 mt-1">Khách: {t.customer_name}</p>}</div><span className={`font-bold ${t.type === 'adjustment' && t.amount < 0 ? 'text-red-600' : 'text-green-600'}`}>{t.amount > 0 ? '+' : ''}{formatCurrency(t.amount)}</span></div><div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-50"><span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${t.status === 'approved' ? 'bg-green-100 text-green-700' : t.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{t.status}</span><div className="flex gap-2">{t.status === 'pending' && (isAdmin || isMod) && (<><button onClick={() => handleApprove(t, true)} className="p-1 bg-green-100 text-green-600 rounded hover:bg-green-200"><CheckCircle2 size={16} /></button><button onClick={() => handleApprove(t, false)} className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"><XCircle size={16} /></button></>)}{(isAdmin || isMod) && (<button onClick={() => setTransactionToDelete(t)} className="p-1 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600"><Trash2 size={16} /></button>)}</div></div></div>))}</div>
+                    <div className="p-4 bg-purple-50 border-b border-purple-100 flex justify-between items-center"><h3 className="font-bold text-purple-800 flex items-center gap-2"><ArrowDownLeft /> Nộp tiền DỰ KIẾN</h3><span className="text-xs font-bold text-purple-600 bg-white px-2 py-1 rounded-lg border border-purple-200">Tổng: {formatCurrency(totalExpectedRevenue)} VNĐ</span></div>
+                    <div className="p-4 max-h-[600px] overflow-y-auto space-y-3">{expectedRevenueCustomers.length === 0 ? (<div className="text-center py-8 text-gray-400 text-sm">Không có doanh thu dự kiến.</div>) : expectedRevenueCustomers.map(c => (<div key={c.id} className="p-3 border border-purple-100 bg-purple-50/30 rounded-xl transition-all hover:shadow-sm cursor-pointer" onClick={() => window.open('/customers/' + c.id, '_blank')}><div className="flex justify-between items-center"><div><p className="font-bold text-gray-900">{c.name}</p><p className="text-xs text-gray-500">{c.sales_rep} • {new Date(c.updated_at || c.created_at).toLocaleDateString('vi-VN')}</p><p className="text-xs text-purple-600 mt-1 font-medium">SĐT: {c.phone}</p></div><span className="font-bold text-purple-600">+{formatCurrency(c.deal_details?.revenue || 0)}</span></div><div className="flex justify-between items-center mt-2 pt-2 border-t border-purple-100"><span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-700">Dự kiến HĐ</span></div></div>))}</div>
+                </div>
+
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="p-4 bg-green-50 border-b border-green-100 flex justify-between items-center"><h3 className="font-bold text-green-800 flex items-center gap-2"><CheckCircle2 /> Nộp tiền THỰC THU</h3><button onClick={() => setShowDepositModal(true)} className="px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-lg shadow hover:bg-green-700 flex items-center gap-1"><QrCode size={14} /> Nộp quỹ</button></div>
+                    <div className="p-4 max-h-[600px] overflow-y-auto space-y-3">{approvedDeposits.length === 0 ? (<div className="text-center py-8 text-gray-400 text-sm">Chưa có khoản nào đã nộp.</div>) : approvedDeposits.map(t => (<div key={t.id} className={`p-3 border border-gray-100 rounded-xl transition-all hover:shadow-sm ${t.customer_id ? 'cursor-pointer hover:border-green-200' : ''}`} onClick={() => t.customer_id && window.open('/customers/' + t.customer_id, '_blank')}><div className="flex justify-between items-center"><div><p className="font-bold text-gray-900 flex items-center gap-2">{t.reason} {t._is_part_time_creator && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 rounded uppercase">Part-time (30% lương)</span>}</p><p className="text-xs text-gray-500">{t.user_name} • {new Date(t.created_at).toLocaleDateString()}</p>{t.customer_name && <p className="text-xs text-green-600 mt-1">Khách: {t.customer_name}</p>}</div><span className="font-bold text-green-600">{t.amount > 0 ? '+' : ''}{formatCurrency(t.amount)}</span></div><div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-50"><span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-green-100 text-green-700">ĐÃ NỘP QUỸ</span><div className="flex gap-2">{(isAdmin || isMod) && (<button onClick={(e) => { e.stopPropagation(); setTransactionToDelete(t); }} className="p-1 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600"><Trash2 size={16} /></button>)}</div></div></div>))}</div>
                 </div>
 
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

@@ -383,7 +383,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 </header>
 
                 <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
-                    <div className="mx-auto max-w-7xl animate-fade-in pb-10">
+                    <div className="mx-auto w-full px-4 animate-fade-in pb-10">
                         {children}
                     </div>
                 </div>
