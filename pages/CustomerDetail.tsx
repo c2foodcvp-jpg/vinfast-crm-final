@@ -2,10 +2,10 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, Interaction, CustomerClassification, DealDetails, UserProfile, UserRole, Distributor, DealStatus, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType, DeliveryProgress } from '../types';
+import { Customer, CustomerStatus, Interaction, CustomerClassification, UserProfile, UserRole, Distributor, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType, DeliveryProgress } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
-    ArrowLeft, Phone, MapPin, Edit, MessageCircle, Send, User as UserIcon, CarFront, Calendar, Flame, Ban, CheckCircle2, ShieldCheck, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, Database, Info, Copy, Terminal, ChevronDown, FileCheck2, Trash2, UserCheck, Hand, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, UserPlus, Keyboard, AlertOctagon, Check, Minus, Eye, Share2, Lock, Users, Archive, EyeOff, Bug, Calculator, Truck
+    ArrowLeft, Phone, Edit, MessageCircle, Send, User as UserIcon, Calendar, Flame, Ban, CheckCircle2, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, FileCheck2, Trash2, UserCheck, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, Check, Eye, Share2, Archive, Calculator, Truck
 } from 'lucide-react';
 import CustomerProgressModal, { DELIVERY_STEPS } from '../components/CustomerProgressModal';
 
@@ -61,6 +61,7 @@ const CustomerDetail: React.FC = () => {
 
     const [showSuspendModal, setShowSuspendModal] = useState(false);
     const [suspendReason, setSuspendReason] = useState('');
+    const [showRefundConfirm, setShowRefundConfirm] = useState(false); // NEW: State for refund confirmation
 
     const [showChangeSalesModal, setShowChangeSalesModal] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -537,7 +538,9 @@ const CustomerDetail: React.FC = () => {
                 delivery_progress: {
                     ...customer.delivery_progress,
                     deposited: { completed: true, timestamp: new Date().toISOString() }
-                }
+                },
+                // Set won_at to NOW upon approval
+                won_at: new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().replace('Z', '+07:00')
             });
             if (customer.deal_details?.revenue && isMKTSource) {
                 await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'revenue', amount: customer.deal_details.revenue, reason: 'Doanh thu dự kiến (Duyệt chốt)', status: 'approved' }]);
@@ -619,8 +622,80 @@ const CustomerDetail: React.FC = () => {
     const confirmSuspend = async () => { if (!suspendReason.trim()) { showToast("Vui lòng nhập lý do treo hồ sơ.", 'error'); return; } const newStatus = (isAdmin || isMod) ? 'suspended' : 'suspended_pending'; await updateCustomerField({ deal_status: newStatus }); handleAddNote('note', `Treo hồ sơ. Lý do: ${suspendReason}`); setShowSuspendModal(false); setSuspendReason(''); showToast("Đã cập nhật trạng thái hồ sơ!"); };
     const handleAddRevenue = async () => { const amount = Number(revenueForm.amount.replace(/\./g, '')); if (!amount || amount <= 0) return; try { const currentActual = customer?.deal_details?.actual_revenue || 0; const newActual = currentActual + amount; const newDealDetails = { ...customer?.deal_details, actual_revenue: newActual }; const { error } = await supabase.from('customers').update({ deal_details: newDealDetails }).eq('id', id); if (error) throw error; setCustomer(prev => { if (!prev) return null; return { ...prev, deal_details: newDealDetails as any }; }); setShowAddRevenueModal(false); setRevenueForm({ amount: '', note: '' }); showToast("Đã thêm doanh thu thực tế!"); if (revenueForm.note) handleAddNote('note', `Thêm doanh thu thực tế: +${formatCurrency(amount)} VNĐ. Ghi chú: ${revenueForm.note}`); } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); } };
     const handleAddIncurredExpense = async () => { const amount = Number(incurredExpenseForm.amount.replace(/\./g, '')); if (!amount || amount <= 0 || !incurredExpenseForm.reason) { showToast("Vui lòng nhập đủ thông tin", 'error'); return; } try { const { data, error } = await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'incurred_expense', amount: amount, reason: incurredExpenseForm.reason, status: 'approved' }]).select().single(); if (error) throw error; setTransactions(prev => [data as Transaction, ...prev]); setShowIncurredExpenseModal(false); setIncurredExpenseForm({ amount: '', reason: '' }); handleAddNote('note', `Thêm khoản chi phát sinh: ${formatCurrency(amount)} VNĐ. Lý do: ${incurredExpenseForm.reason}`); showToast("Đã thêm khoản chi phát sinh!"); } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); } };
-    const handleRequestExpense = async () => { const amount = Number(expenseForm.amount.replace(/\./g, '')); if (!amount || amount <= 0) { showToast("Vui lòng nhập số tiền hợp lệ!", 'error'); return; } if (!expenseForm.reason.trim()) { showToast("Vui lòng nhập lý do chi/ứng!", 'error'); return; } const status = (isAdmin || isMod) ? 'approved' : 'pending'; const approvedBy = (isAdmin || isMod) ? userProfile?.id : null; try { const { data, error } = await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: expenseForm.type, amount: amount, reason: expenseForm.reason, status: status, approved_by: approvedBy }]).select().single(); if (error) throw error; setTransactions(prev => [data as Transaction, ...prev]); setShowExpenseModal(false); setExpenseForm({ type: 'expense', amount: '', reason: '' }); const actionText = expenseForm.type === 'advance' ? `ứng tiền` : 'chi tiền'; const statusText = status === 'approved' ? ' (Đã duyệt)' : ' (Chờ duyệt)'; handleAddNote('note', `Đã gửi yêu cầu ${actionText}: ${formatCurrency(amount)} VNĐ.${statusText}`); showToast(`Gửi yêu cầu thành công! ${status === 'pending' ? 'Vui lòng chờ duyệt.' : 'Đã được duyệt.'}`, 'success'); } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); } };
-    const handleRepayAdvance = async () => { const amount = Number(repayForm.amount.replace(/\./g, '')); if (!amount || amount <= 0) return; try { const { data, error } = await supabase.from('transactions').insert([{ customer_id: id, customer_name: customer?.name, user_id: userProfile?.id, user_name: userProfile?.full_name, type: 'repayment', amount: amount, reason: `${repayForm.reason} [Ref:Self]`, status: 'pending' }]).select().single(); if (error) throw error; setTransactions(prev => [data as Transaction, ...prev]); setShowRepayModal(false); setRepayForm({ amount: '', reason: 'Nộp lại tiền ứng' }); handleAddNote('note', `Đã gửi yêu cầu nộp lại tiền ứng: ${formatCurrency(amount)} VNĐ.`); showToast("Đã gửi yêu cầu nộp tiền! Chờ Admin duyệt.", 'success'); } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); } };
+    // REPLACED: handleRequestExpense removed.
+    // NEW: Handle Borrow Money (Loan)
+    const [showBorrowModal, setShowBorrowModal] = useState(false);
+    const [borrowForm, setBorrowForm] = useState({ amount: '', date: '', reason: '' });
+
+    const handleSubmitBorrow = async () => {
+        const amount = Number(borrowForm.amount.replace(/\./g, ''));
+        if (!amount || amount <= 0 || !borrowForm.date) { showToast("Vui lòng nhập đủ thông tin!", 'error'); return; }
+
+        try {
+            // Check Daily Limit (100M) for User
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const { data: todayLoans } = await supabase.from('transactions')
+                .select('amount')
+                .eq('user_id', userProfile?.id)
+                .eq('type', 'loan')
+                .gte('created_at', todayStart.toISOString())
+                .neq('status', 'rejected');
+
+            const currentTotal = todayLoans?.reduce((sum, t) => sum + t.amount, 0) || 0;
+            if (currentTotal + amount > 100_000_000) {
+                showToast(`Vượt quá hạn mức mượn trong ngày (Đã mượn: ${formatCurrency(currentTotal)}, Hạn mức: 100tr)`, 'error');
+                return;
+            }
+
+            const { data, error } = await supabase.from('transactions').insert([{
+                customer_id: id,
+                customer_name: customer?.name,
+                user_id: userProfile?.id,
+                user_name: userProfile?.full_name,
+                type: 'loan',
+                amount: amount,
+                target_date: borrowForm.date,
+                reason: `Mượn tiền (Trả: ${new Date(borrowForm.date).toLocaleDateString('vi-VN')})`,
+                status: (isAdmin || isMod) ? 'approved' : 'pending', // Admin approves to deduct fund? Prompt says "Admin/Mod phải duyệt mới trừ quỹ". Even if Admin requests? Let's assume yes or auto-approve if Admin.
+                approved_by: (isAdmin || isMod) ? userProfile?.id : null
+            }]).select().single();
+            if (error) throw error;
+
+            setTransactions(prev => [data as Transaction, ...prev]);
+            setShowBorrowModal(false);
+            setBorrowForm({ amount: '', date: '', reason: '' });
+
+            const msg = (isAdmin || isMod) ? "Đã tạo khoản vay thành công!" : "Đã gửi yêu cầu mượn tiền!";
+            handleAddNote('note', `Đã tạo khoản vay: ${formatCurrency(amount)} VNĐ. Dự kiến trả: ${new Date(borrowForm.date).toLocaleDateString('vi-VN')}`);
+            showToast(msg, 'success');
+        } catch (e: any) {
+            showToast("Lỗi: " + e.message, 'error');
+        }
+    };
+
+    const handleRepayLoan = async () => {
+        const amount = Number(repayForm.amount.replace(/\./g, ''));
+        if (!amount || amount <= 0) return;
+        try {
+            const { data, error } = await supabase.from('transactions').insert([{
+                customer_id: id,
+                customer_name: customer?.name,
+                user_id: userProfile?.id,
+                user_name: userProfile?.full_name,
+                type: 'loan_repayment',
+                amount: amount,
+                reason: `${repayForm.reason} [Ref:Client]`,
+                status: 'pending'
+            }]).select().single();
+            if (error) throw error;
+            setTransactions(prev => [data as Transaction, ...prev]);
+            setShowRepayModal(false);
+            setRepayForm({ amount: '', reason: 'Trả nợ vay' });
+            handleAddNote('note', `Đã gửi xác nhận trả nợ: ${formatCurrency(amount)} VNĐ.`);
+            showToast("Đã gửi yêu cầu trả tiền! Chờ Admin duyệt.", 'success');
+        } catch (err: any) { showToast("Lỗi: " + err.message, 'error'); }
+    };
 
     // UPDATED: Create Dealer Debt with checkbox option
     const handleSubmitDealerDebt = async () => {
@@ -662,7 +737,7 @@ const CustomerDetail: React.FC = () => {
         } catch (e) { showToast("Lỗi tạo khoản nợ", 'error'); }
     };
 
-    const handleDealerDebtPaid = (debtTransaction: Transaction) => { setDealerDebtToConfirm(debtTransaction); };
+
 
     // UPDATED: Dealer Debt Paid -> Create Deposit -> Reduces Pending Deposit automatically
     const executeDealerDebtPaid = async () => {
@@ -695,6 +770,16 @@ const CustomerDetail: React.FC = () => {
             status: newStatus,
             deal_details: { ...dealForm, revenue: revenueNum },
             deal_status: newStatus === CustomerStatus.WON ? 'processing' : undefined,
+            // Auto-activate 'deposited' step logic
+            delivery_progress: newStatus === CustomerStatus.WON ? {
+                ...customer?.delivery_progress,
+                deposited: {
+                    completed: true,
+                    timestamp: customer?.delivery_progress?.deposited?.completed
+                        ? customer?.delivery_progress?.deposited?.timestamp
+                        : new Date().toISOString()
+                }
+            } : customer?.delivery_progress,
             won_at: new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().replace('Z', '+07:00')
         });
         if (newStatus === CustomerStatus.WON && isMKTSource) {
@@ -705,16 +790,8 @@ const CustomerDetail: React.FC = () => {
         showToast("Đã cập nhật!");
     };
 
-    const confirmDeleteTransaction = async () => {
-        if (!transactionToDelete) return;
-        try {
-            const { error } = await supabase.from('transactions').delete().eq('id', transactionToDelete.id);
-            if (error) throw error;
-            setTransactions(prev => prev.filter(t => t.id !== transactionToDelete.id));
-            setTransactionToDelete(null);
-            showToast("Đã xóa giao dịch thành công!");
-        } catch (e: any) { showToast("Lỗi xóa: " + e.message, 'error'); }
-    };
+
+
 
     // --- CALCULATION LOGIC ---
     const predictedRevenue = customer?.deal_details?.revenue || 0;
@@ -732,13 +809,13 @@ const CustomerDetail: React.FC = () => {
     // Expense reduces the fund debt because it's money spent that won't be repaid
     const pendingDeposit = Math.max(0, moneyInTotal - totalDeposited - totalPureExpense);
 
-    const refundableAdvances = transactions.filter(t => t.type === 'advance' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
-    const repayments = transactions.filter(t => t.type === 'repayment' && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
+    const refundableAdvances = transactions.filter(t => (t.type === 'advance' || t.type === 'loan') && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
+    const repayments = transactions.filter(t => (t.type === 'repayment' || t.type === 'loan_repayment') && t.status === 'approved').reduce((acc, curr) => acc + curr.amount, 0);
     const outstandingAdvance = Math.max(0, refundableAdvances - repayments);
-    const pendingRepaymentExists = transactions.some(t => t.type === 'repayment' && t.status === 'pending');
+    const pendingRepaymentExists = transactions.some(t => (t.type === 'repayment' || t.type === 'loan_repayment') && t.status === 'pending');
     // totalExpense for display = expense + outstanding advance (unpaid advances)
-    const totalExpense = totalPureExpense + outstandingAdvance;
-    const netRevenue = totalDeposited - totalExpense;
+    // const totalExpense = totalPureExpense + outstandingAdvance;
+    // const netRevenue = totalDeposited - totalExpense;
     const callCount = useMemo(() => interactions.filter(i => i.type === 'call').length, [interactions]);
     const messageCount = useMemo(() => interactions.filter(i => ['zalo', 'email', 'message'].includes(i.type) || i.content.toLowerCase().includes('zalo') || i.content.toLowerCase().includes('nhắn tin')).length, [interactions]);
 
@@ -794,7 +871,7 @@ const CustomerDetail: React.FC = () => {
                         )}
 
                         {/* NEW: Quote Button */}
-                        <button onClick={() => navigate('/quote')} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><Calculator size={16} /> Báo giá</button>
+                        <button onClick={() => navigate(`/quote?fromCustomer=${id}`)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><Calculator size={16} /> Báo giá</button>
 
                         {/* NEW: Delivery Progress Button - Hide if Completed */}
                         {/* NEW: Delivery Progress Button - Hide if Completed/Refunded/Suspended */}
@@ -843,7 +920,26 @@ const CustomerDetail: React.FC = () => {
                         <div className="bg-red-50 rounded-2xl p-6 shadow-sm border border-red-100 text-center animate-fade-in"><div className="flex justify-center mb-3"><Ban size={48} className="text-red-400" /></div><h3 className="font-bold text-red-700 text-lg mb-2">Khách hàng đang Ngưng Chăm Sóc</h3><p className="text-red-600 text-sm mb-4 italic">"{customer.stop_reason || 'Không có lý do'}"</p><button onClick={handleReopenCare} disabled={isDelegatedViewOnly} className="w-full py-2.5 bg-primary-600 text-white rounded-xl font-bold hover:bg-primary-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"><RefreshCcw size={18} /> Mở lại chăm sóc</button></div>
                     )}
                     {isWon && (
-                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-green-200 animate-fade-in"><h3 className="font-bold text-green-800 mb-4 flex items-center gap-2"><FileCheck2 size={20} /> Trạng thái đơn hàng</h3><div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center mb-4"><p className="text-xs text-green-600 font-bold uppercase mb-1">TÌNH TRẠNG HIỆN TẠI</p><p className="text-xl font-bold text-green-800">{isCompleted ? 'Đã hoàn thành' : isRefunded ? 'Đã trả cọc' : isSuspended ? 'Hồ sơ Treo' : customer.deal_status === 'completed_pending' ? 'Chờ duyệt hoàn thành' : customer.deal_status === 'refund_pending' ? 'Chờ duyệt trả cọc' : customer.deal_status === 'suspended_pending' ? 'Chờ duyệt Treo' : 'Đang Xử Lý'}</p></div><div className="space-y-3"><button className="w-full py-2.5 bg-white border border-green-600 text-green-700 rounded-xl font-bold text-sm hover:bg-green-50 flex items-center justify-center gap-2"><FileCheck2 size={16} /> Quản lý Đơn hàng</button>{!isCompleted && !isRefunded && !isSuspended && !isDelegatedViewOnly && (<><button onClick={() => handleDealAction('complete')} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 flex items-center justify-center gap-2"><CheckCircle2 size={16} /> Hoàn thành Đơn hàng</button><div className="grid grid-cols-2 gap-2"><button onClick={() => handleDealAction('refund')} className="py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Trả cọc</button><button onClick={() => handleDealAction('suspend')} className="py-2.5 bg-gray-100 text-gray-700 border border-gray-200 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><Archive size={16} /> Treo hồ sơ</button></div></>)}{(isRefunded || isSuspended) && !isDelegatedViewOnly && (<button onClick={() => handleDealAction('reopen')} className="w-full py-2.5 bg-orange-100 text-orange-700 border border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Mở xử lý lại</button>)}{(isAdmin || isMod) && (<button onClick={() => handleDealAction('cancel')} className="w-full py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Hủy chốt / Mở lại CS</button>)}</div></div>
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-green-200 animate-fade-in"><h3 className="font-bold text-green-800 mb-4 flex items-center gap-2"><FileCheck2 size={20} /> Trạng thái đơn hàng</h3><div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center mb-4"><p className="text-xs text-green-600 font-bold uppercase mb-1">TÌNH TRẠNG HIỆN TẠI</p><p className="text-xl font-bold text-green-800">{isCompleted ? 'Đã hoàn thành' : isRefunded ? 'Đã trả cọc' : isSuspended ? 'Hồ sơ Treo' : customer.deal_status === 'completed_pending' ? 'Chờ duyệt hoàn thành' : customer.deal_status === 'refund_pending' ? 'Chờ duyệt trả cọc' : customer.deal_status === 'suspended_pending' ? 'Chờ duyệt Treo' : 'Đang Xử Lý'}</p></div><div className="space-y-3"><button className="w-full py-2.5 bg-white border border-green-600 text-green-700 rounded-xl font-bold text-sm hover:bg-green-50 flex items-center justify-center gap-2"><FileCheck2 size={16} /> Quản lý Đơn hàng</button>{!isCompleted && !isRefunded && !isSuspended && customer.deal_status !== 'refund_pending' && !isDelegatedViewOnly && (<><button onClick={() => handleDealAction('complete')} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 flex items-center justify-center gap-2"><CheckCircle2 size={16} /> Hoàn thành Đơn hàng</button><div className="grid grid-cols-2 gap-2"><button onClick={() => setShowRefundConfirm(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Trả cọc</button><button onClick={() => handleDealAction('suspend')} className="py-2.5 bg-gray-100 text-gray-700 border border-gray-200 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><Archive size={16} /> Treo hồ sơ</button></div></>)}
+
+                            {/* REFUND PENDING STATE */}
+                            {customer.deal_status === 'refund_pending' && (
+                                <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200 mb-3 animate-fade-in">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <p className="text-yellow-800 font-bold flex items-center gap-2 text-sm">
+                                            <Loader2 size={16} className="animate-spin" /> Yêu cầu Trả cọc đang chờ duyệt
+                                        </p>
+                                        {(isAdmin || isMod) && !isDelegatedViewOnly && (
+                                            <button onClick={() => handleDealAction('refund')} className="px-3 py-1.5 bg-green-600 text-white font-bold rounded-lg text-xs hover:bg-green-700 shadow-sm">
+                                                Duyệt ngay
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-yellow-600 italic">Vui lòng đợi Admin/Mod xác nhận hoàn tiền cọc.</p>
+                                </div>
+                            )}
+
+                            {(isRefunded || isSuspended) && !isDelegatedViewOnly && (<div className="space-y-2">{customer.deal_status === 'refund_pending' && (isAdmin || isMod) && <button onClick={() => handleDealAction('refund')} className="w-full py-2.5 bg-red-600 text-white border border-red-700 rounded-xl font-bold text-sm hover:bg-red-700 flex items-center justify-center gap-2 animate-pulse"><CheckCircle2 size={16} /> Duyệt Trả Cọc</button>}<button onClick={() => handleDealAction('reopen')} className="w-full py-2.5 bg-orange-100 text-orange-700 border border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Mở xử lý lại</button></div>)}{(isAdmin || isMod) && (<button onClick={() => handleDealAction('cancel')} className="w-full py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Hủy chốt / Mở lại CS</button>)}</div></div>
                     )}
                     {!hideCarePanel && (
                         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
@@ -947,31 +1043,31 @@ const CustomerDetail: React.FC = () => {
                                 </div>
 
                                 <div className="bg-red-50 p-3 rounded-xl border border-red-100">
-                                    <p className="text-xs text-red-700 font-bold uppercase">Tổng chi phí (Đã duyệt)</p>
-                                    <p className="text-lg font-bold text-red-900">{formatCurrency(totalExpense)} VNĐ</p>
-
-                                    {outstandingAdvance > 0 && (
-                                        <div className="mt-2 pt-2 border-t border-red-100 flex items-center justify-between">
-                                            <div>
-                                                <p className="text-[10px] text-red-600 font-bold uppercase">Nợ ứng cần hoàn trả</p>
-                                                <p className="text-sm font-bold text-red-800">{formatCurrency(outstandingAdvance)} VNĐ</p>
-                                            </div>
-
-                                            {pendingRepaymentExists ? (
-                                                <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded border border-yellow-200 animate-pulse">Đang chờ duyệt...</span>
-                                            ) : (
-                                                <button disabled={isDelegatedViewOnly} onClick={() => { setRepayForm({ amount: outstandingAdvance.toLocaleString('vi-VN'), reason: 'Nộp lại tiền ứng' }); setShowRepayModal(true); }} className="px-2 py-1 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 flex items-center gap-1 disabled:opacity-50">
-                                                    <Undo2 size={12} /> Nộp lại
-                                                </button>
+                                    <div className="flex justify-between items-center mb-1">
+                                        <p className="text-xs text-red-700 font-bold uppercase">Nợ ứng / Mượn</p>
+                                    </div>
+                                    <div className="flex items-end justify-between">
+                                        <div>
+                                            <p className="text-lg font-bold text-red-900">{formatCurrency(outstandingAdvance)} VNĐ</p>
+                                            {outstandingAdvance > 0 && <p className="text-[10px] text-red-500 font-bold">Cần hoàn trả</p>}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button disabled={isDelegatedViewOnly} onClick={() => { setBorrowForm({ amount: '', date: '', reason: '' }); setShowBorrowModal(true); }} className="px-3 py-1 bg-red-600 text-white text-xs font-bold rounded shadow-md hover:bg-red-700 disabled:opacity-50">
+                                                Mượn tiền
+                                            </button>
+                                            {outstandingAdvance > 0 && (
+                                                pendingRepaymentExists ? (
+                                                    <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded border border-yellow-200 animate-pulse">Chờ duyệt trả...</span>
+                                                ) : (
+                                                    <button disabled={isDelegatedViewOnly} onClick={() => { setRepayForm({ amount: outstandingAdvance.toLocaleString('vi-VN'), reason: 'Trả nợ vay' }); setShowRepayModal(true); }} className="px-3 py-1 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 flex items-center gap-1 disabled:opacity-50 shadow-sm">
+                                                        <Undo2 size={12} /> Trả tiền
+                                                    </button>
+                                                )
                                             )}
                                         </div>
-                                    )}
-
-                                    <div className="flex gap-2 mt-2">
-                                        <button disabled={isDelegatedViewOnly} onClick={() => { setExpenseForm({ type: 'advance', amount: '', reason: '' }); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 disabled:opacity-50">Yêu cầu Ứng</button>
-                                        <button disabled={isDelegatedViewOnly} onClick={() => { setExpenseForm({ type: 'expense', amount: '', reason: '' }); setShowExpenseModal(true); }} className="flex-1 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50 disabled:opacity-50">Yêu cầu Chi</button>
                                     </div>
                                 </div>
+
 
                                 <div className="pt-2 border-t border-green-50"><button disabled={isDelegatedViewOnly} onClick={() => setShowDealerDebtModal(true)} className="w-full py-2 bg-white border border-green-200 text-green-700 font-bold rounded-xl text-sm hover:bg-green-50 flex items-center justify-center gap-2 disabled:opacity-50"><Building2 size={16} /> Tạo khoản Đại lý nợ</button></div></div></div>
                     )}
@@ -1286,7 +1382,7 @@ const CustomerDetail: React.FC = () => {
                                     <label className="block text-sm font-bold text-gray-700 mb-1">Nội dung</label>
                                     <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-gray-100" value={repayForm.reason} disabled />
                                 </div>
-                                <button onClick={handleRepayAdvance} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Gửi yêu cầu Nộp</button>
+                                <button onClick={handleRepayLoan} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Gửi yêu cầu Trả</button>
                             </div>
                         </div>
                     </div>
@@ -1349,14 +1445,13 @@ const CustomerDetail: React.FC = () => {
                 )
             }
 
-            {/* NEW EXPENSE MODAL - FIX 1 */}
             {
-                showExpenseModal && (
+                showBorrowModal && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
                         <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                             <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-bold text-red-700">Yêu cầu {expenseForm.type === 'advance' ? 'Ứng tiền' : 'Chi tiền'}</h3>
-                                <button onClick={() => setShowExpenseModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
+                                <h3 className="text-lg font-bold text-red-700">Mượn tiền quỹ</h3>
+                                <button onClick={() => setShowBorrowModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                             </div>
                             <div className="space-y-4">
                                 <div>
@@ -1364,31 +1459,64 @@ const CustomerDetail: React.FC = () => {
                                     <input
                                         type="text"
                                         className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500 font-bold"
-                                        value={expenseForm.amount}
-                                        onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({ ...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }}
+                                        value={borrowForm.amount}
+                                        onChange={e => { const v = e.target.value.replace(/\D/g, ''); setBorrowForm({ ...borrowForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }}
+                                    />
+                                    <p className="text-[10px] text-gray-500 mt-1">* Hạn mức: 100.000.000 VNĐ / ngày</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Dự kiến trả</label>
+                                    <input
+                                        type="date"
+                                        min={todayStr}
+                                        className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500"
+                                        value={borrowForm.date}
+                                        onChange={e => setBorrowForm({ ...borrowForm, date: e.target.value })}
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Lý do</label>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú (Tùy chọn)</label>
                                     <input
                                         type="text"
                                         className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500"
-                                        value={expenseForm.reason}
-                                        onChange={e => setExpenseForm({ ...expenseForm, reason: e.target.value })}
-                                        placeholder="VD: Tiếp khách, mua đồ..."
+                                        value={borrowForm.reason}
+                                        onChange={e => setBorrowForm({ ...borrowForm, reason: e.target.value })}
+                                        placeholder="Lý do..."
                                     />
                                 </div>
-                                <div className="text-xs bg-gray-50 p-2 rounded text-gray-500 italic">
-                                    {expenseForm.type === 'advance'
-                                        ? 'Khoản này sẽ tạo thành Nợ Tạm Ứng cần hoàn trả.'
-                                        : 'Khoản này là chi phí chung, trừ thẳng vào quỹ.'}
-                                </div>
                                 <button
-                                    onClick={handleRequestExpense}
+                                    onClick={handleSubmitBorrow}
                                     className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors"
                                 >
-                                    Gửi yêu cầu
+                                    Xác nhận Mượn
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* REFUND CONFIRMATION MODAL - NEW */}
+            {
+                showRefundConfirm && (
+                    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex flex-col items-center text-center">
+                                <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4">
+                                    <AlertTriangle size={32} />
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận Trả cọc?</h3>
+                                <p className="text-gray-500 text-sm mb-6">
+                                    {(isAdmin || isMod)
+                                        ? "Bạn đang xác nhận trả cọc cho khách hàng này. Trạng thái đơn hàng sẽ chuyển thành 'Đã trả cọc'."
+                                        : "Bạn muốn yêu cầu trả cọc? Yêu cầu sẽ được gửi tới Admin/Mod để duyệt."}
+                                </p>
+                                <div className="flex gap-3 w-full">
+                                    <button onClick={() => setShowRefundConfirm(false)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button>
+                                    <button onClick={() => { handleDealAction('refund'); setShowRefundConfirm(false); }} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">
+                                        {(isAdmin || isMod) ? "Xác nhận Trả" : "Gửi yêu cầu"}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

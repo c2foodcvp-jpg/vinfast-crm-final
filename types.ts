@@ -246,7 +246,7 @@ export interface SystemBackup {
 // --- NEW TYPES FOR FINANCE & PROMOTIONS ---
 
 // Added 'personal_bonus' to types
-export type TransactionType = 'revenue' | 'deposit' | 'advance' | 'expense' | 'adjustment' | 'dealer_debt' | 'repayment' | 'incurred_expense' | 'personal_bonus';
+export type TransactionType = 'revenue' | 'deposit' | 'advance' | 'expense' | 'adjustment' | 'dealer_debt' | 'repayment' | 'incurred_expense' | 'personal_bonus' | 'loan' | 'loan_repayment';
 export type TransactionStatus = 'pending' | 'approved' | 'rejected';
 
 export interface Transaction {

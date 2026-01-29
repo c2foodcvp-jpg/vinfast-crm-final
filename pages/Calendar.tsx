@@ -35,7 +35,7 @@ const PRIORITY_CONFIG = {
 };
 
 const CalendarPage: React.FC = () => {
-    const { userProfile, isAdmin, isMod } = useAuth();
+    const { userProfile, isAdmin, isMod, refreshProfile } = useAuth();
     const navigate = useNavigate();
 
     const [loading, setLoading] = useState(true);
@@ -68,15 +68,31 @@ const CalendarPage: React.FC = () => {
     const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
     // MOD Consultant Mode: Switch between team view and personal view
-    const [isConsultantMode, setIsConsultantMode] = useState(false);
+    const [isConsultantMode, setIsConsultantMode] = useState(() => {
+        // Try to load from local storage first to prevent flickering/reset
+        if (userProfile?.id) {
+            const saved = localStorage.getItem(`consultant_mode_${userProfile.id}`);
+            if (saved !== null) return saved === 'true';
+        }
+        return false;
+    });
     const [togglingMode, setTogglingMode] = useState(false);
 
-    // Initialize consultant mode from user profile
+    // Initialize/Sync consultant mode from user profile
     useEffect(() => {
-        if (userProfile?.is_consultant_mode !== undefined) {
+        if (!userProfile) return;
+
+        // If DB has a value, use it (Source of Truth)
+        if (userProfile.is_consultant_mode !== undefined) {
             setIsConsultantMode(userProfile.is_consultant_mode);
+            // Sync valid DB value to local
+            localStorage.setItem(`consultant_mode_${userProfile.id}`, String(userProfile.is_consultant_mode));
+        } else {
+            // If DB is undefined (e.g. missing column), fall back to Local Storage
+            const saved = localStorage.getItem(`consultant_mode_${userProfile.id}`);
+            if (saved !== null) setIsConsultantMode(saved === 'true');
         }
-    }, [userProfile?.is_consultant_mode]);
+    }, [userProfile?.is_consultant_mode, userProfile?.id]);
 
     // Toggle consultant mode and save to database
     const toggleConsultantMode = async () => {
@@ -84,18 +100,26 @@ const CalendarPage: React.FC = () => {
         setTogglingMode(true);
         try {
             const newMode = !isConsultantMode;
+
+            // Optimistic update (Local first)
+            setIsConsultantMode(newMode);
+            localStorage.setItem(`consultant_mode_${userProfile.id}`, String(newMode));
+
             const { error } = await supabase
                 .from('profiles')
                 .update({ is_consultant_mode: newMode })
                 .eq('id', userProfile.id);
 
             if (error) throw error;
-            setIsConsultantMode(newMode);
+
+            await refreshProfile(); // Refresh context to sync others
             // Refetch data with new mode
             fetchDataWithMode(newMode);
         } catch (e) {
             console.error('Error toggling consultant mode:', e);
-            alert('Lỗi khi chuyển chế độ');
+            alert('Lỗi khi chuyển chế độ - Vui lòng thử lại');
+            // Revert on error
+            setIsConsultantMode(!isConsultantMode);
         } finally {
             setTogglingMode(false);
         }
@@ -389,9 +413,9 @@ const CalendarPage: React.FC = () => {
     };
 
     // --- Customer Card Component ---
-    const CustomerCard = ({ customer, isOverdue = false }: { customer: Customer; isOverdue?: boolean }) => (
+    const CustomerCard = ({ customer, isOverdue = false, contextIds = [] }: { customer: Customer; isOverdue?: boolean; contextIds?: string[] }) => (
         <div
-            onClick={() => navigate(`/customers/${customer.id}`)}
+            onClick={() => navigate(`/customers/${customer.id}`, { state: { from: '/calendar', customerIds: contextIds } })}
             className={`p-3 rounded-xl border transition-all cursor-pointer hover:shadow-md group
                 ${isOverdue ? 'border-red-200 bg-red-50 hover:bg-red-100' : 'border-gray-100 bg-white hover:border-blue-200'}`}
         >
@@ -481,30 +505,37 @@ const CalendarPage: React.FC = () => {
         items: Customer[] | UserTask[];
         type: 'customer' | 'task';
         emptyText: string;
-    }) => (
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm">
-                    <Icon size={16} className={iconColor} /> {title}
-                </h3>
-                <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
+    }) => {
+        const contextIds = useMemo(() => {
+            if (type === 'customer') return (items as Customer[]).map(c => c.id);
+            return [];
+        }, [items, type]);
+
+        return (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                    <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm">
+                        <Icon size={16} className={iconColor} /> {title}
+                    </h3>
+                    <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar max-h-[550px]">
+                    {items.length === 0 ? (
+                        <div className="text-center py-6 text-gray-400 text-sm">
+                            <CheckCircle2 size={24} className="mx-auto mb-2 text-gray-300" />
+                            {emptyText}
+                        </div>
+                    ) : (
+                        items.map((item: any) =>
+                            type === 'customer'
+                                ? <CustomerCard key={item.id} customer={item} isOverdue={item.recare_date < todayStr} contextIds={contextIds} />
+                                : <TaskCard key={item.id} task={item} />
+                        )
+                    )}
+                </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar max-h-[550px]">
-                {items.length === 0 ? (
-                    <div className="text-center py-6 text-gray-400 text-sm">
-                        <CheckCircle2 size={24} className="mx-auto mb-2 text-gray-300" />
-                        {emptyText}
-                    </div>
-                ) : (
-                    items.map((item: any) =>
-                        type === 'customer'
-                            ? <CustomerCard key={item.id} customer={item} isOverdue={item.recare_date < todayStr} />
-                            : <TaskCard key={item.id} task={item} />
-                    )
-                )}
-            </div>
-        </div>
-    );
+        );
+    };
 
     if (loading) {
         return (
@@ -550,7 +581,7 @@ const CalendarPage: React.FC = () => {
                         {specialCare.map(c => (
                             <div
                                 key={c.id}
-                                onClick={() => navigate(`/customers/${c.id}`)}
+                                onClick={() => navigate(`/customers/${c.id}`, { state: { from: '/calendar', customerIds: specialCare.map(x => x.id) } })}
                                 className="p-3 bg-white rounded-xl border border-pink-100 hover:border-pink-300 hover:shadow-md transition-all cursor-pointer"
                             >
                                 <div className="flex items-center gap-2 mb-1">
@@ -723,7 +754,7 @@ const CalendarPage: React.FC = () => {
                                             </div>
                                         ) : (
                                             selectedTasks.customerTasks.map(c => (
-                                                <CustomerCard key={c.id} customer={c} isOverdue={c.recare_date! < todayStr} />
+                                                <CustomerCard key={c.id} customer={c} isOverdue={c.recare_date! < todayStr} contextIds={selectedTasks.customerTasks.map(x => x.id)} />
                                             ))
                                         )}
                                     </div>

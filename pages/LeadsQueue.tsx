@@ -53,9 +53,10 @@ const LeadsQueue: React.FC = () => {
                 .eq('status', 'active')
                 .order('full_name');
 
-            // MOD only sees their team (manager_id = their own id)
+            // MOD only sees their team (manager_id = their own id) PLUS THEMSELVES
             if (isMod && !isAdmin && userProfile?.id) {
-                empQuery = empQuery.eq('manager_id', userProfile.id);
+                // Modified query to include self (id equal to userProfile.id) OR subordinates (manager_id equal to userProfile.id)
+                empQuery = empQuery.or(`manager_id.eq.${userProfile.id},id.eq.${userProfile.id}`);
             }
 
             const { data: empData } = await empQuery;
@@ -65,6 +66,47 @@ const LeadsQueue: React.FC = () => {
             console.error("Error fetching leads", e);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleSelfAssign = async () => {
+        if (selectedLeadIds.length === 0 || !userProfile) return;
+        if (!window.confirm(`Bạn có chắc muốn NHẬN ${selectedLeadIds.length} khách hàng này về danh sách của mình?`)) return;
+
+        setIsAssigning(true);
+        try {
+            // Update Customers
+            const { error } = await supabase
+                .from('customers')
+                .update({
+                    sales_rep: userProfile.full_name,
+                    creator_id: userProfile.id,
+                    pending_transfer_to: null,
+                    is_acknowledged: true, // Auto-acknowledge for self-assign
+                    updated_at: new Date().toISOString()
+                })
+                .in('id', selectedLeadIds);
+
+            if (error) throw error;
+
+            // Log Interactions
+            const notes = selectedLeadIds.map(leadId => ({
+                customer_id: leadId,
+                user_id: userProfile.id,
+                type: 'note',
+                content: `[Tự nhận khách] ${userProfile.full_name} đã nhận khách này từ danh sách Lead.`,
+                created_at: new Date().toISOString()
+            }));
+
+            await supabase.from('interactions').insert(notes);
+
+            alert(`✅ Đã nhận ${selectedLeadIds.length} khách thành công!`);
+            setSelectedLeadIds([]);
+            fetchData();
+        } catch (e: any) {
+            alert("Lỗi nhận khách: " + e.message);
+        } finally {
+            setIsAssigning(false);
         }
     };
 
@@ -237,6 +279,18 @@ const LeadsQueue: React.FC = () => {
                             >
                                 {isAssigning ? <Loader2 className="animate-spin" size={18} /> : <UserPlus size={18} />}
                                 Phân Bổ
+                            </button>
+
+                            <button
+                                onClick={handleSelfAssign}
+                                disabled={selectedLeadIds.length === 0 || isAssigning}
+                                className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white transition-all shadow-md whitespace-nowrap
+                                    ${selectedLeadIds.length > 0
+                                        ? 'bg-green-600 hover:bg-green-700 shadow-green-200'
+                                        : 'bg-gray-300 cursor-not-allowed text-gray-500'}`}
+                                title="Nhận các khách hàng đã chọn về danh sách của tôi"
+                            >
+                                <CheckSquare size={18} /> Nhận khách cho mình
                             </button>
                         </div>
                     </div>

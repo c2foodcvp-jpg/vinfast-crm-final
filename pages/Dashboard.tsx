@@ -126,25 +126,43 @@ const Dashboard: React.FC = () => {
             setTeamMembers(members);
 
             // 1. Fetch Customers filtered by Team/User
-            let query = supabase.from('customers').select('*');
+            // 1. Fetch Customers filtered by Team/User with pagination
+            let customers: Customer[] = [];
+            let page = 0;
+            const size = 1000;
+            let hasMore = true;
 
-            if (!isAdmin) {
-                // For Mod and User, strictly enforce Creator ID check
-                if (teamIds.length > 0) {
-                    query = query.in('creator_id', teamIds);
+            while (hasMore) {
+                let query = supabase.from('customers').select('*').range(page * size, (page + 1) * size - 1);
+
+                if (!isAdmin) {
+                    // For Mod and User, strictly enforce Creator ID check
+                    if (teamIds.length > 0) {
+                        query = query.in('creator_id', teamIds);
+                    } else {
+                        query = query.eq('creator_id', userProfile.id);
+                    }
                 } else {
-                    query = query.eq('creator_id', userProfile.id);
+                    // Admin: Apply team filter if selected
+                    if (selectedTeam !== 'all' && teamIds.length > 0) {
+                        query = query.in('creator_id', teamIds);
+                    }
                 }
-            } else {
-                // Admin: Apply team filter if selected
-                if (selectedTeam !== 'all' && teamIds.length > 0) {
-                    query = query.in('creator_id', teamIds);
+
+                const { data, error } = await query;
+                if (error) throw error;
+
+                if (data && data.length > 0) {
+                    customers = [...customers, ...data as Customer[]];
+                    page++;
+                    // If we got less than requested size, we're done
+                    if (data.length < size) {
+                        hasMore = false;
+                    }
+                } else {
+                    hasMore = false;
                 }
             }
-
-            const { data: customersData, error } = await query;
-            if (error) throw error;
-            let customers = customersData as Customer[] || [];
 
             // --- AUTO-CONVERT EXPIRED LONG-TERM TO NORMAL ---
             const tomorrowStr = getTomorrowStr();

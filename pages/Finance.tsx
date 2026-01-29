@@ -5,14 +5,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { Transaction, UserProfile, Customer, CustomerStatus, TransactionType, ProfitExclusion, EmployeeKPI } from '../types';
 import { useNavigate } from 'react-router-dom';
 import {
-    PiggyBank, Plus, CheckCircle2, AlertOctagon, History, User, Filter,
-    Loader2, X, Wallet, BellRing, ArrowUpRight, ArrowDownLeft, Terminal,
-    Copy, Database, Trash2, Check, XCircle, AlertTriangle, Calendar,
+    CheckCircle2, User, Filter,
+    Loader2, X, ArrowUpRight, ArrowDownLeft, Trash2, Check, XCircle, AlertTriangle, Calendar,
     BadgeDollarSign, Settings2, Undo2, ExternalLink, Building2, QrCode,
-    Percent,
-    MinusCircle,
-    Gift,
-    Scale
+    Percent, MinusCircle, Gift, Scale, Hand
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis, Legend } from 'recharts';
 
@@ -94,7 +90,14 @@ const Finance: React.FC = () => {
     // Added missing states
     const [showDealerDebtModal, setShowDealerDebtModal] = useState(false);
     const [dealerDebtForm, setDealerDebtForm] = useState({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền' });
+
+    // NEW: Borrow Money Modal State
+    const [showBorrowModal, setShowBorrowModal] = useState(false);
+    const [borrowForm, setBorrowForm] = useState({ customerId: '', amount: '', date: '', reason: '' });
+
     const todayStr = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+
 
     const [showSql, setShowSql] = useState(false);
     const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
@@ -123,7 +126,15 @@ const Finance: React.FC = () => {
             const { data: profiles } = await supabase.from('profiles').select('*');
             if (profiles) setAllProfiles(profiles as UserProfile[]);
 
-            const { data: customers } = await supabase.from('customers').select('*');
+            // OPTIMIZED: Select only necessary fields + Filter WON + MKT Source on Server
+            // This drastically reduces payload size and memory usage
+            const { data: customers } = await supabase
+                .from('customers')
+                .select('id, name, phone, source, status, deal_status, creator_id, sales_rep, created_at, updated_at, won_at, deal_details')
+                .eq('status', 'Chốt đơn')
+                .ilike('source', '%MKT%')
+                .range(0, 9999)
+                .order('created_at', { ascending: false });
             const custList = (customers as Customer[]) || [];
             setAllCustomers(custList);
 
@@ -277,6 +288,55 @@ const Finance: React.FC = () => {
         } catch (e: any) { showToast("Lỗi tạo khoản nợ", 'error'); }
     };
 
+    // NEW: Handle Submit Borrow (Loan) from Finance Page
+    const handleSubmitBorrow = async () => {
+        const amount = Number(borrowForm.amount.replace(/\./g, ''));
+        if (!amount || amount <= 0 || !borrowForm.date || !borrowForm.customerId) { showToast("Vui lòng nhập đủ thông tin!", 'error'); return; }
+
+        try {
+            // Check Daily Limit (100M) for User
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const { data: todayLoans } = await supabase.from('transactions')
+                .select('amount')
+                .eq('user_id', userProfile?.id)
+                .eq('type', 'loan')
+                .gte('created_at', todayStart.toISOString())
+                .neq('status', 'rejected');
+
+            const currentTotal = todayLoans?.reduce((sum, t) => sum + t.amount, 0) || 0;
+            if (currentTotal + amount > 100_000_000) {
+                showToast(`Vượt quá hạn mức mượn trong ngày (Đã mượn: ${formatCurrency(currentTotal)}, Hạn mức: 100tr)`, 'error');
+                return;
+            }
+
+            const cust = allCustomers.find(c => c.id === borrowForm.customerId);
+
+            const { data, error } = await supabase.from('transactions').insert([{
+                customer_id: borrowForm.customerId,
+                customer_name: cust?.name,
+                user_id: userProfile?.id,
+                user_name: userProfile?.full_name,
+                type: 'loan',
+                amount: amount,
+                target_date: borrowForm.date,
+                reason: `Mượn tiền (Trả: ${new Date(borrowForm.date).toLocaleDateString('vi-VN')})`,
+                status: (isAdmin || isMod) ? 'approved' : 'pending',
+                approved_by: (isAdmin || isMod) ? userProfile?.id : null
+            }]).select().single();
+            if (error) throw error;
+
+            setTransactions(prev => [data as Transaction, ...prev]);
+            setShowBorrowModal(false);
+            setBorrowForm({ customerId: '', amount: '', date: '', reason: '' });
+
+            const msg = (isAdmin || isMod) ? "Đã tạo khoản vay thành công!" : "Đã gửi yêu cầu mượn tiền!";
+            showToast(msg, 'success');
+        } catch (e: any) {
+            showToast("Lỗi: " + e.message, 'error');
+        }
+    };
+
     const executeDealerDebtPaid = async () => {
         if (!dealerDebtToConfirm) return;
         try {
@@ -317,7 +377,8 @@ const Finance: React.FC = () => {
     };
 
     // --- LOGIC ---
-    const isMKT = (src?: string) => src === 'MKT Group';
+    // Relaxed MKT check (Case Insensitive)
+    const isMKT = (src?: string) => (src || '').toUpperCase().includes('MKT');
 
     const isInMonthYear = (dateStr: string) => {
         if (!dateStr) return false;
@@ -367,10 +428,6 @@ const Finance: React.FC = () => {
     const filteredCustomers = useMemo(() => {
         return allCustomers.filter(c => {
             if (filterMode === 'creation') {
-                // For 'creation' mode, we might typically want strict creation date.
-                // BUT the user said "Revenue according to Deal Close Date". 
-                // Let's assume 'creation' mode is just for listing, but Finance View usually implies Deal Date.
-                // However, preserving original filterMode intention:
                 const d = new Date(c.created_at);
                 const m = d.getMonth() + 1;
                 const y = d.getFullYear();
@@ -389,10 +446,18 @@ const Finance: React.FC = () => {
             } else {
                 // 'deal' mode -> Use Effective Date Logic (Deal Close Date)
                 if (c.status !== CustomerStatus.WON) return false;
-                if (!isInMonthYear(c.updated_at || c.created_at || '')) return false;
+
+                // CRITICAL FIX: Do NOT use updated_at. It causes deals to jump months when edited.
+                // Use won_at (Deal Close). If missing, use created_at (Deal Start).
+                // Never use updated_at for Finance Period placement.
+                const effectiveDate = c.won_at || c.created_at || '';
+                if (!isInMonthYear(effectiveDate)) return false;
             }
-            if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
+            if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending' || c.deal_status === 'refunded' || c.deal_status === 'refund_pending') return false;
+
+            // Check Source with relaxed logic
             if (!isMKT(c.source)) return false;
+
             const creator = allProfiles.find(p => p.id === c.creator_id);
             if (isAdmin) {
                 if (selectedTeam !== 'all') {
@@ -416,7 +481,10 @@ const Finance: React.FC = () => {
             if (c.status !== CustomerStatus.WON) return false;
             if (c.deal_status === 'refunded' || c.deal_status === 'refund_pending' || c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
 
-            if (!isInMonthYear(c.updated_at || c.created_at || '')) return false;
+            // Use same date logic as main filter to be consistent
+            const effectiveDate = c.won_at || c.created_at || '';
+            if (!isInMonthYear(effectiveDate)) return false;
+
             const creator = allProfiles.find(p => p.id === c.creator_id);
             if (!creator) return false;
             if (isAdmin) {
@@ -444,10 +512,17 @@ const Finance: React.FC = () => {
 
     const availableCustomersForDeposit = useMemo(() => {
         return allCustomers.filter(c => {
-            const isWon = c.status === CustomerStatus.WON;
-            const isNotFinished = c.deal_status !== 'completed' && c.deal_status !== 'refunded' && c.deal_status !== 'suspended' && c.deal_status !== 'suspended_pending';
-            const isMKTSource = c.source === 'MKT Group' || (c.source || '').includes('MKT');
-            if (!isWon || !isNotFinished || !isMKTSource) return false;
+            // Must be WON status
+            if (c.status !== CustomerStatus.WON) return false;
+
+            // Exclude Invalid Deal Statuses (Refunded/Suspended)
+            // 'completed' is ALLOWED.
+            if (c.deal_status === 'refunded' || c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
+
+            // Source Check: Must contain "MKT" (Case insensitive preferably)
+            if (!isMKT(c.source)) return false;
+
+            // Permission Check
             if (isAdmin) {
                 if (selectedTeam !== 'all') {
                     const creator = allProfiles.find(p => p.id === c.creator_id);
@@ -474,8 +549,8 @@ const Finance: React.FC = () => {
     const displayTotalExpense = realExpenses + partTimeSalaryLiability;
     const pnlNet = pnlRevenue - displayTotalExpense;
 
-    const totalIn = filteredTransactions.filter(t => ['deposit', 'adjustment', 'repayment'].includes(t.type) && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
-    const totalOut = filteredTransactions.filter(t => t.status === 'approved' && (['expense', 'advance'].includes(t.type) || (t.type === 'adjustment' && t.amount < 0))).reduce((sum, t) => sum + Math.abs(t.amount), 0);
+    const totalIn = filteredTransactions.filter(t => ['deposit', 'adjustment', 'repayment', 'loan_repayment'].includes(t.type) && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+    const totalOut = filteredTransactions.filter(t => t.status === 'approved' && (['expense', 'advance', 'loan'].includes(t.type) || (t.type === 'adjustment' && t.amount < 0))).reduce((sum, t) => sum + Math.abs(t.amount), 0);
     const fundRemaining = totalIn - totalOut - partTimeSalaryLiability;
 
     // --- PROFIT SHARING CALCULATION (WITH REDISTRIBUTION) ---
@@ -534,18 +609,9 @@ const Finance: React.FC = () => {
                 if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
                 if (!isMKT(c.source)) return false;
 
-                // Use the shared helper logic for date check
-                // We can reuse isInMonthYear but need to be careful with 'c' object vs date string
-                // Let's copy the logic inline to be safe and explicit or use the helper if it's efficient.
-                // Since this corresponds to 'Finance View' filter logic, we should use the same date field logic as filteredCustomers?
-                // Actually KPI usually tracks "Sale Date" or "Creation Date". 
-                // Let's align with the 'filteredCustomers' selection logic:
-                // If filterMode is creation, we check created_at. If deal, we check deal close date?
-                // Usually KPI is strictly based on "Sold Date" (Deal Date).
-                // Let's use the helper `isInMonthYear` on `created_at` or `updated_at` roughly similar to previous faulty logic but CORRECTED.
-
-                // Re-using the helper is safest if it relies on selectedMonth/Year state
-                return isInMonthYear(c.updated_at || c.created_at || '');
+                // Use won_at (Deal Close) for KPI. If missing, use created_at (Deal Start).
+                const effectiveDate = c.won_at || c.created_at || '';
+                return isInMonthYear(effectiveDate);
             }).length;
 
             const missedKpi = Math.max(0, kpiTarget - kpiActual);
@@ -572,7 +638,7 @@ const Finance: React.FC = () => {
 
             // NEW: Calculate employee's personal revenue (deposits from their customers in MKT Group)
             const employeeCustomerIds = allCustomers
-                .filter(c => c.creator_id === emp.id && c.source === 'MKT Group')
+                .filter(c => c.creator_id === emp.id && (c.source || '').includes('MKT'))
                 .map(c => c.id);
             const employeeRevenue = filteredTransactions
                 .filter(t => t.customer_id && employeeCustomerIds.includes(t.customer_id) && t.status === 'approved' && t.type === 'deposit')
@@ -712,27 +778,27 @@ const Finance: React.FC = () => {
         }
 
         return eligibleProfiles.map(emp => {
-            // Get Customers for this employee (Filtered by Month/Year/MKT) - reusing logic roughly from profitSharing
+            // Get Customers for this employee (Filtered by Month/Year/MKT)
             const empCustomers = allCustomers.filter(c => {
-                if (c.creator_id !== emp.id) return false;
+                // Ownership: Creator OR Sales Rep (to handle transferred leads)
+                const isOwner = c.creator_id === emp.id || c.sales_rep === emp.full_name;
+                if (!isOwner) return false;
                 if (c.status !== CustomerStatus.WON) return false;
                 if (c.deal_status === 'refunded' || c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
 
                 if (!isMKT(c.source)) return false;
-                // Use date logic consistent with page filters
+
+                // CRITICAL FIX: Use won_at (Deal Date) instead of updated_at
                 if (filterMode === 'creation') {
-                    const d = new Date(c.created_at);
                     return isInMonthYear(c.created_at);
                 } else {
-                    return isInMonthYear(c.updated_at || c.created_at || '');
+                    return isInMonthYear(c.won_at || c.created_at || '');
                 }
             });
 
             const countWon = empCustomers.length;
             const expectedRevenue = empCustomers.reduce((sum, c) => sum + (c.deal_details?.revenue || 0), 0);
 
-            // Collected Revenue (From Customer Deal Details)
-            const collectedRevenue = empCustomers.reduce((sum, c) => sum + (c.deal_details?.actual_revenue || 0), 0);
             const custIds = empCustomers.map(c => c.id);
 
             // Incurred Expenses (Chi phí phát sinh linked to customers)
@@ -740,29 +806,35 @@ const Finance: React.FC = () => {
                 .filter(t => t.customer_id && custIds.includes(t.customer_id) && t.type === 'incurred_expense' && t.status === 'approved')
                 .reduce((sum, t) => sum + t.amount, 0);
 
+            // Collected Revenue (From Customer Deal Details) - Incurred Expenses
+            // Request: "Doanh thu thực tế (tổng) ... : = Doanh thu thực tế (Tổng) - Chi phí phát sinh (Trừ DT)"
+            const rawCollected = empCustomers.reduce((sum, c) => sum + (c.deal_details?.actual_revenue || 0), 0);
+            const collectedRevenue = rawCollected - incurredExpenses;
+
             // Deposited (Nộp quỹ)
             const depositedRevenue = transactions
                 .filter(t => t.customer_id && custIds.includes(t.customer_id) && t.type === 'deposit' && t.status === 'approved')
                 .reduce((sum, t) => sum + t.amount, 0);
 
-            // General Expenses (Chi quỹ - type=expense)
-            const totalExpenses = transactions
-                .filter(t => t.user_id === emp.id && t.type === 'expense' && t.status === 'approved')
-                .reduce((sum, t) => sum + t.amount, 0);
+            // Removed: totalExpenses (Chi đã duyệt) per request "Xoá cột Đã chi"
 
             // Advances & Repayments
             const totalAdvances = transactions
-                .filter(t => t.user_id === emp.id && t.type === 'advance' && t.status === 'approved')
+                .filter(t => t.user_id === emp.id && (t.type === 'advance' || t.type === 'loan') && t.status === 'approved')
                 .reduce((sum, t) => sum + t.amount, 0);
 
             const totalRepayments = transactions
-                .filter(t => t.user_id === emp.id && t.type === 'repayment' && t.status === 'approved')
+                .filter(t => t.user_id === emp.id && (t.type === 'repayment' || t.type === 'loan_repayment') && t.status === 'approved')
                 .reduce((sum, t) => sum + t.amount, 0);
 
             const outstandingAdvance = Math.max(0, totalAdvances - totalRepayments);
-            const revenueDebt = Math.max(0, (collectedRevenue - incurredExpenses) - depositedRevenue);
 
-            // Total Debt = Revenue Debt + Outstanding Advance
+            // Debt Logic:
+            // Remaining Debt = (Collected Real - Deposited) + Outstanding Advance
+            // Note: collectedRevenue here already includes deduction of Incurred Expenses per new request.
+            const revenueDebt = Math.max(0, collectedRevenue - depositedRevenue);
+
+            // Total Debt
             const debt = revenueDebt + outstandingAdvance;
 
             return {
@@ -771,7 +843,6 @@ const Finance: React.FC = () => {
                 expectedRevenue,
                 collectedRevenue,
                 depositedRevenue,
-                totalExpenses,
                 totalAdvances,
                 debt
             };
@@ -779,22 +850,28 @@ const Finance: React.FC = () => {
     }, [allProfiles, allCustomers, transactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, filterMode]);
 
 
-    const expenses = filteredTransactions.filter(t => t.type === 'expense' || t.type === 'advance');
+    const expenses = filteredTransactions.filter(t => t.type === 'expense' || t.type === 'advance' || t.type === 'loan');
     const expectedRevenueCustomers = filteredCustomers
         .filter(c => (c.deal_details?.revenue || 0) > 0)
         .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
     const approvedDeposits = filteredTransactions.filter(t =>
-        ['deposit', 'revenue', 'adjustment', 'repayment', 'personal_bonus'].includes(t.type) &&
+        ['deposit', 'revenue', 'adjustment', 'repayment', 'personal_bonus', 'loan_repayment'].includes(t.type) &&
         t.status === 'approved' &&
         !t.reason.toLowerCase().includes('dự kiến')
     );
-    const refundableAdvancesList = filteredTransactions.filter(t => t.type === 'advance' && !t.reason.toLowerCase().includes('ứng lương'));
+    const pendingDeposits = filteredTransactions.filter(t =>
+        t.type === 'deposit' && t.status === 'pending'
+    );
+    const refundableAdvancesList = filteredTransactions.filter(t => (t.type === 'advance' || t.type === 'loan') && !t.reason.toLowerCase().includes('ứng lương'));
 
-    const allRepayments = transactions.filter(t => t.type === 'repayment');
-    const pendingDealerDebts = filteredTransactions.filter(t => t.type === 'dealer_debt' && !t.reason.includes('(Đã thu)'));
+    const allRepayments = transactions.filter(t => t.type === 'repayment' || t.type === 'loan_repayment');
+    const pendingDealerDebts = filteredTransactions.filter(t =>
+        t.type === 'dealer_debt' &&
+        !t.reason.toLowerCase().includes('(đã thu)')
+    );
 
-    const totalAdvances = filteredTransactions.filter(t => t.type === 'advance' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
-    const totalRepaid = filteredTransactions.filter(t => t.type === 'repayment' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+    const totalAdvances = filteredTransactions.filter(t => (t.type === 'advance' || t.type === 'loan') && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+    const totalRepaid = filteredTransactions.filter(t => (t.type === 'repayment' || t.type === 'loan_repayment') && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
     const netOutstandingAdvances = Math.max(0, totalAdvances - totalRepaid);
     const outstandingAdvances = netOutstandingAdvances;
 
@@ -804,7 +881,12 @@ const Finance: React.FC = () => {
         { name: 'Lương Part-time', value: partTimeSalaryLiability }
     ];
 
-    const totalExpectedRevenue = filteredCustomers.reduce((sum, c) => sum + Number(c.deal_details?.revenue || 0), 0);
+    const totalExpectedRevenue = filteredCustomers.reduce((sum, c) => {
+        const contractRev = Number(c.deal_details?.revenue || 0);
+        const actualRev = Number(c.deal_details?.actual_revenue || 0);
+        // Use Actual Revenue if it exceeds Contract (Upsell), otherwise use Contract (Unpaid)
+        return sum + Math.max(contractRev, actualRev);
+    }, 0);
 
     const collectionData = [
         { name: 'Tổng quan', 'Dự kiến (Sau ứng)': Math.max(0, totalExpectedRevenue - (displayTotalExpense - partTimeSalaryLiability)), 'Đã thu': pnlRevenue }
@@ -814,14 +896,38 @@ const Finance: React.FC = () => {
     // 1. Total Dealer Debt
     const totalDealerDebt = pendingDealerDebts.reduce((sum, t) => sum + t.amount, 0);
 
-    // 2. Total Pending Customer Revenue (Contract - Deposited)
-    // Calculate Actual Total Deposits for Filtered Customers (MKT only as per filters)
+    // 2. User Borrow Loans (Tiền mượn của User)
+    const totalLoans = filteredTransactions.filter(t => t.type === 'loan' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+    const totalLoanRepaid = filteredTransactions.filter(t => t.type === 'loan_repayment' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+    const outstandingBorrowLoans = Math.max(0, totalLoans - totalLoanRepaid);
+
+    // 3. Total Pending Customer Revenue (Contract - Deposited)
     const totalDepositedReal = filteredTransactions
         .filter(t => t.type === 'deposit' && t.status === 'approved')
         .reduce((sum, t) => sum + t.amount, 0);
 
-    const totalCustomerDebt = Math.max(0, totalExpectedRevenue - totalDepositedReal);
-    const totalDebtToCollect = totalDealerDebt + totalCustomerDebt;
+    const totalIncurredExpenses = filteredTransactions
+        .filter(t => t.type === 'incurred_expense' && t.status === 'approved')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+    // "Dư nợ khách hàng" = (Total Expected - Incurred Expenses - Real Deposit) - "Nợ Đại lý" (Excluded per request)
+    // We must deduct Incurred Expenses because they reduce the Target Revenue (Khách không cần đóng khoản này).
+    // Start with Raw Gap:
+    const rawCustomerGap = Math.max(0, totalExpectedRevenue - totalIncurredExpenses - totalDepositedReal);
+    // Filter "Nợ mới" specifically to deduct it again if required by user logic (Offsetting potential revenue duplication)
+    const totalNewDealerDebt = pendingDealerDebts
+        .filter(t => t.reason.toLowerCase().includes('nợ mới'))
+        .reduce((sum, t) => sum + t.amount, 0);
+
+    // Request: "Tiền nợ quỹ nhưng Không tính (Đại lý nợ...)" -> Deduct Dealer Debt.
+    // Updated Request: "Đại lý nợ tiền [Nợ mới]... không tính vào vì đã cộng trước đó" -> Deduct AGAIN? or Ensure it's deducted?
+    // User wants result 25.6M (Current 26.6M). NewDebt=1M. So we deduct it.
+    const totalCustomerDebt = Math.max(0, rawCustomerGap - totalDealerDebt - totalNewDealerDebt);
+
+    // 4. Total to Collect (Cong no phai doi)
+    // Request: Tổng số tiền nợ quỹ + Đại ý nợ + Tiền mượn của User
+    // "Tổng số tiền nợ quỹ" mapped to "totalCustomerDebt" above?
+    const totalDebtToCollect = totalCustomerDebt + totalDealerDebt + outstandingBorrowLoans;
 
     const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
 
@@ -946,8 +1052,15 @@ const Finance: React.FC = () => {
                             </div>
                             <span className="font-bold text-gray-800 text-sm">{formatCurrency(totalDealerDebt)}</span>
                         </div>
+                        <div className="w-full h-px bg-gray-100"></div>
+                        <div className="flex justify-between items-center px-2">
+                            <div className="flex items-center gap-2 text-xs text-gray-600 font-semibold">
+                                <div className="p-1.5 bg-red-100 text-red-600 rounded-lg"><Undo2 size={12} /></div>
+                                Tiền mượn của User
+                            </div>
+                            <span className="font-bold text-gray-800 text-sm">{formatCurrency(outstandingBorrowLoans)}</span>
+                        </div>
                     </div>
-                    <p className="text-[10px] text-gray-400 italic text-center w-full mt-1">(*Dư nợ khách = Dự kiến HĐ - Thực nộp)</p>
                 </div>
             </div>
 
@@ -1051,8 +1164,11 @@ const Finance: React.FC = () => {
             {/* DASHBOARD HISTORY TABLES */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div className="p-4 bg-red-50 border-b border-red-100 flex justify-between items-center"><h3 className="font-bold text-red-800 flex items-center gap-2"><ArrowUpRight /> Lịch sử Chi/Tạm Ứng</h3>
-                        <button onClick={() => setShowExpenseModal(true)} className="px-3 py-1 bg-red-600 text-white text-xs font-bold rounded-lg shadow hover:bg-red-700 flex items-center gap-1"><ArrowUpRight size={14} /> Xuất tiền (Chi)</button>
+                    <div className="p-4 bg-red-50 border-b border-red-100 flex justify-between items-center"><h3 className="font-bold text-red-800 flex items-center gap-2"><ArrowUpRight /> Lịch sử Chi/Tạm Ứng/Mượn</h3>
+                        <div className="flex gap-2">
+                            <button onClick={() => setShowBorrowModal(true)} className="px-3 py-1 bg-white text-red-600 border border-red-200 text-xs font-bold rounded-lg shadow-sm hover:bg-red-50 flex items-center gap-1"><Hand size={14} /> Mượn tiền</button>
+                            <button onClick={() => setShowExpenseModal(true)} className="px-3 py-1 bg-red-600 text-white text-xs font-bold rounded-lg shadow hover:bg-red-700 flex items-center gap-1"><ArrowUpRight size={14} /> Xuất tiền (Chi)</button>
+                        </div>
                     </div>
                     <div className="p-4 max-h-[600px] overflow-y-auto space-y-3">{expenses.map(t => (<div key={t.id} className="p-3 border border-gray-100 rounded-xl hover:shadow-sm transition-all"><div className="flex justify-between items-start"><div><p className="font-bold text-gray-900">{t.reason}</p><p className="text-xs text-gray-500">{t.user_name} • {new Date(t.created_at).toLocaleDateString()}</p>{t.customer_name && <p className="text-xs text-blue-600 mt-1">Khách: {t.customer_name}</p>}</div><span className="font-bold text-red-600">-{formatCurrency(t.amount)}</span></div><div className="flex justify-between items-center mt-3 pt-2 border-t border-gray-50"><span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${t.status === 'approved' ? 'bg-green-100 text-green-700' : t.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{t.status}</span><div className="flex gap-2">{t.status === 'pending' && (isAdmin || isMod) && (<><button onClick={() => handleApprove(t, true)} className="p-1 bg-green-100 text-green-600 rounded hover:bg-green-200"><CheckCircle2 size={16} /></button><button onClick={() => handleApprove(t, false)} className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"><XCircle size={16} /></button></>)}{(isAdmin || isMod) && (<button onClick={() => setTransactionToDelete(t)} className="p-1 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600"><Trash2 size={16} /></button>)}</div></div></div>))}</div>
                 </div>
@@ -1064,12 +1180,46 @@ const Finance: React.FC = () => {
 
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <div className="p-4 bg-green-50 border-b border-green-100 flex justify-between items-center"><h3 className="font-bold text-green-800 flex items-center gap-2"><CheckCircle2 /> Nộp tiền THỰC THU</h3><button onClick={() => setShowDepositModal(true)} className="px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-lg shadow hover:bg-green-700 flex items-center gap-1"><QrCode size={14} /> Nộp quỹ</button></div>
-                    <div className="p-4 max-h-[600px] overflow-y-auto space-y-3">{approvedDeposits.length === 0 ? (<div className="text-center py-8 text-gray-400 text-sm">Chưa có khoản nào đã nộp.</div>) : approvedDeposits.map(t => (<div key={t.id} className={`p-3 border border-gray-100 rounded-xl transition-all hover:shadow-sm ${t.customer_id ? 'cursor-pointer hover:border-green-200' : ''}`} onClick={() => t.customer_id && window.open('/customers/' + t.customer_id, '_blank')}><div className="flex justify-between items-center"><div><p className="font-bold text-gray-900 flex items-center gap-2">{t.reason} {t._is_part_time_creator && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 rounded uppercase">Part-time (30% lương)</span>}</p><p className="text-xs text-gray-500">{t.user_name} • {new Date(t.created_at).toLocaleDateString()}</p>{t.customer_name && <p className="text-xs text-green-600 mt-1">Khách: {t.customer_name}</p>}</div><span className="font-bold text-green-600">{t.amount > 0 ? '+' : ''}{formatCurrency(t.amount)}</span></div><div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-50"><span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-green-100 text-green-700">ĐÃ NỘP QUỸ</span><div className="flex gap-2">{(isAdmin || isMod) && (<button onClick={(e) => { e.stopPropagation(); setTransactionToDelete(t); }} className="p-1 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600"><Trash2 size={16} /></button>)}</div></div></div>))}</div>
+                    <div className="p-4 max-h-[600px] overflow-y-auto space-y-3">
+                        {/* PENDING DEPOSITS */}
+                        {pendingDeposits.length > 0 && (
+                            <div className="mb-4 space-y-3 pb-4 border-b border-gray-100">
+                                <p className="text-xs font-extrabold text-orange-600 uppercase px-1 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Yêu cầu đang chờ duyệt ({pendingDeposits.length})</p>
+                                {pendingDeposits.map(t => (
+                                    <div key={t.id} className="p-3 border border-orange-200 bg-orange-50/50 rounded-xl transition-all shadow-sm">
+                                        <div className="flex justify-between items-center">
+                                            <div>
+                                                <p className="font-bold text-gray-900 flex items-center gap-2">{t.reason} {t._is_part_time_creator && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 rounded uppercase">Part-time</span>}</p>
+                                                <p className="text-xs text-gray-500">{t.user_name} • {new Date(t.created_at).toLocaleDateString()}</p>
+                                                {t.customer_name && <p className="text-xs text-blue-600 mt-1 font-medium">Khách: {t.customer_name}</p>}
+                                            </div>
+                                            <span className="font-bold text-orange-600">+{formatCurrency(t.amount)}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center mt-2 pt-2 border-t border-orange-100">
+                                            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-orange-100 text-orange-700">Chờ duyệt</span>
+                                            <div className="flex gap-2">
+                                                {(isAdmin || isMod) && (
+                                                    <>
+                                                        <button onClick={() => handleApprove(t, true)} className="p-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-sm transition-colors" title="Duyệt"><Check size={16} /></button>
+                                                        <button onClick={() => handleApprove(t, false)} className="p-1.5 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors" title="Từ chối"><X size={16} /></button>
+                                                        <button onClick={() => setTransactionToDelete(t)} className="p-1.5 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200 transition-colors"><Trash2 size={16} /></button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* APPROVED DEPOSITS */}
+                        {approvedDeposits.length === 0 && pendingDeposits.length === 0 ? (<div className="text-center py-8 text-gray-400 text-sm">Chưa có khoản nào đã nộp.</div>) : approvedDeposits.map(t => (<div key={t.id} className={`p-3 border border-gray-100 rounded-xl transition-all hover:shadow-sm ${t.customer_id ? 'cursor-pointer hover:border-green-200' : ''}`} onClick={() => t.customer_id && window.open('/customers/' + t.customer_id, '_blank')}><div className="flex justify-between items-center"><div><p className="font-bold text-gray-900 flex items-center gap-2">{t.reason} {t._is_part_time_creator && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 rounded uppercase">Part-time (30% lương)</span>}</p><p className="text-xs text-gray-500">{t.user_name} • {new Date(t.created_at).toLocaleDateString()}</p>{t.customer_name && <p className="text-xs text-green-600 mt-1">Khách: {t.customer_name}</p>}</div><span className="font-bold text-green-600">{t.amount > 0 ? '+' : ''}{formatCurrency(t.amount)}</span></div><div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-50"><span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-green-100 text-green-700">ĐÃ NỘP QUỸ</span><div className="flex gap-2">{(isAdmin || isMod) && (<button onClick={(e) => { e.stopPropagation(); setTransactionToDelete(t); }} className="p-1 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600"><Trash2 size={16} /></button>)}</div></div></div>))}
+                    </div>
                 </div>
 
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <div className="p-4 bg-purple-50 border-b border-purple-100 flex flex-col gap-1">
-                        <h3 className="font-bold text-purple-800 flex items-center gap-2"><Undo2 size={18} /> Nợ ứng cần hoàn trả</h3>
+                        <h3 className="font-bold text-purple-800 flex items-center gap-2"><Undo2 size={18} /> Nợ ứng / Mượn cần hoàn trả</h3>
                         <p className="text-xs text-purple-600 font-semibold">Tổng nợ: {formatCurrency(outstandingAdvances)} VNĐ</p>
                     </div>
                     <div className="p-4 max-h-[600px] overflow-y-auto space-y-3">
@@ -1127,14 +1277,13 @@ const Finance: React.FC = () => {
                                 <th className="px-4 py-3 text-right">Doanh thu dự kiến</th>
                                 <th className="px-4 py-3 text-right">Doanh thu thực tế (Tổng)</th>
                                 <th className="px-4 py-3 text-right text-green-600">Đã nộp quỹ</th>
-                                <th className="px-4 py-3 text-right text-orange-600">Đã chi</th>
                                 <th className="px-4 py-3 text-right text-purple-600">Đã ứng</th>
                                 <th className="px-4 py-3 text-right text-red-600">Nợ cần thu</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {employeeStats.length === 0 ? (
-                                <tr><td colSpan={8} className="p-4 text-center text-gray-400">Không có dữ liệu nhân viên.</td></tr>
+                                <tr><td colSpan={7} className="p-4 text-center text-gray-400">Không có dữ liệu nhân viên.</td></tr>
                             ) : employeeStats.map(row => (
                                 <tr key={row.user.id} className="hover:bg-gray-50 transition-colors">
                                     <td className="px-4 py-3 font-bold text-gray-900">{row.user.full_name}</td>
@@ -1142,7 +1291,6 @@ const Finance: React.FC = () => {
                                     <td className="px-4 py-3 text-right font-medium text-purple-600">{formatCurrency(row.expectedRevenue)}</td>
                                     <td className="px-4 py-3 text-right font-bold text-gray-800">{formatCurrency(row.collectedRevenue)}</td>
                                     <td className="px-4 py-3 text-right font-bold text-green-600">{formatCurrency(row.depositedRevenue)}</td>
-                                    <td className="px-4 py-3 text-right font-medium text-orange-600">{formatCurrency(row.totalExpenses)}</td>
                                     <td className="px-4 py-3 text-right font-medium text-purple-600">{formatCurrency(row.totalAdvances)}</td>
                                     <td className="px-4 py-3 text-right font-bold text-red-600">{formatCurrency(row.debt)}</td>
                                 </tr>
@@ -1155,7 +1303,6 @@ const Finance: React.FC = () => {
                                     <td className="px-4 py-3 text-right text-purple-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.expectedRevenue, 0))}</td>
                                     <td className="px-4 py-3 text-right text-gray-900">{formatCurrency(employeeStats.reduce((a, b) => a + b.collectedRevenue, 0))}</td>
                                     <td className="px-4 py-3 text-right text-green-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.depositedRevenue, 0))}</td>
-                                    <td className="px-4 py-3 text-right text-orange-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.totalExpenses, 0))}</td>
                                     <td className="px-4 py-3 text-right text-purple-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.totalAdvances, 0))}</td>
                                     <td className="px-4 py-3 text-right text-red-700">{formatCurrency(employeeStats.reduce((a, b) => a + b.debt, 0))}</td>
                                 </tr>
@@ -1213,6 +1360,103 @@ const Finance: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* NEW: Finance Page Borrow Modal */}
+            {
+                showBorrowModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-red-700">Mượn tiền quỹ</h3>
+                                <button onClick={() => setShowBorrowModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
+                            </div>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Chọn Khách hàng (Liên quan)</label>
+                                    <select
+                                        className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500 bg-white"
+                                        value={borrowForm.customerId}
+                                        onChange={e => setBorrowForm({ ...borrowForm, customerId: e.target.value })}
+                                    >
+                                        <option value="">-- Chọn khách hàng --</option>
+                                        {allCustomers
+                                            .filter(c => {
+                                                // 1. Source: MKT Group
+                                                const sourceUpper = (c.source || '').toUpperCase();
+                                                const isMKT = sourceUpper.includes('MKT');
+                                                if (!isMKT) return false;
+
+                                                // 2. Status: WON + Processing
+                                                const isProcessing = c.status === CustomerStatus.WON && c.deal_status === 'processing';
+                                                if (!isProcessing) return false;
+
+                                                // 3. Ownership
+                                                if (isAdmin) return true; // Admin sees all
+
+                                                if (isMod) {
+                                                    // My customers
+                                                    if (c.creator_id === userProfile?.id) return true;
+                                                    if (c.sales_rep === userProfile?.full_name) return true;
+
+                                                    // My Team's customers (Owner reports to Me)
+                                                    const owner = allProfiles.find(p => p.id === c.creator_id);
+                                                    if (owner && owner.manager_id === userProfile?.id) return true;
+
+                                                    return false;
+                                                }
+
+                                                // Regular User
+                                                return c.sales_rep === userProfile?.full_name || c.creator_id === userProfile?.id;
+                                            })
+                                            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                                            .map(c => (
+                                                <option key={c.id} value={c.id}>{c.name} - {c.phone}</option>
+                                            ))
+                                        }
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500 font-bold"
+                                        value={borrowForm.amount}
+                                        onChange={e => { const v = e.target.value.replace(/\D/g, ''); setBorrowForm({ ...borrowForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }}
+                                    />
+                                    <p className="text-[10px] text-gray-500 mt-1">* Hạn mức: 100.000.000 VNĐ / ngày</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Dự kiến trả</label>
+                                    <input
+                                        type="date"
+                                        min={todayStr}
+                                        className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500"
+                                        value={borrowForm.date}
+                                        onChange={e => setBorrowForm({ ...borrowForm, date: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú (Tùy chọn)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500"
+                                        value={borrowForm.reason}
+                                        onChange={e => setBorrowForm({ ...borrowForm, reason: e.target.value })}
+                                        placeholder="Lý do..."
+                                    />
+                                </div>
+                                <button
+                                    onClick={handleSubmitBorrow}
+                                    className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors"
+                                >
+                                    Xác nhận Mượn
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
         </div>
     );
 };

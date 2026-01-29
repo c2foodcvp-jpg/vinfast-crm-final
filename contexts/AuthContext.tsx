@@ -11,6 +11,7 @@ interface AuthContextType {
   isAdmin: boolean;
   isMod: boolean;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -26,7 +27,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error) throw error;
-        
+
         setSession(session);
         if (session) {
           await fetchProfile(session.user.id, session.user.email);
@@ -62,32 +63,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select('*, is_consultant_mode')
         .eq('id', userId)
         .single();
-      
+
       const isSuperAdmin = email === 'cskh.vinfasthcm@gmail.com';
 
       if (error || !data) {
         console.warn('Profile not found, using fallback or creating...');
         setUserProfile({
-            id: userId,
-            email: email || '',
-            full_name: session?.user?.user_metadata?.full_name || 'Người dùng',
-            role: isSuperAdmin ? UserRole.ADMIN : UserRole.EMPLOYEE,
-            status: isSuperAdmin ? 'active' : 'pending'
+          id: userId,
+          email: email || '',
+          full_name: session?.user?.user_metadata?.full_name || 'Người dùng',
+          role: isSuperAdmin ? UserRole.ADMIN : UserRole.EMPLOYEE,
+          status: isSuperAdmin ? 'active' : 'pending'
         });
       } else {
         if (isSuperAdmin && (data.role !== UserRole.ADMIN || data.status !== 'active')) {
-             const { error: updateError } = await supabase
-                .from('profiles')
-                .update({ role: UserRole.ADMIN, status: 'active' })
-                .eq('id', userId);
-             
-             if (!updateError) {
-                 data.role = UserRole.ADMIN;
-                 data.status = 'active';
-             }
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({ role: UserRole.ADMIN, status: 'active' })
+            .eq('id', userId);
+
+          if (!updateError) {
+            data.role = UserRole.ADMIN;
+            data.status = 'active';
+          }
         }
         setUserProfile(data as UserProfile);
       }
@@ -108,11 +109,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUserProfile(null);
   };
 
+  const refreshProfile = async () => {
+    if (session?.user) {
+      await fetchProfile(session.user.id, session.user.email);
+    }
+  };
+
   const isAdmin = userProfile?.role === UserRole.ADMIN;
   const isMod = userProfile?.role === UserRole.MOD;
 
   return (
-    <AuthContext.Provider value={{ session, userProfile, isLoading, isAdmin, isMod, signOut }}>
+    <AuthContext.Provider value={{ session, userProfile, isLoading, isAdmin, isMod, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

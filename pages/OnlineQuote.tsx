@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { CarModel, CarVersion, QuoteConfig, BankConfig, BankPackage, MembershipTier, RegistrationService } from '../types';
@@ -875,8 +875,31 @@ const OnlineQuote: React.FC = () => {
         return modelMatch && versionMatch;
     });
 
+    // Logic for Back Button
+    const searchParams = new URLSearchParams(location.search);
+    const fromCustomerId = searchParams.get('fromCustomer');
+
+    const handleBack = () => {
+        if (fromCustomerId) {
+            navigate(`/customers/${fromCustomerId}`);
+        } else {
+            navigate('/customers');
+        }
+    };
     return (
         <div className="max-w-[1200px] mx-auto pb-20">
+            {/* Back Button Row - Visible only if fromCustomer exists */}
+            {/* Back Button Row - Always Visible */}
+            <div className="mb-4">
+                <button
+                    onClick={handleBack}
+                    className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-bold transition-colors"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+                    {fromCustomerId ? 'Quay lại khách hàng' : 'Quay lại danh sách'}
+                </button>
+            </div>
+
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">

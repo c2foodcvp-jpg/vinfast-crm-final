@@ -176,15 +176,25 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
                         const isCompleted = progress[step.key]?.completed;
                         const timestamp = progress[step.key]?.timestamp;
 
+                        // Check previous step completion
+                        const isPreviousCompleted = index === 0 || progress[applicableSteps[index - 1].key]?.completed;
+                        const isDisabled = !isPreviousCompleted;
+
                         return (
                             <div
                                 key={step.key}
-                                onClick={() => handleToggleStep(step.key)}
+                                onClick={() => {
+                                    // Modified: ONLY allow toggle if NOT disabled AND NOT completed
+                                    // User Requirement: Cannot deselect completed steps.
+                                    if (!isDisabled && !isCompleted) handleToggleStep(step.key);
+                                }}
                                 className={`
-                                    group relative flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all duration-200
-                                    ${isCompleted
-                                        ? 'border-green-100 bg-green-50/50'
-                                        : 'border-gray-100 hover:border-blue-200 hover:bg-blue-50/30'
+                                    group relative flex items-center gap-4 p-4 rounded-xl border-2 transition-all duration-200
+                                    ${isDisabled
+                                        ? 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
+                                        : isCompleted
+                                            ? 'border-green-100 bg-green-50/50 cursor-default' // Completed: No pointer, green style
+                                            : 'cursor-pointer border-gray-100 hover:border-blue-200 hover:bg-blue-50/30' // Active: Pointer, hover effect
                                     }
                                     ${isWaitCar ? 'opacity-50 grayscale pointer-events-none' : ''}
                                 `}
@@ -192,7 +202,12 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
                                 {/* Checkbox/Icon */}
                                 <div className={`
                                     w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors duration-300
-                                    ${isCompleted ? 'bg-green-500 text-white shadow-green-200 shadow-md' : 'bg-gray-200 text-gray-400 group-hover:bg-blue-100 group-hover:text-blue-500'}
+                                    ${isCompleted
+                                        ? 'bg-green-500 text-white shadow-green-200 shadow-md'
+                                        : isDisabled
+                                            ? 'bg-gray-100 text-gray-300'
+                                            : 'bg-gray-200 text-gray-400 group-hover:bg-blue-100 group-hover:text-blue-500'
+                                    }
                                 `}>
                                     {isCompleted ? <CheckCircle2 size={18} strokeWidth={3} /> : <Circle size={18} />}
                                 </div>
@@ -212,9 +227,9 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
                                     )}
                                 </div>
 
-                                {/* Connector Line (Visual only, incomplete) */}
+                                {/* Connector Line (Visual only) */}
                                 {index < applicableSteps.length - 1 && (
-                                    <div className={`absolute left-[31px] -bottom-6 w-0.5 h-6 bg-gray-200 -z-10 ${isCompleted ? 'bg-green-200' : ''}`} />
+                                    <div className={`absolute left-[31px] -bottom-6 w-0.5 h-6 -z-10 ${progress[step.key]?.completed ? 'bg-green-200' : 'bg-gray-200'}`} />
                                 )}
                             </div>
                         );

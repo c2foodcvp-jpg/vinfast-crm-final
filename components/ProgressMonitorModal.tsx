@@ -165,15 +165,17 @@ const ProgressMonitorModal: React.FC<ProgressMonitorModalProps> = ({
                     </span>
                 </div>
 
-                <div className="flex items-center gap-2 mb-1">
-                    <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                            className={`h-full rounded-full transition-all duration-500 ${colorClass}`}
-                            style={{ width: `${percent}%` }}
-                        />
+                {customer.deal_details?.car_availability !== 'Đợi xe' && (
+                    <div className="flex items-center gap-2 mb-1">
+                        <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                                className={`h-full rounded-full transition-all duration-500 ${colorClass}`}
+                                style={{ width: `${percent}%` }}
+                            />
+                        </div>
+                        <span className={`text-xs font-bold w-9 text-right ${percent === 100 ? 'text-green-600' : 'text-gray-600'}`}>{percent}%</span>
                     </div>
-                    <span className={`text-xs font-bold w-9 text-right ${percent === 100 ? 'text-green-600' : 'text-gray-600'}`}>{percent}%</span>
-                </div>
+                )}
 
                 <div className="flex justify-between items-center text-[10px] text-gray-400 mt-1">
                     <span>{days} ngày (từ chốt đơn)</span>
