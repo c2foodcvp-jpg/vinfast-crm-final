@@ -1,18 +1,17 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import { CarModel, CarVersion, QuoteConfig, BankConfig, BankPackage, MembershipTier, RegistrationService } from '../types';
+import { CarModel, CarVersion, QuoteConfig, BankConfig, BankPackage, MembershipTier, RegistrationService, UserRole } from '../types';
 import {
-    Car, Calculator, Check, ChevronDown, DollarSign, Calendar, Landmark, Download, FileText, Loader2, CheckCircle2, AlertCircle, FileImage, Gift, Crown, Coins, ShieldCheck, Phone, MapPin, Search, TableProperties, Lock, ArrowUpCircle
+    Car, Calculator, FileImage, FileText, CheckCircle2, AlertCircle, Settings2, Mail, Loader2, Lock, Check, DollarSign, Landmark, Gift, Crown, Coins, ShieldCheck, MapPin, Search, TableProperties, ArrowUpCircle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
-// Registration services will be fetched from database
 
 // --- HELPER: WARRANTY TEXT LOGIC ---
 const getWarrantyText = (modelName: string) => {
@@ -160,11 +159,9 @@ const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
                         {feeBreakdown.map((item: any, idx: number) => (
                             <tr key={idx}>
                                 <td style={styles.td}>{idx + 1}. {item.name}</td>
-                                <td style={{ ...styles.tdRight, fontWeight: 'normal' }}>{formatCurrency(item.amount)}</td>
+                                <td style={{ ...styles.tdRight, fontWeight: 'bold', color: '#1d4ed8' }}>{Math.round(item.amount).toLocaleString('vi-VN')}</td>
                             </tr>
                         ))}
-
-                        {/* TOTAL REGISTRATION FEES ROW */}
                         <tr style={{ backgroundColor: '#f3f4f6' }}>
                             <td style={{ ...styles.td, fontWeight: 'bold', fontStyle: 'italic' }}>TỔNG PHÍ ĐĂNG KÝ</td>
                             <td style={{ ...styles.tdRight, fontWeight: 'bold' }}>{formatCurrency(totalFees)}</td>
@@ -257,11 +254,33 @@ const OnlineQuote: React.FC = () => {
     const quoteRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
 
+    // Access Control
+    const isDiamond = userProfile?.member_tier === MembershipTier.DIAMOND ||
+        userProfile?.role === UserRole.ADMIN ||
+        userProfile?.role === UserRole.MOD;
+
+    // --- EMAIL SENDING STATE ---
+    const [showEmailModal, setShowEmailModal] = useState(false);
+    const [emailRecipient, setEmailRecipient] = useState('');
+    const [customerName, setCustomerName] = useState('');
+    const [emailMessage, setEmailMessage] = useState(''); // Lời nhắn
+    const [sendingEmail, setSendingEmail] = useState(false);
+    const [attachPDF, setAttachPDF] = useState(true); // Tùy chọn đính kèm PDF
+
     // Check if user is locked from using this page (Restricted to Platinum+)
     const isPlatinumOrHigher =
         userProfile?.member_tier === MembershipTier.PLATINUM ||
         userProfile?.member_tier === MembershipTier.DIAMOND ||
         userProfile?.role === 'admin' || userProfile?.role === 'moderator'; // Allow Admin/Mod
+
+    // --- UI HANDLERS ---
+    const handleEmailButtonClick = () => {
+        if (isDiamond) {
+            setShowEmailModal(true);
+        } else {
+            alert('🔒 TÍNH NĂNG CAO CẤP\n\nBạn cần đạt hạng DIAMOND (Kim Cương) để sử dụng tính năng Gửi Email Báo Giá tự động.\n\nVui lòng liên hệ Admin để nâng cấp!');
+        }
+    };
 
     if (!isPlatinumOrHigher) {
         return (
@@ -887,6 +906,272 @@ const OnlineQuote: React.FC = () => {
         }
     };
 
+    // --- EMAIL SENDING LOGIC ---
+    const handleTestEmailConnection = async () => {
+        try {
+            const { data: settingData } = await supabase
+                .from('app_settings')
+                .select('value')
+                .eq('key', 'email_script_url')
+                .maybeSingle();
+
+            const scriptUrl = settingData?.value;
+            if (!scriptUrl) {
+                alert('LỖI: Chưa cấu hình URL gửi email (key: email_script_url) trong App Settings.');
+                return;
+            }
+
+            // Mask URL for security in alert
+            const maskedUrl = scriptUrl.substring(0, 30) + '...';
+            if (!confirm(`Đang test kết nối tới: ${maskedUrl}\n\nNhấn OK để tiếp tục.`)) return;
+
+            const response = await fetch(scriptUrl); // GET request
+            if (!response.ok) throw new Error(response.statusText);
+
+            const text = await response.text();
+            alert('✅ KẾT NỐI THÀNH CÔNG!\n\nPhản hồi từ Server:\n' + text);
+
+        } catch (e: any) {
+            console.error(e);
+            alert('❌ KẾT NỐI THẤT BẠI: ' + e.message + '\n\nNguyên nhân thường gặp:\n- Script chưa Deploy dạng Web App "Anyone".\n- URL bị sai.');
+        }
+    };
+
+    // --- HELPER: GENERATE ASSETS (PDF & IMG) ---
+    const generateQuoteAssets = async (data: any): Promise<{ pdf: string, img: string } | null> => {
+        // Render Template off-screen
+        const container = document.createElement('div');
+        container.style.position = 'absolute';
+        container.style.top = '-9999px';
+        container.style.left = '-9999px';
+        document.body.appendChild(container);
+
+        const root = createRoot(container);
+        // Force sync render promise wrapper
+        await new Promise<void>(resolve => {
+            root.render(<PrintableQuoteTemplate data={data} />);
+            setTimeout(resolve, 500); // Wait for render
+        });
+
+        try {
+            const element = container.querySelector('#print-template') as HTMLElement;
+            if (!element) return null;
+
+            const canvas = await html2canvas(element, {
+                scale: 1.5, // Scale for quality
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff'
+            });
+
+            // 1. Get Image Base64
+            // toDataURL returns: "data:image/jpeg;base64,....." -> we split to get just the code
+            const imgDataFull = canvas.toDataURL('image/jpeg', 0.9);
+            const imgBase64 = imgDataFull.split(',')[1];
+
+            // 2. Generate PDF using the image
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+            const imgWidth = pdfWidth;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+            let heightLeft = imgHeight;
+            let position = 0;
+
+            pdf.addImage(imgDataFull, 'JPEG', 0, position, imgWidth, imgHeight);
+            heightLeft -= pdfHeight;
+
+            while (heightLeft > 0) {
+                position = heightLeft - imgHeight;
+                pdf.addPage();
+                pdf.addImage(imgDataFull, 'JPEG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pdfHeight;
+            }
+
+            const pdfOutput = pdf.output('datauristring');
+            const pdfBase64 = pdfOutput.split(',')[1];
+
+            return { pdf: pdfBase64, img: imgBase64 };
+
+        } catch (err) {
+            console.error("Asset Gen Error:", err);
+            return null;
+        } finally {
+            setTimeout(() => {
+                root.unmount();
+                document.body.removeChild(container);
+            }, 100);
+        }
+    };
+
+    const handleSendEmail = async () => {
+        if (!emailRecipient) {
+            alert('Vui lòng nhập địa chỉ Email!');
+            return;
+        }
+
+        setSendingEmail(true);
+        try {
+            // 1. Get Google Apps Script URL
+            const { data: settingData } = await supabase
+                .from('app_settings')
+                .select('value')
+                .eq('key', 'email_script_url')
+                .maybeSingle();
+
+            const scriptUrl = settingData?.value;
+
+            if (!scriptUrl) {
+                alert('Chưa cấu hình URL gửi email (app_settings: email_script_url)');
+                return;
+            }
+
+            // 2. Prepare Data
+            const quoteData = {
+                carModelName: carModels.find(m => m.id === selectedModelId)?.name || 'VinFast',
+                versionName: selectedVersionId ? carVersions.find(v => v.id === selectedVersionId)?.name : '',
+                listPrice: selectedVersionId ? carVersions.find(v => v.id === selectedVersionId)?.price : 0,
+                finalInvoicePrice,
+                totalFees,
+                finalRollingPrice,
+                invoiceBreakdown: invoicePromoCalculation.breakdown,
+                feeBreakdown: feeCalculation.breakdown,
+                rollingBreakdown: rollingPromoCalculation.breakdown,
+                activeGifts,
+                membershipData: membershipCalculation,
+                bankName: selectedBankId ? banks.find(b => b.id === selectedBankId)?.name : '',
+                loanAmount,
+                upfrontPayment,
+                monthlyPaymentTable,
+                userProfile,
+                prepaidPercent,
+                isRegistrationFree
+            };
+
+            // 3. Generate Assets if requested
+            let assets = null;
+            if (attachPDF) {
+                assets = await generateQuoteAssets(quoteData);
+            }
+
+            // 4. Professional HTML Body
+            const emailHtml = renderToStaticMarkup(
+                <div style={{ fontFamily: 'Helvetica, Arial, sans-serif', lineHeight: '1.6', color: '#1f2937', maxWidth: '600px', margin: '0 auto', fontSize: '15px' }}>
+
+                    {/* Header Logo/Brand */}
+                    <div style={{ padding: '24px 0', borderBottom: '2px solid #2563eb', textAlign: 'center' }}>
+                        <h1 style={{ margin: 0, fontSize: '26px', fontWeight: 'bold', color: '#2563eb', letterSpacing: '-0.5px' }}>VINFAST AUTO</h1>
+                        <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px' }}>Hệ thống Báo giá Online</p>
+                    </div>
+
+                    {/* Greeting */}
+                    <div style={{ padding: '30px 20px', backgroundColor: '#ffffff' }}>
+                        <p style={{ marginTop: 0 }}>Kính gửi Quý khách <strong>{customerName}</strong>,</p>
+
+                        <p>Lời đầu tiên, <strong>VinFast</strong> xin gửi lời cảm ơn chân thành tới Quý khách vì đã quan tâm đến dòng xe <strong>{quoteData.carModelName}</strong>.</p>
+
+                        <p>Theo yêu cầu của Quý khách, chúng tôi xin gửi kèm <strong>Báo giá chi tiết & Bảng tính dòng tiền trả góp</strong> (gồm File PDF và Hình ảnh) để Quý khách tham khảo.</p>
+
+                        {/* Custom Message */}
+                        {emailMessage && (
+                            <div style={{ backgroundColor: '#eff6ff', borderLeft: '4px solid #3b82f6', padding: '16px', color: '#1e40af', margin: '24px 0', borderRadius: '0 8px 8px 0', fontStyle: 'italic' }}>
+                                "{emailMessage}"
+                            </div>
+                        )}
+
+                        <p style={{ marginBottom: 0 }}>Nếu cần thêm thông tin chi tiết hoặc hỗ trợ lái thử xe tận nhà, Quý khách vui lòng liên hệ trực tiếp với em qua số điện thoại bên dưới.</p>
+                    </div>
+                    {/* CTA Button */}
+                    <div style={{ textAlign: 'center', margin: '10px 0 40px' }}>
+                        <a href="https://vinfast-hcmc.com/" style={{ backgroundColor: '#2563eb', color: '#ffffff', padding: '14px 32px', borderRadius: '50px', textDecoration: 'none', fontWeight: 'bold', display: 'inline-block', boxShadow: '0 4px 6px -1px rgba(37, 99, 235, 0.4)' }}>
+                            Truy cập Website VinFast HCMC
+                        </a>
+                    </div>
+
+                    {/* Footer / Signature */}
+                    <div style={{ borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb', padding: '24px', fontSize: '13px', color: '#4b5563', borderRadius: '0 0 12px 12px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <tbody>
+                                <tr>
+                                    <td style={{ verticalAlign: 'top', width: '60px' }}>
+                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#dbeafe', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 'bold', overflow: 'hidden', lineHeight: '48px', textAlign: 'center' }}>
+                                            {userProfile?.full_name?.charAt(0) || 'V'}
+                                        </div>
+                                    </td>
+                                    <td style={{ verticalAlign: 'top', paddingLeft: '12px' }}>
+                                        <p style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 'bold', color: '#111827' }}>{userProfile?.full_name || 'Tư vấn bán hàng'}</p>
+                                        <p style={{ margin: '0 0 4px', color: '#2563eb', fontWeight: '500' }}>Tư vấn bán hàng - VinFast</p>
+                                        <p style={{ margin: '0 0 2px' }}>Email: <a href={`mailto:${userProfile?.email}`} style={{ color: '#4b5563', textDecoration: 'none' }}>{userProfile?.email}</a></p>
+                                        <p style={{ margin: '0 0 2px' }}>Hotline/Zalo: <a href={`tel:${userProfile?.phone}`} style={{ color: '#059669', fontWeight: 'bold', textDecoration: 'none' }}>{userProfile?.phone || 'Đang cập nhật'}</a></p>
+                                        <p style={{ margin: '12px 0 0', fontSize: '12px', fontStyle: 'italic', color: '#9ca3af' }}>VinFast - Mãnh liệt tinh thần Việt Nam</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+
+            // 5. Send Request
+            const attachments = [];
+            if (assets) {
+                // Add PDF
+                attachments.push({
+                    fileName: `BaoGia_VinFast_${quoteData.carModelName}.pdf`,
+                    mimeType: 'application/pdf',
+                    content: assets.pdf
+                });
+                // Add Image
+                attachments.push({
+                    fileName: `ChiTiet_BaoGia_${quoteData.carModelName}.jpg`,
+                    mimeType: 'image/jpeg',
+                    content: assets.img
+                });
+            }
+
+            const payload = {
+                type: 'send_email',
+                recipientEmail: emailRecipient,
+                subject: `Báo giá xe VinFast ${quoteData.carModelName} - Kính gửi ${customerName || 'Quý khách'}`,
+                htmlBody: emailHtml,
+                attachments: attachments
+            };
+
+            const response = await fetch(scriptUrl, {
+                method: 'POST',
+                // Quan trọng: Dùng text/plain để tránh CORS Preflight
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server returned ${response.status} ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            if (result.success) {
+                alert(`Đã gửi báo giá (kèm PDF) tới ${emailRecipient} thành công!`);
+                setShowEmailModal(false);
+                setEmailRecipient('');
+                setCustomerName('');
+                setEmailMessage('');
+            } else {
+                console.error("Server Response Error:", result);
+                throw new Error(result.message || JSON.stringify(result) || 'Unknown error');
+            }
+
+        } catch (e: any) {
+            console.error(e);
+            alert('Lỗi khi gửi email: ' + (e.message || e));
+            if (e.message && e.message.includes("Invalid request format")) {
+                alert("GỢI Ý: Bạn cần cập nhật Google Apps Script lên phiên bản v4 (Hỗ trợ Attachments).");
+            }
+        } finally {
+            setSendingEmail(false);
+        }
+    };
+
     return (
         <div className="max-w-[1200px] mx-auto pb-20">
             <div className="mb-4">
@@ -924,6 +1209,19 @@ const OnlineQuote: React.FC = () => {
                     <button onClick={() => handleExportQuote('image')} className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-600 border border-blue-200 rounded-xl font-bold hover:bg-blue-100 shadow-sm text-sm transition-all">
                         <FileImage size={16} /> Lưu Ảnh
                     </button>
+                    <div className="flex items-center gap-1">
+                        <button onClick={handleEmailButtonClick} className={`flex items-center gap-2 px-3 py-2 border rounded-xl font-bold shadow-sm text-sm transition-all ${isDiamond ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100' : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200 cursor-not-allowed'}`}>
+                            <Mail size={16} /> Gửi Email
+                            {!isDiamond && <Lock size={12} className="ml-1" />}
+                        </button>
+
+                        {/* Debug Button (Small) - Only show for Admin */}
+                        {userProfile?.role === 'admin' && (
+                            <button onClick={handleTestEmailConnection} className="p-2 text-gray-400 hover:text-gray-600 transition-colors" title="Test Kết nối Email (Admin Only)">
+                                <Settings2 size={16} />
+                            </button>
+                        )}
+                    </div>
                     <button onClick={() => handleExportQuote('pdf')} className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-lg text-sm transition-all">
                         <FileText size={16} /> Xuất PDF
                     </button>
@@ -1447,6 +1745,73 @@ const OnlineQuote: React.FC = () => {
                     </div>
                 </div>
             </div>
+            {showEmailModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4">
+                    <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-fade-in relative z-[10000]">
+                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                            <Mail className="text-primary-600" /> Gửi Báo Giá
+                        </h3>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Tên khách hàng</label>
+                                <input
+                                    type="text"
+                                    className="w-full border border-gray-300 rounded-xl px-4 py-2 outline-none focus:border-primary-500"
+                                    value={customerName}
+                                    onChange={e => setCustomerName(e.target.value)}
+                                    placeholder="VD: Nguyễn Văn A"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Email nhận <span className="text-red-500">*</span></label>
+                                <input
+                                    type="email"
+                                    className="w-full border border-gray-300 rounded-xl px-4 py-2 outline-none focus:border-primary-500"
+                                    value={emailRecipient}
+                                    onChange={e => setEmailRecipient(e.target.value)}
+                                    placeholder="khachhang@example.com"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Lời nhắn (Tùy chọn)</label>
+                                <textarea
+                                    className="w-full border border-gray-300 rounded-xl px-4 py-2 outline-none focus:border-primary-500 text-sm h-20 resize-none"
+                                    value={emailMessage}
+                                    onChange={e => setEmailMessage(e.target.value)}
+                                    placeholder="Nhập lời nhắn cá nhân tới khách hàng..."
+                                />
+                            </div>
+
+                            <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-gray-50 rounded-lg">
+                                <input
+                                    type="checkbox"
+                                    checked={attachPDF}
+                                    onChange={e => setAttachPDF(e.target.checked)}
+                                    className="w-4 h-4 text-emerald-600 rounded"
+                                />
+                                <span className="text-sm text-gray-700 font-medium">Đính kèm file PDF + Hình ảnh Báo Giá</span>
+                            </label>
+
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                >
+                                    Đóng
+                                </button>
+                                <button
+                                    onClick={handleSendEmail}
+                                    disabled={sendingEmail || !emailRecipient}
+                                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {sendingEmail ? <Loader2 className="animate-spin" size={18} /> : <Mail size={18} />}
+                                    Gửi Ngay
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

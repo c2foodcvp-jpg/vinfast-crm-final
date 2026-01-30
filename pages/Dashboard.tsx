@@ -10,6 +10,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { CustomerStatus, Customer, UserProfile, UserRole, CustomerClassification } from '../types';
 import AddCustomerModal from '../components/AddCustomerModal';
 import DateRangeFilter from '../components/DateRangeFilter';
+import ApprovalBadge from '../components/ApprovalBadge';
 
 const { useNavigate } = ReactRouterDOM as any;
 
@@ -397,6 +398,7 @@ const Dashboard: React.FC = () => {
                         }}
                     />
 
+                    <ApprovalBadge className="bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-gray-50 !p-2.5" />
                     <div className="relative" ref={notiRef}>
                         <button onClick={() => setIsNotiOpen(!isNotiOpen)} className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-600 hover:text-primary-600 hover:bg-gray-50 shadow-sm transition-all relative">
                             <Bell size={20} />

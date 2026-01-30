@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { User, Lock, Loader2, AlertCircle, ShieldCheck, Mail, ArrowLeft, ChevronRight } from 'lucide-react';
+import { User, Lock, Loader2, AlertCircle, ShieldCheck, Mail, ArrowLeft, ChevronRight, ArrowRight } from 'lucide-react';
 
 const { useNavigate, Link } = ReactRouterDOM as any;
 
@@ -127,6 +127,16 @@ const Login: React.FC = () => {
             {/* Background Abstract Shapes */}
             <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-primary-600/20 blur-[120px]"></div>
             <div className="absolute bottom-[0%] right-[0%] w-[40%] h-[40%] rounded-full bg-blue-600/20 blur-[100px]"></div>
+
+            {/* Intro Navigation Button (Top Right) */}
+            <Link
+                to="/intro"
+                className="absolute top-6 right-6 z-50 px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-full backdrop-blur-md border border-white/20 shadow-xl transition-all hover:scale-105 active:scale-95 group flex items-center gap-3"
+                title="Giới thiệu Hệ thống"
+            >
+                <span className="font-semibold text-sm">Tìm hiểu hệ thống CRM</span>
+                <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+            </Link>
 
             <div className="relative w-full max-w-[1000px] bg-white/10 backdrop-blur-xl rounded-3xl shadow-2xl overflow-hidden border border-white/10 flex flex-col md:flex-row m-4 animate-fade-in">
 

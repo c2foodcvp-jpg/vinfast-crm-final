@@ -3,10 +3,12 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { CarModel, CarVersion, QuoteConfig, BankConfig, QuoteConfigOption, BankPackage, Distributor, DemoCar, UserProfile, RegistrationService } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Trash2, Edit2, X, MapPin, Building2, Loader2, Copy, Terminal, Database, Car, Settings, CheckCircle2, AlertTriangle, Key, ChevronDown, Percent, Landmark, Wallet, Layers, Gift, Crown, ShieldCheck, Coins, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, MapPin, Building2, Loader2, Copy, Terminal, Database, Car, Settings, CheckCircle2, AlertTriangle, Key, ChevronDown, Percent, Landmark, Wallet, Layers, Gift, Crown, ShieldCheck, Coins, RefreshCw, Megaphone } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import SystemSettingsPanel from '../components/SystemSettingsPanel';
+import SystemNotificationSender from '../components/SystemNotificationSender';
 import { useVersionCheck } from '../src/hooks/useVersionCheck';
+
 
 const VersionCheckButton: React.FC = () => {
     const { checkVersion, isChecking, hasUpdate, reload } = useVersionCheck(0); // 0 = no auto check
@@ -38,7 +40,7 @@ const Configuration: React.FC = () => {
     const { userProfile, isAdmin, isMod } = useAuth();
     const navigate = useNavigate();
     // Enhanced tabs
-    const [activeTab, setActiveTab] = useState<'distributors' | 'cars' | 'versions' | 'promos' | 'fees' | 'banks' | 'demo_cars' | 'gifts' | 'membership' | 'warranties' | 'regservices' | 'system'>('distributors');
+    const [activeTab, setActiveTab] = useState<'distributors' | 'cars' | 'versions' | 'promos' | 'fees' | 'banks' | 'demo_cars' | 'gifts' | 'membership' | 'warranties' | 'regservices' | 'system' | 'notifications'>('distributors');
 
     const [distributors, setDistributors] = useState<Distributor[]>([]);
     const [carModels, setCarModels] = useState<CarModel[]>([]);
@@ -385,6 +387,12 @@ const Configuration: React.FC = () => {
                 payload.value = Number(String(payload.value).replace(/\D/g, ''));
                 payload.priority = Number(payload.priority || 0);
                 payload.is_active = true;
+
+                if (isAdmin) {
+                    payload.manager_id = formData.manager_id || null;
+                } else if (isMod && userProfile) {
+                    payload.manager_id = userProfile.id;
+                }
             }
 
             if (formData.id) {
@@ -515,6 +523,9 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                 </button>
                 <button onClick={() => setActiveTab('regservices')} className={`px-4 py-3 font-bold text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === 'regservices' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                     <MapPin size={18} /> Dịch vụ ĐK
+                </button>
+                <button onClick={() => setActiveTab('notifications')} className={`px-4 py-3 font-bold text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === 'notifications' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                    <Megaphone size={18} /> Thông báo
                 </button>
                 {isAdmin && (
                     <button onClick={() => setActiveTab('system')} className={`px-4 py-3 font-bold text-sm border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${activeTab === 'system' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
@@ -781,23 +792,46 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                         );
                     })}
 
-                    {activeTab === 'regservices' && regServices.map(svc => (
-                        <div key={svc.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 group hover:shadow-md transition-all">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3 flex-1">
-                                    <div className="bg-emerald-50 p-2 rounded-lg"><MapPin size={18} className="text-emerald-600" /></div>
-                                    <div className="flex-1">
-                                        <h3 className="font-bold text-gray-900 text-sm">{svc.label}</h3>
-                                        <p className="text-sm text-emerald-600 font-bold">{svc.value?.toLocaleString('vi-VN')} VNĐ</p>
+                    {activeTab === 'regservices' && regServices.map(svc => {
+                        const isGlobal = !svc.manager_id;
+                        const managerName = !isGlobal ? allManagers.find(m => m.id === svc.manager_id)?.name : null;
+
+                        return (
+                            <div key={svc.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 group hover:shadow-md transition-all">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3 flex-1">
+                                        <div className={`p-2 rounded-lg ${isGlobal ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
+                                            <MapPin size={18} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                                                {svc.label}
+                                                {isGlobal ? (
+                                                    <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">Chung</span>
+                                                ) : (
+                                                    <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 border border-blue-200">
+                                                        {managerName ? `Team ${managerName}` : 'Team Riêng'}
+                                                    </span>
+                                                )}
+                                            </h3>
+                                            <p className="text-sm text-emerald-600 font-bold">{svc.value?.toLocaleString('vi-VN')} VNĐ</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={() => handleOpenModal(svc)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 size={16} /></button>
+                                        <button onClick={() => handleDeleteClick(svc, 'registration_services')} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
                                     </div>
                                 </div>
-                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => handleOpenModal(svc)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 size={16} /></button>
-                                    <button onClick={() => handleDeleteClick(svc, 'registration_services')} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
-                                </div>
                             </div>
+                        );
+                    })}
+
+
+                    {activeTab === 'notifications' && (
+                        <div className="col-span-1 md:col-span-2 lg:col-span-3">
+                            <SystemNotificationSender />
                         </div>
-                    ))}
+                    )}
 
                     {activeTab === 'system' && isAdmin && (
                         <div className="col-span-1 md:col-span-2 lg:col-span-3">
@@ -1033,6 +1067,54 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
 
                             {activeTab === 'regservices' && (
                                 <>
+                                    {isAdmin ? (
+                                        <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 mb-4">
+                                            <label className="block text-xs font-bold text-gray-700 mb-2 uppercase tracking-wider">Phạm vi áp dụng</label>
+                                            <div className="flex gap-4 mb-2">
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="radio"
+                                                        name="scope"
+                                                        checked={!formData.manager_id}
+                                                        onChange={() => setFormData({ ...formData, manager_id: null })}
+                                                        className="w-4 h-4 text-blue-600"
+                                                    />
+                                                    <span className="text-sm font-medium">Toàn hệ thống (Chung)</span>
+                                                </label>
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="radio"
+                                                        name="scope"
+                                                        checked={!!formData.manager_id}
+                                                        onChange={() => setFormData({ ...formData, manager_id: userProfile?.id })} // Default to self first
+                                                        className="w-4 h-4 text-blue-600"
+                                                    />
+                                                    <span className="text-sm font-medium">Theo Team (Riêng)</span>
+                                                </label>
+                                            </div>
+
+                                            {!!formData.manager_id && (
+                                                <div className="mt-2 animate-fade-in">
+                                                    <label className="block text-xs font-bold text-gray-500 mb-1">Chọn Team (Trưởng nhóm)</label>
+                                                    <select
+                                                        value={formData.manager_id || ''}
+                                                        onChange={e => setFormData({ ...formData, manager_id: e.target.value })}
+                                                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none"
+                                                    >
+                                                        <option value="">-- Chọn Team --</option>
+                                                        {allManagers.map(m => (
+                                                            <option key={m.id} value={m.id}>{m.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="bg-blue-50 text-blue-700 text-xs font-bold px-3 py-2 rounded-lg mb-4 flex items-center gap-2">
+                                            <Building2 size={14} />
+                                            Cấu hình cho Team: {userProfile?.full_name}
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-sm font-bold text-gray-700 mb-1">Tên dịch vụ</label>
                                         <input

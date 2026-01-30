@@ -52,6 +52,7 @@ export interface RegistrationService {
   value: number;
   is_active?: boolean;
   priority?: number;
+  manager_id?: string; // Team isolation
 }
 
 // NEW: Fee Options & VinPoint Mapping
@@ -155,6 +156,9 @@ export interface UserProfile {
 
   // MOD Consultant Mode: When true, MOD only sees their own customers instead of team
   is_consultant_mode?: boolean;
+
+  // NEW: Team QR Code (Manager Level)
+  qr_code_url?: string;
 
   created_at?: string;
   discord_config?: any;

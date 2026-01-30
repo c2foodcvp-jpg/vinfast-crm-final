@@ -245,22 +245,33 @@ const LeadsQueue: React.FC = () => {
             </div>
 
             {/* Assignment Toolbar */}
-            <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm mb-6 sticky top-20 z-10">
+            <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm mb-6 sticky top-20 z-10 transition-all">
                 <div className="flex flex-col gap-4">
                     {/* Row 1: Selection + Employee Picker + Button */}
                     <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-                        <div className="flex items-center gap-3 w-full md:w-auto">
+
+                        {/* Selected Count & Select All Toggle */}
+                        <div className="flex items-center justify-between w-full md:w-auto gap-3">
                             <div className="flex items-center gap-2 text-gray-700 font-medium">
                                 <CheckSquare size={20} className="text-purple-600" />
                                 <span>Đã chọn: <strong className="text-gray-900">{selectedLeadIds.length}</strong></span>
                             </div>
+
+                            {/* Mobile Select All Button */}
+                            <button
+                                onClick={toggleSelectAll}
+                                className="md:hidden text-sm text-purple-600 font-medium hover:bg-purple-50 px-3 py-1 rounded-lg transition-colors border border-purple-100"
+                            >
+                                {selectedLeadIds.length === leads.length && leads.length > 0 ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                            </button>
                         </div>
 
-                        <div className="flex items-center gap-3 w-full md:w-auto">
+                        {/* Actions */}
+                        <div className="flex flex-col w-full md:w-auto md:flex-row gap-3">
                             <select
                                 value={targetRepId}
                                 onChange={(e) => setTargetRepId(e.target.value)}
-                                className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-purple-500 focus:border-purple-500 block w-full p-2.5 outline-none font-bold"
+                                className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-purple-500 focus:border-purple-500 block w-full md:w-64 p-2.5 outline-none font-bold"
                                 disabled={selectedLeadIds.length === 0}
                             >
                                 <option value="">-- Chọn Sale tiếp nhận --</option>
@@ -269,29 +280,31 @@ const LeadsQueue: React.FC = () => {
                                 ))}
                             </select>
 
-                            <button
-                                onClick={handleAssign}
-                                disabled={selectedLeadIds.length === 0 || !targetRepId || isAssigning}
-                                className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white transition-all shadow-md whitespace-nowrap
-                                    ${selectedLeadIds.length > 0 && targetRepId
-                                        ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-200'
-                                        : 'bg-gray-300 cursor-not-allowed text-gray-500'}`}
-                            >
-                                {isAssigning ? <Loader2 className="animate-spin" size={18} /> : <UserPlus size={18} />}
-                                Phân Bổ
-                            </button>
+                            <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto">
+                                <button
+                                    onClick={handleAssign}
+                                    disabled={selectedLeadIds.length === 0 || !targetRepId || isAssigning}
+                                    className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-white transition-all shadow-md whitespace-nowrap w-full md:w-auto
+                                        ${selectedLeadIds.length > 0 && targetRepId
+                                            ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-200'
+                                            : 'bg-gray-300 cursor-not-allowed text-gray-500'}`}
+                                >
+                                    {isAssigning ? <Loader2 className="animate-spin" size={18} /> : <UserPlus size={18} />}
+                                    Phân Bổ
+                                </button>
 
-                            <button
-                                onClick={handleSelfAssign}
-                                disabled={selectedLeadIds.length === 0 || isAssigning}
-                                className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white transition-all shadow-md whitespace-nowrap
-                                    ${selectedLeadIds.length > 0
-                                        ? 'bg-green-600 hover:bg-green-700 shadow-green-200'
-                                        : 'bg-gray-300 cursor-not-allowed text-gray-500'}`}
-                                title="Nhận các khách hàng đã chọn về danh sách của tôi"
-                            >
-                                <CheckSquare size={18} /> Nhận khách cho mình
-                            </button>
+                                <button
+                                    onClick={handleSelfAssign}
+                                    disabled={selectedLeadIds.length === 0 || isAssigning}
+                                    className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-white transition-all shadow-md whitespace-nowrap w-full md:w-auto
+                                        ${selectedLeadIds.length > 0
+                                            ? 'bg-green-600 hover:bg-green-700 shadow-green-200'
+                                            : 'bg-gray-300 cursor-not-allowed text-gray-500'}`}
+                                    title="Nhận các khách hàng đã chọn về danh sách của tôi"
+                                >
+                                    <CheckSquare size={18} /> Nhận ngay
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -302,8 +315,8 @@ const LeadsQueue: React.FC = () => {
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <Mail size={18} className={sendEmail ? 'text-green-600' : 'text-gray-400'} />
-                                    <span className="text-sm font-medium text-gray-700">Gửi email thông báo cho nhân viên</span>
-                                    {!emailScriptUrl && <span className="text-xs text-orange-500">(Chưa cấu hình)</span>}
+                                    <span className="text-sm font-medium text-gray-700">Gửi email thông báo</span>
+                                    {!emailScriptUrl && <span className="text-xs text-orange-500">(Chưa config)</span>}
                                 </div>
                                 <div
                                     onClick={() => setSendEmail(!sendEmail)}
@@ -316,11 +329,10 @@ const LeadsQueue: React.FC = () => {
                             {/* Admin Note */}
                             {sendEmail && (
                                 <div className="animate-fade-in">
-                                    <label className="block text-xs font-bold text-gray-500 mb-1">Ghi chú từ Admin (tuỳ chọn)</label>
                                     <textarea
                                         value={adminNote}
                                         onChange={(e) => setAdminNote(e.target.value)}
-                                        placeholder="VD: Khách VIP, liên hệ trong sáng nay. Nguồn từ website chính..."
+                                        placeholder="Ghi chú cho Sale (tuỳ chọn)..."
                                         className="w-full border border-gray-200 rounded-xl p-3 text-sm text-gray-700 outline-none focus:border-purple-400 resize-none"
                                         rows={2}
                                     />
@@ -340,70 +352,125 @@ const LeadsQueue: React.FC = () => {
             </div>
 
 
-            {/* Leads Table */}
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left text-gray-500">
-                        <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                            <tr>
-                                <th scope="col" className="p-4 w-4">
-                                    <div className="flex items-center">
-                                        <button onClick={toggleSelectAll}>
-                                            {leads.length > 0 && selectedLeadIds.length === leads.length ? <CheckSquare className="text-purple-600" size={20} /> : <Square className="text-gray-400" size={20} />}
-                                        </button>
+            {/* Content: Mobile Cards + Desktop Table */}
+            <div>
+                {/* Mobile View: Cards */}
+                <div className="md:hidden flex flex-col gap-3">
+                    {leads.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center text-gray-400 bg-white p-8 rounded-2xl border border-gray-200 border-dashed">
+                            <div className="bg-gray-50 p-4 rounded-full mb-3"><CheckSquare size={32} /></div>
+                            <p className="font-bold text-center">Không có khách hàng nào đang chờ.</p>
+                        </div>
+                    ) : (
+                        leads.map((lead) => (
+                            <div
+                                key={lead.id}
+                                onClick={() => toggleSelectOne(lead.id)}
+                                className={`p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedLeadIds.includes(lead.id)
+                                        ? 'bg-purple-50 border-purple-300 shadow-sm ring-1 ring-purple-200'
+                                        : 'bg-white border-gray-200 shadow-sm'
+                                    }`}
+                            >
+                                <div className="flex items-start gap-3">
+                                    <div className={`mt-1 flex-shrink-0 transition-colors ${selectedLeadIds.includes(lead.id) ? 'text-purple-600' : 'text-gray-300'}`}>
+                                        {selectedLeadIds.includes(lead.id) ? <CheckSquare size={24} /> : <Square size={24} />}
                                     </div>
-                                </th>
-                                <th className="px-6 py-3">Ngày nhận</th>
-                                <th className="px-6 py-3">Khách hàng</th>
-                                <th className="px-6 py-3">SĐT / Email</th>
-                                <th className="px-6 py-3">Nguồn</th>
-                                <th className="px-6 py-3">Quan tâm</th>
-                                <th className="px-6 py-3 md:table-cell hidden">Nội dung</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                            {leads.length === 0 ? (
-                                <tr>
-                                    <td colSpan={7} className="px-6 py-12 text-center">
-                                        <div className="flex flex-col items-center justify-center text-gray-400">
-                                            <div className="bg-gray-50 p-4 rounded-full mb-3"><CheckSquare size={32} /></div>
-                                            <p className="font-bold">Tuyệt vời! Không có khách hàng nào đang chờ.</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ) : (
-                                leads.map((lead) => (
-                                    <tr key={lead.id} className={`hover:bg-purple-50 transition-colors ${selectedLeadIds.includes(lead.id) ? 'bg-purple-50' : 'bg-white'}`}>
-                                        <td className="p-4 w-4">
-                                            <button onClick={() => toggleSelectOne(lead.id)}>
-                                                {selectedLeadIds.includes(lead.id) ? <CheckSquare className="text-purple-600" size={20} /> : <Square className="text-gray-300" size={20} />}
-                                            </button>
-                                        </td>
-                                        <td className="px-6 py-4 font-medium">
-                                            {new Date(lead.created_at).toLocaleString('vi-VN')}
-                                        </td>
-                                        <td className="px-6 py-4 font-bold text-gray-900 cursor-pointer hover:text-purple-600" onClick={() => navigate(`/customers/${lead.id}`)}>
-                                            {lead.name}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {lead.phone}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded border border-blue-200">
-                                                {lead.source || 'Email Form'}
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex justify-between items-start gap-2">
+                                            <h3 className="font-bold text-gray-900 truncate text-base leading-tight">{lead.name}</h3>
+                                            <span className="text-[10px] text-gray-400 whitespace-nowrap font-medium bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">
+                                                {new Date(lead.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}
                                             </span>
-                                        </td>
-                                        <td className="px-6 py-4 font-medium text-purple-700">
-                                            {lead.interest || '---'}
-                                        </td>
-                                        <td className="px-6 py-4 max-w-xs truncate text-gray-400 md:table-cell hidden">
-                                            {lead.notes || '---'}
+                                        </div>
+
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <span className="text-sm text-gray-600">{lead.phone}</span>
+                                            <span className="text-gray-300">|</span>
+                                            <span className="text-sm font-medium text-purple-600">{lead.interest || 'N/A'}</span>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+                                                {lead.source || 'Email'}
+                                            </span>
+                                            {lead.notes && (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs text-gray-500 bg-gray-50 border border-gray-100 max-w-full truncate">
+                                                    {lead.notes}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                {/* Desktop View: Table */}
+                <div className="hidden md:block bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left text-gray-500">
+                            <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+                                <tr>
+                                    <th scope="col" className="p-4 w-4">
+                                        <div className="flex items-center">
+                                            <button onClick={toggleSelectAll}>
+                                                {leads.length > 0 && selectedLeadIds.length === leads.length ? <CheckSquare className="text-purple-600" size={20} /> : <Square className="text-gray-400" size={20} />}
+                                            </button>
+                                        </div>
+                                    </th>
+                                    <th className="px-6 py-3">Ngày nhận</th>
+                                    <th className="px-6 py-3">Khách hàng</th>
+                                    <th className="px-6 py-3">SĐT / Email</th>
+                                    <th className="px-6 py-3">Nguồn</th>
+                                    <th className="px-6 py-3">Quan tâm</th>
+                                    <th className="px-6 py-3 md:table-cell hidden">Nội dung</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {leads.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={7} className="px-6 py-12 text-center">
+                                            <div className="flex flex-col items-center justify-center text-gray-400">
+                                                <div className="bg-gray-50 p-4 rounded-full mb-3"><CheckSquare size={32} /></div>
+                                                <p className="font-bold">Tuyệt vời! Không có khách hàng nào đang chờ.</p>
+                                            </div>
                                         </td>
                                     </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
+                                ) : (
+                                    leads.map((lead) => (
+                                        <tr key={lead.id} className={`hover:bg-purple-50 transition-colors ${selectedLeadIds.includes(lead.id) ? 'bg-purple-50' : 'bg-white'}`}>
+                                            <td className="p-4 w-4">
+                                                <button onClick={() => toggleSelectOne(lead.id)}>
+                                                    {selectedLeadIds.includes(lead.id) ? <CheckSquare className="text-purple-600" size={20} /> : <Square className="text-gray-300" size={20} />}
+                                                </button>
+                                            </td>
+                                            <td className="px-6 py-4 font-medium">
+                                                {new Date(lead.created_at).toLocaleString('vi-VN')}
+                                            </td>
+                                            <td className="px-6 py-4 font-bold text-gray-900 cursor-pointer hover:text-purple-600" onClick={() => navigate(`/customers/${lead.id}`)}>
+                                                {lead.name}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                {lead.phone}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded border border-blue-200">
+                                                    {lead.source || 'Email Form'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 font-medium text-purple-700">
+                                                {lead.interest || '---'}
+                                            </td>
+                                            <td className="px-6 py-4 max-w-xs truncate text-gray-400 md:table-cell hidden">
+                                                {lead.notes || '---'}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>

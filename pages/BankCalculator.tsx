@@ -2,8 +2,10 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-    Calculator, Percent, FileImage, Settings2, TableProperties, Loader2, ArrowLeft, Lock, ArrowUpCircle, FileText
+    Calculator, Percent, FileImage, Settings2, TableProperties, Loader2, ArrowLeft, Lock, ArrowUpCircle, FileText, Mail
 } from 'lucide-react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { supabase } from '../supabaseClient';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { useAuth } from '../contexts/AuthContext';
@@ -15,6 +17,18 @@ const BankCalculator: React.FC = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const [isExporting, setIsExporting] = useState(false);
+
+    // --- EMAIL STATE ---
+    const [showEmailModal, setShowEmailModal] = useState(false);
+    const [emailRecipient, setEmailRecipient] = useState('');
+    const [customerName, setCustomerName] = useState('');
+    const [emailMessage, setEmailMessage] = useState(''); // Lời nhắn
+    const [sendingEmail, setSendingEmail] = useState(false);
+
+    // Diamond Check for Email Feature
+    const isDiamond = userProfile?.member_tier === MembershipTier.DIAMOND ||
+        userProfile?.role === UserRole.ADMIN ||
+        userProfile?.role === UserRole.MOD;
 
     // Check if user is locked from using this page (Restricted to Platinum+)
     const isPlatinumOrHigher =
@@ -164,6 +178,163 @@ const BankCalculator: React.FC = () => {
         return { interest, total: parseAmount(loanAmount) + interest, firstMonth };
     }, [schedule, loanAmount]);
 
+    // --- TEST CONNECTION ---
+    const handleTestEmailConnection = async () => {
+        try {
+            const { data: settingData } = await supabase
+                .from('app_settings')
+                .select('value')
+                .eq('key', 'email_script_url')
+                .maybeSingle();
+
+            const scriptUrl = settingData?.value;
+            if (!scriptUrl) {
+                alert('LỖI: Chưa cấu hình URL gửi email (key: email_script_url).');
+                return;
+            }
+
+            const maskedUrl = scriptUrl.substring(0, 30) + '...';
+            if (!confirm(`Đang test kết nối tới: ${maskedUrl}\n\nNhấn OK để tiếp tục.`)) return;
+
+            const response = await fetch(scriptUrl);
+            if (!response.ok) throw new Error(response.statusText);
+            const text = await response.text();
+            alert('✅ KẾT NỐI THÀNH CÔNG!\n\n' + text);
+        } catch (e: any) {
+            alert('❌ KẾT NỐI THẤT BẠI: ' + e.message);
+        }
+    };
+
+    // --- SEND EMAIL LOGIC ---
+    const handleSendEmail = async () => {
+        if (!emailRecipient) {
+            alert('Vui lòng nhập địa chỉ Email!');
+            return;
+        }
+
+        setSendingEmail(true);
+        try {
+            // 1. Get Script URL
+            const { data: settingData } = await supabase
+                .from('app_settings')
+                .select('value')
+                .eq('key', 'email_script_url')
+                .maybeSingle();
+
+            const scriptUrl = settingData?.value;
+            if (!scriptUrl) {
+                alert('Chưa cấu hình URL gửi email (app_settings: email_script_url)');
+                return;
+            }
+
+            // 2. HTML Content
+            const emailHtml = renderToStaticMarkup(
+                <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', backgroundColor: '#f3f4f6' }}>
+                    <div style={{ maxWidth: '800px', margin: '0 auto', backgroundColor: '#ffffff', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+                        <div style={{ padding: '20px', backgroundColor: '#2563eb', color: '#ffffff', textAlign: 'center' }}>
+                            <h2 style={{ margin: 0, fontSize: '24px' }}>Bảng Tính Trả Góp VinFast</h2>
+                            <p style={{ margin: '5px 0 0', opacity: 0.9 }}>Kính gửi: {customerName || 'Quý khách hàng'}</p>
+                        </div>
+
+                        <div style={{ padding: '20px' }}>
+                            {/* SUMMARY */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                                <div style={{ backgroundColor: '#eff6ff', padding: '15px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                                    <p style={{ margin: 0, fontSize: '12px', color: '#1e40af', fontWeight: 'bold' }}>SỐ TIỀN VAY</p>
+                                    <p style={{ margin: '5px 0 0', fontSize: '18px', fontWeight: 'bold', color: '#1e3a8a' }}>{loanAmount} VNĐ</p>
+                                </div>
+                                <div style={{ backgroundColor: '#eff6ff', padding: '15px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                                    <p style={{ margin: 0, fontSize: '12px', color: '#1e40af', fontWeight: 'bold' }}>THỜI HẠN VAY</p>
+                                    <p style={{ margin: '5px 0 0', fontSize: '18px', fontWeight: 'bold', color: '#1e3a8a' }}>{loanTermYears} Năm</p>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '30px' }}>
+                                <div style={{ textAlign: 'center', padding: '10px', backgroundColor: '#f9fafb', borderRadius: '8px' }}>
+                                    <p style={{ margin: 0, fontSize: '11px', color: '#6b7280' }}>Tổng lãi</p>
+                                    <p style={{ margin: '5px 0 0', fontWeight: 'bold', color: '#059669' }}>{formatCurrency(totals.interest)}</p>
+                                </div>
+                                <div style={{ textAlign: 'center', padding: '10px', backgroundColor: '#f9fafb', borderRadius: '8px' }}>
+                                    <p style={{ margin: 0, fontSize: '11px', color: '#6b7280' }}>Tổng gốc + lãi</p>
+                                    <p style={{ margin: '5px 0 0', fontWeight: 'bold', color: '#111827' }}>{formatCurrency(totals.total)}</p>
+                                </div>
+                                <div style={{ textAlign: 'center', padding: '10px', backgroundColor: '#f9fafb', borderRadius: '8px' }}>
+                                    <p style={{ margin: 0, fontSize: '11px', color: '#6b7280' }}>Tháng đầu trả</p>
+                                    <p style={{ margin: '5px 0 0', fontWeight: 'bold', color: '#dc2626' }}>{formatCurrency(totals.firstMonth)}</p>
+                                </div>
+                            </div>
+
+                            {/* TABLE */}
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                <thead>
+                                    <tr style={{ backgroundColor: '#f3f4f6', borderBottom: '2px solid #e5e7eb' }}>
+                                        <th style={{ padding: '10px', textAlign: 'left', color: '#6b7280' }}>Kỳ</th>
+                                        <th style={{ padding: '10px', textAlign: 'right', color: '#6b7280' }}>Dư nợ</th>
+                                        <th style={{ padding: '10px', textAlign: 'right', color: '#6b7280' }}>Gốc</th>
+                                        <th style={{ padding: '10px', textAlign: 'right', color: '#6b7280' }}>Lãi</th>
+                                        <th style={{ padding: '10px', textAlign: 'right', color: '#1d4ed8', backgroundColor: '#eff6ff' }}>Tổng trả</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {schedule.map((row) => (
+                                        <tr key={row.monthIndex} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                            <td style={{ padding: '8px 10px', color: '#374151', fontWeight: 'bold' }}>{row.monthIndex}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', color: '#4b5563' }}>{formatCurrency(row.currentBalance)}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', color: '#111827' }}>{formatCurrency(row.principal)}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', color: '#059669' }}>{formatCurrency(row.interest)}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff' }}>{formatCurrency(row.total)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style={{ padding: '20px', borderTop: '1px solid #e5e7eb', textAlign: 'center', color: '#6b7280', fontSize: '12px' }}>
+                            <p>Email này được gửi tự động từ hệ thống VinFast CRM.</p>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            // 3. Send
+            const response = await fetch(scriptUrl, {
+                method: 'POST',
+                // Quan trọng: Dùng text/plain để tránh CORS Preflight
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                    type: 'send_email',
+                    recipientEmail: emailRecipient,
+                    subject: `[VinFast] Bảng tính trả góp - ${customerName || 'Khách hàng'}`,
+                    htmlBody: emailHtml
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server returned ${response.status} ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            if (result.success) {
+                alert(`Đã gửi bảng tính tới ${emailRecipient} thành công!`);
+                setShowEmailModal(false);
+                setEmailRecipient('');
+                setCustomerName('');
+            } else {
+                console.error("Server Response Error:", result);
+                throw new Error(result.message || JSON.stringify(result) || 'Unknown error');
+            }
+
+        } catch (e: any) {
+            console.error(e);
+            alert('Lỗi khi gửi email: ' + (e.message || e));
+            // Detailed message for users
+            if (e.message && e.message.includes('Failed to fetch')) {
+                alert('⚠️ LỖI KẾT NỐI: Không thể kết nối tới Google Apps Script.\n\nNguyên nhân có thể:\n1. URL Script chưa đúng trong Cài đặt chung.\n2. Script chưa được Public "Anyone" (Ai cũng có thể truy cập).\n3. Mạng bị chặn.');
+            }
+        } finally {
+            setSendingEmail(false);
+        }
+    };
+
     const handleExportImage = async () => {
         if (!resultRef.current || isExporting) return;
 
@@ -279,6 +450,14 @@ const BankCalculator: React.FC = () => {
         }
     };
 
+    const handleEmailButtonClick = () => {
+        if (isDiamond) {
+            setShowEmailModal(true);
+        } else {
+            alert('🔒 TÍNH NĂNG CAO CẤP\n\nBạn cần đạt hạng DIAMOND (Kim Cương) để sử dụng tính năng Gửi Email này.\n\nVui lòng liên hệ Admin để nâng cấp!');
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -306,6 +485,21 @@ const BankCalculator: React.FC = () => {
                         {isExporting ? <Loader2 className="animate-spin" size={18} /> : <FileImage size={18} />}
                         Xuất Ảnh
                     </button>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={handleEmailButtonClick}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold shadow-sm transition-all ${isDiamond ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                        >
+                            <Mail size={18} /> Gửi Email
+                            {!isDiamond && <Lock size={14} className="ml-1" />}
+                        </button>
+
+                        {userProfile?.role === 'admin' && (
+                            <button onClick={handleTestEmailConnection} className="p-2 text-indigo-300 hover:text-indigo-600 transition-colors" title="Test Kết nối Email (Admin Only)">
+                                <Settings2 size={18} />
+                            </button>
+                        )}
+                    </div>
                     <button
                         onClick={handleExportPDF}
                         disabled={isExporting}
@@ -558,6 +752,55 @@ const BankCalculator: React.FC = () => {
                     </div>
                 </div>
             </div>
+            {showEmailModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4">
+                    <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-fade-in relative z-[10000]">
+                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                            <Mail className="text-blue-600" /> Gửi Bảng Tính
+                        </h3>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Tên khách hàng</label>
+                                <input
+                                    type="text"
+                                    className="w-full border border-gray-300 rounded-xl px-4 py-2 outline-none focus:border-blue-500"
+                                    value={customerName}
+                                    onChange={e => setCustomerName(e.target.value)}
+                                    placeholder="VD: Nguyễn Văn A"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Email nhận <span className="text-red-500">*</span></label>
+                                <input
+                                    type="email"
+                                    className="w-full border border-gray-300 rounded-xl px-4 py-2 outline-none focus:border-blue-500"
+                                    value={emailRecipient}
+                                    onChange={e => setEmailRecipient(e.target.value)}
+                                    placeholder="khachhang@example.com"
+                                />
+                            </div>
+
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    onClick={() => setShowEmailModal(false)}
+                                    className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200"
+                                >
+                                    Đóng
+                                </button>
+                                <button
+                                    onClick={handleSendEmail}
+                                    disabled={sendingEmail || !emailRecipient}
+                                    className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {sendingEmail ? <Loader2 className="animate-spin" size={18} /> : <Mail size={18} />}
+                                    Gửi Ngay
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

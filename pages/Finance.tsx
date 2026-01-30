@@ -68,8 +68,9 @@ const Finance: React.FC = () => {
     const [expenseForm, setExpenseForm] = useState({ amount: '', reason: '' });
 
     const [showConfigModal, setShowConfigModal] = useState(false);
-    const [qrCodeUrl, setQrCodeUrl] = useState('');
-    const [newQrUrl, setNewQrUrl] = useState('');
+    // NEW: QR Upload States (Replaces simple URL string)
+    const [qrFile, setQrFile] = useState<File | null>(null);
+    const [qrPreview, setQrPreview] = useState<string | null>(null);
     const [isSavingQr, setIsSavingQr] = useState(false);
 
     // Exclusion Modal
@@ -120,8 +121,10 @@ const Finance: React.FC = () => {
     const fetchDataWithIsolation = async () => {
         try {
             setLoading(true);
-            const { data: configData } = await supabase.from('app_settings').select('value').eq('key', 'qr_code_url').maybeSingle();
-            if (configData) setQrCodeUrl(configData.value);
+
+            // REMOVED: Global QR Code Fetch (Now using Team-based Profile QR)
+            // const { data: configData } = await supabase.from('app_settings').select('value').eq('key', 'qr_code_url').maybeSingle();
+            // if (configData) setQrCodeUrl(configData.value);
 
             const { data: profiles } = await supabase.from('profiles').select('*');
             if (profiles) setAllProfiles(profiles as UserProfile[]);
@@ -196,8 +199,39 @@ const Finance: React.FC = () => {
     };
 
     const handleSaveQr = async () => {
+        if (!qrFile && !qrPreview) return; // Nothing to save
         setIsSavingQr(true);
-        try { await supabase.from('app_settings').upsert({ key: 'qr_code_url', value: newQrUrl }); setQrCodeUrl(newQrUrl); setShowConfigModal(false); showToast("Đã lưu QR Code!", 'success'); } catch (e: any) { showToast("Lỗi lưu QR.", 'error'); } finally { setIsSavingQr(false); }
+        try {
+            let finalUrl = qrPreview;
+
+            if (qrFile) {
+                // 1. Upload to Storage
+                const fileExt = qrFile.name.split('.').pop();
+                const fileName = `${userProfile?.id}/qr-code-${Date.now()}.${fileExt}`;
+                const { error: uploadError } = await supabase.storage.from('qr-codes').upload(fileName, qrFile, { upsert: true });
+                if (uploadError) throw uploadError;
+
+                // 2. Get Public URL
+                const { data: urlData } = await supabase.storage.from('qr-codes').getPublicUrl(fileName);
+                finalUrl = urlData.publicUrl;
+            }
+
+            // 3. Update Profile
+            if (userProfile?.id && finalUrl) {
+                await supabase.from('profiles').update({ qr_code_url: finalUrl }).eq('id', userProfile.id);
+                // Update local state immediately
+                setAllProfiles(prev => prev.map(p => p.id === userProfile.id ? { ...p, qr_code_url: finalUrl as string } : p));
+                setShowConfigModal(false);
+                setQrFile(null);
+                setQrPreview(null);
+                showToast("Đã lưu QR Code mới cho Team!", 'success');
+            }
+        } catch (e: any) {
+            console.error(e);
+            showToast("Lỗi lưu QR: " + e.message, 'error');
+        } finally {
+            setIsSavingQr(false);
+        }
     };
 
     const handleApprove = async (t: Transaction, approve: boolean) => {
@@ -929,6 +963,29 @@ const Finance: React.FC = () => {
     // "Tổng số tiền nợ quỹ" mapped to "totalCustomerDebt" above?
     const totalDebtToCollect = totalCustomerDebt + totalDealerDebt + outstandingBorrowLoans;
 
+    // --- NEW: Effective QR Code Logic (Hierarchy based) ---
+    const effectiveQrUrl = useMemo(() => {
+        if (!userProfile) return '';
+        let targetManagerId = '';
+
+        if (isAdmin) {
+            if (selectedTeam !== 'all') {
+                targetManagerId = selectedTeam;
+            } else {
+                return ''; // Admin showing 'All' doesn't show a specific QR, or show Admin's? Let's show nothing or fallback.
+            }
+        } else if (isMod) {
+            // Mod (Team Leader) uses their own QR
+            targetManagerId = userProfile.id;
+        } else {
+            // Member uses Manager's QR
+            targetManagerId = userProfile.manager_id || '';
+        }
+
+        const targetProfile = allProfiles.find(p => p.id === targetManagerId);
+        return targetProfile?.qr_code_url || '';
+    }, [userProfile, allProfiles, selectedTeam, isAdmin, isMod]);
+
     const formatCurrency = (n: number) => n.toLocaleString('vi-VN');
 
     return (
@@ -944,49 +1001,101 @@ const Finance: React.FC = () => {
 
             {/* FILTER HEADER */}
             <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-                <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><BadgeDollarSign className="text-green-600" /> Quỹ & Thu Chi (MKT Group)</h1>
-                <div className="flex flex-col md:flex-row gap-2 w-full xl:w-auto items-center">
-                    <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-                        <Calendar size={16} className="text-gray-500" />
-                        <select value={filterMode} onChange={(e) => setFilterMode(e.target.value as any)} className="text-sm font-bold text-gray-700 bg-transparent outline-none cursor-pointer border-r border-gray-200 pr-2 mr-2">
-                            <option value="creation">Theo ngày tạo</option><option value="deal">Theo ngày chốt</option>
-                        </select>
-                        <span className="text-gray-500 text-sm">Tháng</span>
-                        <select value={selectedMonth} onChange={(e) => { const val = e.target.value; setSelectedMonth((val === 'all' || val.startsWith('q')) ? val as 'all' | 'q1' | 'q2' | 'q3' | 'q4' : Number(val)); }} className="text-sm font-bold text-primary-700 bg-transparent outline-none cursor-pointer">
-                            <option value="all">Tất cả [Năm]</option>
-                            <option value="q1">Quý 1</option>
-                            <option value="q2">Quý 2</option>
-                            <option value="q3">Quý 3</option>
-                            <option value="q4">Quý 4</option>
-                            <option disabled>──────────</option>
-                            {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (<option key={m} value={m}>Tháng {m}</option>))}
-                        </select>
-                        <span className="text-gray-500 text-sm">/</span>
-                        <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="text-sm font-bold text-primary-700 bg-transparent outline-none cursor-pointer">
-                            {[2024, 2025, 2026].map(y => (<option key={y} value={y}>{y}</option>))}
-                        </select>
+                <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <BadgeDollarSign className="text-green-600" />
+                    <span>Quỹ & Thu Chi <span className="text-sm font-medium text-gray-500 hidden sm:inline">(MKT Group)</span></span>
+                </h1>
+
+                <div className="w-full xl:w-auto flex flex-col xl:flex-row gap-2 xl:items-center mt-4 xl:mt-0">
+                    {/* Time Filters */}
+                    <div className="bg-white border border-gray-200 rounded-2xl p-1.5 shadow-sm flex-shrink-0">
+                        <div className="flex flex-col sm:flex-row items-center gap-2">
+                            {/* Filter Mode */}
+                            <div className="flex items-center gap-2 w-full sm:w-auto border-b sm:border-b-0 sm:border-r border-gray-100 pb-2 sm:pb-0 sm:pr-2">
+                                <Calendar size={18} className="text-purple-600 ml-2" />
+                                <select
+                                    value={filterMode}
+                                    onChange={(e) => setFilterMode(e.target.value as any)}
+                                    className="w-full sm:w-auto text-sm font-bold text-gray-700 bg-transparent outline-none cursor-pointer py-1"
+                                >
+                                    <option value="creation">Theo ngày tạo</option>
+                                    <option value="deal">Theo ngày chốt</option>
+                                </select>
+                            </div>
+
+                            {/* Month/Year */}
+                            <div className="flex gap-2 w-full sm:w-auto">
+                                <div className="flex-1 sm:w-auto flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-100">
+                                    <span className="text-xs font-semibold text-gray-400">Tháng</span>
+                                    <select
+                                        value={selectedMonth}
+                                        onChange={(e) => { const val = e.target.value; setSelectedMonth((val === 'all' || val.startsWith('q')) ? val as 'all' | 'q1' | 'q2' | 'q3' | 'q4' : Number(val)); }}
+                                        className="w-full text-sm font-bold text-gray-800 bg-transparent outline-none cursor-pointer"
+                                    >
+                                        <option value="all">Tất cả</option>
+                                        <option value="q1">Quý 1</option>
+                                        <option value="q2">Quý 2</option>
+                                        <option value="q3">Quý 3</option>
+                                        <option value="q4">Quý 4</option>
+                                        <option disabled>─────</option>
+                                        {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (<option key={m} value={m}>Tháng {m}</option>))}
+                                    </select>
+                                </div>
+
+                                <span className="text-gray-300 self-center hidden sm:block">/</span>
+
+                                <div className="flex-1 sm:w-auto flex items-center justify-center gap-1 bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-100">
+                                    <select
+                                        value={selectedYear}
+                                        onChange={(e) => setSelectedYear(Number(e.target.value))}
+                                        className="text-sm font-bold text-gray-800 bg-transparent outline-none cursor-pointer"
+                                    >
+                                        {[2024, 2025, 2026].map(y => (<option key={y} value={y}>{y}</option>))}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div className="flex gap-2 items-center">
+
+                    {/* Secondary Filters & Actions */}
+                    <div className="flex flex-wrap xl:flex-nowrap items-center gap-2 w-full xl:w-auto">
                         {isAdmin && (
-                            <div className="relative">
-                                <select value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)} className="appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-100 text-sm font-bold shadow-sm cursor-pointer">
+                            <div className="relative flex-1 sm:flex-none min-w-[140px]">
+                                <select
+                                    value={selectedTeam}
+                                    onChange={(e) => setSelectedTeam(e.target.value)}
+                                    className="w-full appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-100 text-sm font-bold shadow-sm cursor-pointer"
+                                >
                                     <option value="all">Tất cả Team</option>
                                     {managers.map(mgr => (<option key={mgr.id} value={mgr.id}>Team {mgr.name}</option>))}
                                 </select>
                                 <Filter size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-indigo-400 pointer-events-none" />
                             </div>
                         )}
-                        <div className="relative">
-                            <div className="appearance-none bg-blue-50 border border-blue-200 text-blue-700 py-2 px-4 rounded-xl text-sm font-bold shadow-sm h-full flex items-center">
-                                Nguồn: MKT Group
-                            </div>
+
+                        <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm whitespace-nowrap text-center">
+                            MKT Group
                         </div>
-                        {(isAdmin || isMod) && <button onClick={() => { setNewQrUrl(qrCodeUrl); setShowConfigModal(true); }} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-200 transition-colors whitespace-nowrap">Cấu hình QR</button>}
-                        {isAdmin && (
-                            <button onClick={() => setShowResetConfirm(true)} className="px-4 py-2 bg-red-100 text-red-700 rounded-xl text-sm font-bold hover:bg-red-200 transition-colors whitespace-nowrap flex items-center gap-1 border border-red-200">
-                                <Trash2 size={16} /> Reset
-                            </button>
-                        )}
+
+                        <div className="flex gap-2 ml-auto sm:ml-0 w-full sm:w-auto xl:w-auto">
+                            {(isAdmin || isMod) && (
+                                <button
+                                    onClick={() => { setQrPreview(effectiveQrUrl); setShowConfigModal(true); }}
+                                    className="flex-1 sm:flex-none px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm flex items-center justify-center gap-2"
+                                >
+                                    <QrCode size={16} /> <span className="hidden sm:inline">Cấu hình</span> QR
+                                </button>
+                            )}
+
+                            {isAdmin && (
+                                <button
+                                    onClick={() => setShowResetConfirm(true)}
+                                    className="px-4 py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl text-sm font-bold hover:bg-red-100 transition-all whitespace-nowrap flex items-center gap-2 shadow-sm"
+                                >
+                                    <Trash2 size={16} /> Reset
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1313,7 +1422,18 @@ const Finance: React.FC = () => {
             </div>
 
             {/* ... (Keep existing modals unchanged) ... */}
-            {showDepositModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Nộp quỹ / Doanh thu</h3><button onClick={() => setShowDepositModal(false)}><X size={24} className="text-gray-400" /></button></div>{qrCodeUrl && (<div className="flex flex-col items-center mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100"><img src={qrCodeUrl} alt="QR Code" className="w-48 h-48 object-contain mb-2 mix-blend-multiply" /><p className="text-xs text-gray-500 text-center">Quét mã để chuyển khoản, sau đó nhập thông tin bên dưới.</p></div>)}<div className="space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Chọn Khách hàng (Đã chốt)</label><select className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.customerId} onChange={e => setDepositForm({ ...depositForm, customerId: e.target.value })}><option value="">-- Chọn khách hàng --</option>{availableCustomersForDeposit.map(c => <option key={c.id} value={c.id}>{c.name} - {c.phone}</option>)}</select>{availableCustomersForDeposit.length === 0 && <p className="text-xs text-red-500 mt-1">Không có khách hàng khả dụng</p>}</div><div><label className="block text-sm font-bold text-gray-700 mb-1">Số tiền</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900 font-bold" value={depositForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDepositForm({ ...depositForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} /></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Nội dung</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.reason} onChange={e => setDepositForm({ ...depositForm, reason: e.target.value })} /></div><button onClick={handleSubmitDeposit} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận đã nộp</button></div></div></div>)}
+            {showDepositModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Nộp quỹ / Doanh thu</h3><button onClick={() => setShowDepositModal(false)}><X size={24} className="text-gray-400" /></button></div>
+                {effectiveQrUrl ? (
+                    <div className="flex flex-col items-center mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">
+                        <img src={effectiveQrUrl} alt="QR Code" className="w-48 h-48 object-contain mb-2 mix-blend-multiply" />
+                        <p className="text-xs text-gray-500 text-center">Quét mã để chuyển khoản cho Team Lead.</p>
+                    </div>
+                ) : (
+                    <div className="mb-6 p-4 bg-yellow-50 text-yellow-700 text-sm text-center rounded-xl border border-yellow-200">
+                        Chưa có QR Code. Vui lòng liên hệ Team Lead để cấu hình.
+                    </div>
+                )}
+                <div className="space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Chọn Khách hàng (Đã chốt)</label><select className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.customerId} onChange={e => setDepositForm({ ...depositForm, customerId: e.target.value })}><option value="">-- Chọn khách hàng --</option>{availableCustomersForDeposit.map(c => <option key={c.id} value={c.id}>{c.name} - {c.phone}</option>)}</select>{availableCustomersForDeposit.length === 0 && <p className="text-xs text-red-500 mt-1">Không có khách hàng khả dụng</p>}</div><div><label className="block text-sm font-bold text-gray-700 mb-1">Số tiền</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900 font-bold" value={depositForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDepositForm({ ...depositForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} /></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Nội dung</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.reason} onChange={e => setDepositForm({ ...depositForm, reason: e.target.value })} /></div><button onClick={handleSubmitDeposit} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận đã nộp</button></div></div></div>)}
             {showAdjustmentModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Điều chỉnh Quỹ (Admin)</h3><button onClick={() => setShowAdjustmentModal(false)}><X size={24} className="text-gray-400" /></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền (+/-)</label><input type="text" value={adjustmentForm.amount} onChange={e => setAdjustmentForm({ ...adjustmentForm, amount: e.target.value })} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" placeholder="-500000 hoặc 1000000" /></div><div><label className="text-sm font-bold text-gray-600">Lý do</label><input type="text" value={adjustmentForm.reason} onChange={e => setAdjustmentForm({ ...adjustmentForm, reason: e.target.value })} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><button onClick={handleSubmitAdjustment} className="w-full py-3 bg-gray-800 text-white font-bold rounded-xl hover:bg-gray-900">Xác nhận điều chỉnh</button></div></div></div>)}
 
             {showAdvanceModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-red-700">Tạm Ứng (Cần hoàn lại)</h3><button onClick={() => setShowAdvanceModal(false)}><X size={24} className="text-gray-400" /></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền cần ứng</label><input type="text" value={advanceForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setAdvanceForm({ ...advanceForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do ứng</label><input type="text" value={advanceForm.reason} onChange={e => setAdvanceForm({ ...advanceForm, reason: e.target.value })} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder="VD: Đi tiếp khách..." /></div><div className="text-xs text-gray-500 italic bg-gray-50 p-2 rounded">Khoản này sẽ tạo thành <strong>Nợ tạm ứng</strong> cần phải hoàn trả sau này.</div><button onClick={handleSubmitAdvance} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Gửi yêu cầu Ứng</button></div></div></div>)}
@@ -1321,7 +1441,42 @@ const Finance: React.FC = () => {
             {/* NEW EXPENSE MODAL */}
             {showExpenseModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-red-700">Chi Tiền (Trừ thẳng quỹ)</h3><button onClick={() => setShowExpenseModal(false)}><X size={24} className="text-gray-400" /></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền chi</label><input type="text" value={expenseForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({ ...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do chi</label><input type="text" value={expenseForm.reason} onChange={e => setExpenseForm({ ...expenseForm, reason: e.target.value })} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder="VD: Mua nước, liên hoan..." /></div><div className="text-xs text-gray-500 italic bg-gray-50 p-2 rounded">Lưu ý: Khoản này là <strong>Chi phí</strong> chung, sẽ trừ thẳng vào quỹ và KHÔNG tạo nợ cá nhân.</div><button onClick={handleSubmitExpense} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Gửi yêu cầu Chi</button></div></div></div>)}
 
-            {showConfigModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><h3 className="text-lg font-bold text-gray-900 mb-4">Cấu hình QR Code</h3><div className="mb-4"><label className="block text-sm font-bold text-gray-700 mb-1">Link ảnh QR</label><input type="text" placeholder="Dán link ảnh QR Code..." className="w-full border p-2 rounded-xl text-gray-900 outline-none focus:border-primary-500" value={newQrUrl} onChange={e => setNewQrUrl(e.target.value)} /></div>{newQrUrl && (<div className="mb-4 p-2 bg-gray-50 border rounded-xl flex justify-center"><img src={newQrUrl} alt="Preview" className="h-32 object-contain" /></div>)}<div className="flex justify-end gap-2"><button onClick={() => setShowConfigModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg font-bold">Hủy</button><button onClick={handleSaveQr} disabled={isSavingQr} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold flex items-center gap-2">{isSavingQr && <Loader2 className="animate-spin" size={16} />} Lưu</button></div></div></div>)}
+            {showConfigModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+                        <h3 className="text-lg font-bold text-gray-900 mb-4">Cấu hình QR Code (Team)</h3>
+
+                        <div className="mb-4">
+                            <label className="block text-sm font-bold text-gray-700 mb-2">Tải ảnh QR lên</label>
+                            <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => {
+                                    if (e.target.files && e.target.files[0]) {
+                                        setQrFile(e.target.files[0]);
+                                        setQrPreview(URL.createObjectURL(e.target.files[0]));
+                                    }
+                                }}
+                                className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                            />
+                        </div>
+
+                        {qrPreview && (
+                            <div className="mb-4 p-2 bg-gray-50 border rounded-xl flex justify-center relative group">
+                                <img src={qrPreview} alt="Preview" className="h-40 object-contain" />
+                                {qrFile && <div className="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><span className="bg-black/70 text-white text-xs px-2 py-1 rounded">Mới</span></div>}
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-2">
+                            <button onClick={() => setShowConfigModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg font-bold">Hủy</button>
+                            <button onClick={handleSaveQr} disabled={isSavingQr} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold flex items-center gap-2">
+                                {isSavingQr && <Loader2 className="animate-spin" size={16} />} Lưu
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {showExclusionModal && targetUserForExclusion && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[80vh] flex flex-col"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Loại trừ khách hàng</h3><button onClick={() => setShowExclusionModal(false)}><X size={24} className="text-gray-400" /></button></div><div className="bg-yellow-50 p-3 rounded-xl mb-4 border border-yellow-100"><p className="text-sm text-yellow-800">Đang chọn loại trừ cho: <strong>{targetUserForExclusion.full_name}</strong></p><p className="text-xs text-yellow-700 mt-1">Danh sách hiển thị: Khách <strong>MKT Group</strong>, Đã chốt, Chưa hoàn tiền (Thuộc Team đang chọn).</p></div><div className="overflow-y-auto flex-1 space-y-2 border-t border-gray-100 pt-2">{exclusionCandidates.length === 0 ? <p className="text-center text-gray-400 py-4">Không có khách hàng MKT nào phù hợp.</p> : exclusionCandidates.map(c => { const isExcluded = profitExclusions.some(ex => ex.user_id === targetUserForExclusion.id && ex.customer_id === c.id); return (<div key={c.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 cursor-pointer" onClick={() => handleToggleExclusion(c.id)}><div><p className="font-bold text-sm text-gray-900">{c.name} <span className="font-normal text-gray-500">({c.sales_rep})</span></p><p className="text-xs text-gray-500">{formatCurrency(c.deal_details?.revenue || 0)} VNĐ • {c.source}</p></div><div className={`w-5 h-5 rounded border flex items-center justify-center ${isExcluded ? 'bg-red-500 border-red-500 text-white' : 'border-gray-300'}`}>{isExcluded && <Check size={14} />}</div></div>); })}</div><div className="mt-4 pt-2 border-t flex justify-end"><button onClick={() => setShowExclusionModal(false)} className="px-4 py-2 bg-gray-100 font-bold rounded-xl text-gray-700 hover:bg-gray-200">Đóng</button></div></div></div>)}
             {transactionToDelete && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-red-100"><div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-600"><Trash2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận xóa giao dịch?</h3><p className="text-sm text-gray-500 mb-4">Bạn có chắc chắn muốn xóa giao dịch này khỏi hệ thống?</p><div className="flex gap-3 w-full"><button onClick={() => setTransactionToDelete(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={confirmDeleteTransaction} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Xóa ngay</button></div></div></div></div>)}
             {advanceToRepay && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-purple-100"><div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4 text-purple-600"><Undo2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận Hoàn ứng?</h3><div className="bg-purple-50 p-4 rounded-xl text-left w-full mb-4 border border-purple-100 space-y-2"><div><p className="text-xs text-gray-500">Nội dung ứng</p><p className="font-bold text-gray-900">{advanceToRepay.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền hoàn trả</p><p className="font-bold text-purple-600 text-lg">{formatCurrency(advanceToRepay.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ gửi yêu cầu hoàn trả. Vui lòng chờ Admin/Mod duyệt để cập nhật quỹ.</p><div className="flex gap-3 w-full"><button onClick={() => setAdvanceToRepay(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={handleManualRepay} className="flex-1 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors">Xác nhận Thu</button></div></div></div></div>)}

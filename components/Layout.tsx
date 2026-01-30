@@ -14,6 +14,7 @@ import { UserRole } from '../types';
 import NewCustomerNotification from './NewCustomerNotification';
 import VersionChecker from './VersionChecker';
 import { useTheme } from '../contexts/ThemeContext';
+import ApprovalBadge from './ApprovalBadge';
 
 interface NavItemDef {
     key: string;
@@ -62,12 +63,12 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 return count || 0;
             },
             children: [
-                { key: 'assign', icon: UserPlus, label: 'Phân bổ Leads', path: '/assign', roleReq: [UserRole.ADMIN, UserRole.MOD] },
+                { key: 'assign', icon: UserPlus, label: 'Phân bổ Leads', path: '/leads/assign', roleReq: [UserRole.ADMIN, UserRole.MOD] },
                 {
                     key: 'leads_queue',
                     icon: Mail,
                     label: 'Lead Email (Chờ)',
-                    path: '/leads-queue',
+                    path: '/leads/queue',
                     roleReq: [UserRole.ADMIN, UserRole.MOD],
                     countFetcher: async () => {
                         const { count } = await supabase.from('customers').select('*', { count: 'exact', head: true }).or('sales_rep.is.null,sales_rep.eq.,sales_rep.eq.System,sales_rep.eq.Chưa phân bổ');
@@ -94,10 +95,10 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             label: 'Chính sách & Tồn kho',
             path: '',
             children: [
-                { key: 'car_prices', icon: CarFront, label: 'Bảng giá Xe', path: '/car-prices' },
-                { key: 'bank_rates', icon: Landmark, label: 'Lãi suất Bank', path: '/bank-rates' },
-                { key: 'inventory', icon: Box, label: 'Kho xe (Tồn)', path: '/inventory' },
-                { key: 'promotions', icon: Gift, label: 'Chính sách Team', path: '/promotions' },
+                { key: 'car_prices', icon: CarFront, label: 'Bảng giá Xe', path: '/resources/cars' },
+                { key: 'bank_rates', icon: Landmark, label: 'Lãi suất Bank', path: '/resources/banks' },
+                { key: 'inventory', icon: Box, label: 'Kho xe (Tồn)', path: '/resources/inventory' },
+                { key: 'promotions', icon: Gift, label: 'Chính sách Team', path: '/resources/promotions' },
             ]
         },
         {
@@ -107,14 +108,14 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             }
         },
         {
-            key: 'team_fund', icon: PiggyBank, label: 'Quỹ Nhóm', path: '/team-fund', partTimeHidden: true, countFetcher: async () => {
+            key: 'team_fund', icon: PiggyBank, label: 'Quỹ Nhóm', path: '/fund', partTimeHidden: true, countFetcher: async () => {
                 if (!userProfile?.id) return 0;
                 const { count } = await supabase.from('team_fines').select('*', { count: 'exact', head: true }).eq('user_id', userProfile.id).eq('status', 'pending');
                 return count || 0;
             }
         },
         { key: 'utilities', icon: Sparkles, label: 'Tiện ích', path: '/utilities' },
-        { key: 'configuration', icon: Settings, label: 'Cấu hình', path: '/configuration', roleReq: [UserRole.ADMIN, UserRole.MOD] },
+        { key: 'configuration', icon: Settings, label: 'Cấu hình', path: '/system', roleReq: [UserRole.ADMIN, UserRole.MOD] },
         { key: 'profile', icon: User, label: 'Cá nhân', path: '/profile' },
     ], [userProfile]);
 
@@ -366,7 +367,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                         Đăng xuất
                     </button>
                 </div>
-            </aside>
+            </aside >
 
             <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#f8fafc] dark:bg-slate-900 transition-colors duration-200">
                 <header className="md:hidden flex items-center justify-between h-16 px-4 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm z-30 sticky top-0 transition-colors duration-200">
@@ -398,7 +399,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
             {/* Auto Update Checker */}
             <VersionChecker />
-        </div>
+        </div >
     );
 };
 
