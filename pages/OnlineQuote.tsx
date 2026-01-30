@@ -883,20 +883,19 @@ const OnlineQuote: React.FC = () => {
         if (fromCustomerId) {
             navigate(`/customers/${fromCustomerId}`);
         } else {
-            navigate('/customers');
+            navigate(-1);
         }
     };
+
     return (
         <div className="max-w-[1200px] mx-auto pb-20">
-            {/* Back Button Row - Visible only if fromCustomer exists */}
-            {/* Back Button Row - Always Visible */}
             <div className="mb-4">
                 <button
                     onClick={handleBack}
                     className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-bold transition-colors"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-                    {fromCustomerId ? 'Quay lại khách hàng' : 'Quay lại danh sách'}
+                    Quay lại
                 </button>
             </div>
 

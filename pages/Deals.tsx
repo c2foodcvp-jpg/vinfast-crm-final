@@ -403,9 +403,9 @@ const Deals: React.FC = () => {
                     Quản lý Đơn hàng
                 </h1>
 
-                <div className="flex flex-col md:flex-row gap-2 w-full xl:w-auto items-center flex-wrap">
+                <div className="grid grid-cols-2 md:flex md:flex-row gap-2 w-full xl:w-auto md:items-center flex-wrap">
                     {/* Time Filter */}
-                    <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-2 py-1 shadow-sm h-10">
+                    <div className="col-span-2 md:w-auto flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-2 py-1 shadow-sm h-10 w-full md:justify-start justify-center">
                         <Calendar size={16} className="text-gray-500 ml-1" />
                         {/* Disable Month Select if Year is 'All' */}
                         <select
@@ -431,11 +431,11 @@ const Deals: React.FC = () => {
 
                     {/* Team Filter (Admin Only) */}
                     {isAdmin && (
-                        <div className="relative h-10">
+                        <div className="relative h-10 col-span-1 w-full md:w-auto">
                             <select
                                 value={selectedTeam}
                                 onChange={(e) => setSelectedTeam(e.target.value)}
-                                className="appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-100 text-sm font-bold shadow-sm cursor-pointer h-full flex items-center"
+                                className="appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-100 text-sm font-bold shadow-sm cursor-pointer h-full flex items-center w-full"
                             >
                                 <option value="all">Tất cả Team</option>
                                 {managers.map(mgr => (
@@ -448,13 +448,13 @@ const Deals: React.FC = () => {
 
                     {/* Rep Filter (Admin/Mod Only) */}
                     {(isAdmin || isMod) && (
-                        <div className="relative h-10">
+                        <div className="relative h-10 col-span-1 w-full md:w-auto">
                             <select
                                 value={selectedRep}
                                 onChange={(e) => setSelectedRep(e.target.value)}
-                                className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer h-full"
+                                className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer h-full w-full"
                             >
-                                <option value="all">Tất cả nhân viên</option>
+                                <option value="all">NV</option> {/* Shortened for mobile space */}
                                 {employees
                                     .filter(emp => isAdmin && selectedTeam !== 'all' ? (emp.manager_id === selectedTeam || emp.id === selectedTeam) : true)
                                     .map(emp => (
@@ -467,27 +467,27 @@ const Deals: React.FC = () => {
                     )}
 
                     {/* Source Filter */}
-                    <div className="relative h-10">
+                    <div className="relative h-10 col-span-1 w-full md:w-auto">
                         <select
                             value={sourceFilter}
                             onChange={(e) => setSourceFilter(e.target.value as any)}
-                            className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer h-full"
+                            className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-100 text-sm font-bold shadow-sm cursor-pointer h-full w-full"
                         >
-                            <option value="all">Tất cả nguồn</option>
-                            <option value="mkt">Nguồn MKT Group</option>
-                            <option value="other">Nguồn Khác</option>
+                            <option value="all">Nguồn</option> {/* Shortened */}
+                            <option value="mkt">MKT Group</option>
+                            <option value="other">Khác</option>
                         </select>
                         <Filter size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     </div>
 
                     {/* Distributor Filter */}
-                    <div className="relative h-10">
+                    <div className="relative h-10 col-span-1 w-full md:w-auto">
                         <select
                             value={selectedDistributor}
                             onChange={(e) => setSelectedDistributor(e.target.value)}
-                            className="appearance-none bg-orange-50 border border-orange-200 text-orange-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 text-sm font-bold shadow-sm cursor-pointer h-full"
+                            className="appearance-none bg-orange-50 border border-orange-200 text-orange-700 py-2 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 text-sm font-bold shadow-sm cursor-pointer h-full w-full"
                         >
-                            <option value="all">Tất cả đại lý</option>
+                            <option value="all">Đại lý</option> {/* Shortened */}
                             {distributors.map(d => (
                                 <option key={d.id} value={d.name}>{d.name}</option>
                             ))}
@@ -497,20 +497,20 @@ const Deals: React.FC = () => {
 
                     {/* EXPORT BUTTON - Only for Admin/Mod */}
                     {(isAdmin || isMod) && (
-                        <div className='flex gap-2 items-center'>
+                        <div className='flex gap-2 items-center col-span-2 justify-center md:w-auto md:justify-start'>
                             <button
                                 onClick={() => setShowProgressMonitor(true)}
                                 className="flex items-center gap-2 h-10 px-4 bg-purple-600 text-white rounded-xl font-bold shadow-md hover:bg-purple-700 transition-colors"
                                 title="Kiểm tra tiến độ giao xe"
                             >
-                                <BarChart2 size={18} /> <span className="hidden sm:inline">Kiểm tra tiến độ</span>
+                                <BarChart2 size={18} /> <span className="hidden sm:inline">Tiến độ</span>
                             </button>
                             <button
                                 onClick={handleExport}
                                 className="flex items-center gap-2 h-10 px-4 bg-green-600 text-white rounded-xl font-bold shadow-md hover:bg-green-700 transition-colors"
                                 title="Xuất danh sách ra Excel"
                             >
-                                <Download size={18} /> <span className="hidden sm:inline">Xuất Excel</span>
+                                <Download size={18} /> <span className="hidden sm:inline">Excel</span>
                             </button>
                         </div>
                     )}

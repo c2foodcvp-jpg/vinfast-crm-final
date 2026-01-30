@@ -239,38 +239,38 @@ const ProgressMonitorModal: React.FC<ProgressMonitorModalProps> = ({
                 </div>
 
                 {/* Body - 3 Columns */}
-                <div className="flex-1 overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-gray-100">
+                <div className="flex-1 overflow-y-auto md:overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-gray-100">
                     {/* Column 1: Early Stage */}
-                    <div className="flex-1 flex flex-col bg-blue-50/30">
-                        <div className="p-3 border-b border-blue-100 bg-blue-50 text-blue-800 font-bold flex justify-between items-center sticky top-0">
+                    <div className="md:flex-1 flex flex-col bg-blue-50/30">
+                        <div className="p-3 border-b border-blue-100 bg-blue-50 text-blue-800 font-bold flex justify-between items-center sticky top-0 z-10">
                             <span>Giai đoạn đầu (0-10 ngày từ chốt)</span>
                             <span className="bg-blue-200 text-blue-800 text-xs px-2 py-0.5 rounded-full">{earlyStage.length}</span>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                        <div className="md:flex-1 md:overflow-y-auto p-3 space-y-3 custom-scrollbar">
                             {earlyStage.map(c => <CustomerItem key={c.id} customer={c} />)}
                             {earlyStage.length === 0 && <div className="text-center text-gray-400 py-10 text-sm">Không có khách hàng</div>}
                         </div>
                     </div>
 
                     {/* Column 2: Late Stage */}
-                    <div className="flex-1 flex flex-col bg-orange-50/30">
-                        <div className="p-3 border-b border-orange-100 bg-orange-50 text-orange-800 font-bold flex justify-between items-center sticky top-0">
+                    <div className="md:flex-1 flex flex-col bg-orange-50/30">
+                        <div className="p-3 border-b border-orange-100 bg-orange-50 text-orange-800 font-bold flex justify-between items-center sticky top-0 z-10">
                             <span>Đã lâu (&gt; 10 ngày từ chốt)</span>
                             <span className="bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{lateStage.length}</span>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                        <div className="md:flex-1 md:overflow-y-auto p-3 space-y-3 custom-scrollbar">
                             {lateStage.map(c => <CustomerItem key={c.id} customer={c} />)}
                             {lateStage.length === 0 && <div className="text-center text-gray-400 py-10 text-sm">Không có khách hàng</div>}
                         </div>
                     </div>
 
                     {/* Column 3: Waiting Car */}
-                    <div className="flex-1 flex flex-col bg-purple-50/30">
-                        <div className="p-3 border-b border-purple-100 bg-purple-50 text-purple-800 font-bold flex justify-between items-center sticky top-0">
+                    <div className="md:flex-1 flex flex-col bg-purple-50/30">
+                        <div className="p-3 border-b border-purple-100 bg-purple-50 text-purple-800 font-bold flex justify-between items-center sticky top-0 z-10">
                             <span className="flex items-center gap-2"><CarFront size={16} /> Chờ xe về</span>
                             <span className="bg-purple-200 text-purple-800 text-xs px-2 py-0.5 rounded-full">{waitingCar.length}</span>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                        <div className="md:flex-1 md:overflow-y-auto p-3 space-y-3 custom-scrollbar">
                             {waitingCar.map(c => <CustomerItem key={c.id} customer={c} />)}
                             {waitingCar.length === 0 && <div className="text-center text-gray-400 py-10 text-sm">Không có khách hàng</div>}
                         </div>

@@ -57,6 +57,10 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             label: 'Phân Bổ Khách',
             path: '',
             roleReq: [UserRole.ADMIN, UserRole.MOD],
+            countFetcher: async () => {
+                const { count } = await supabase.from('customers').select('*', { count: 'exact', head: true }).or('sales_rep.is.null,sales_rep.eq.,sales_rep.eq.System,sales_rep.eq.Chưa phân bổ');
+                return count || 0;
+            },
             children: [
                 { key: 'assign', icon: UserPlus, label: 'Phân bổ Leads', path: '/assign', roleReq: [UserRole.ADMIN, UserRole.MOD] },
                 {

@@ -6,9 +6,9 @@ import { Customer, CustomerStatus, MembershipTier } from '../types';
 import { useNavigate } from 'react-router-dom';
 import {
     Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2, Phone, User, Clock,
-    Plus, CheckCircle2, Flame, AlertCircle, X, CalendarDays,
+    Plus, CheckCircle2, Flame, AlertCircle, X,
     AlertTriangle, Timer, ListTodo, Flag, Activity, Calendar, Star, Bell, BellRing,
-    Users, UserCircle, Lock
+    Users, UserCircle, Lock, LayoutList, CheckSquare, Banknote, PauseCircle
 } from 'lucide-react';
 
 // Task interface
@@ -64,6 +64,30 @@ const CalendarPage: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [customerSearch, setCustomerSearch] = useState('');
     const [selectedCustomerName, setSelectedCustomerName] = useState('');
+
+    // UI Logic States
+    const [activeMainTab, setActiveMainTab] = useState<'customers' | 'orders'>('customers');
+    const [activeOrderTab, setActiveOrderTab] = useState<'processing' | 'completed' | 'refund' | 'suspended'>('processing');
+    const [showOrderFilter, setShowOrderFilter] = useState(false);
+
+    // Date Filter for Orders (Default to current month)
+    const [orderDateRange, setOrderDateRange] = useState(() => {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+        const formatDate = (date: Date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        return {
+            start: formatDate(start),
+            end: formatDate(end)
+        };
+    });
 
     const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
@@ -152,13 +176,13 @@ const CalendarPage: React.FC = () => {
                 teamIds = [userProfile.id];
             }
 
-            // --- Fetch Customers with recare_date ---
+            // --- Fetch Customers with recare_date OR deal_status ---
+            // Changed: Removed .not('recare_date', 'is', null) and .neq('status', CustomerStatus.WON)
+            // to allow showing Deals/Orders that might be WON or missing recare date
             let query = supabase
                 .from('customers')
-                .select('id, name, phone, status, recare_date, interest, classification, sales_rep, creator_id, created_at, is_special_care, is_long_term')
-                .not('recare_date', 'is', null)
-                .neq('status', CustomerStatus.LOST)
-                .neq('status', CustomerStatus.WON);
+                .select('id, name, phone, status, recare_date, interest, classification, sales_rep, creator_id, created_at, is_special_care, is_long_term, deal_status')
+                .neq('status', CustomerStatus.LOST);
 
             if (!isAdmin) {
                 if (teamIds.length > 0) query = query.in('creator_id', teamIds);
@@ -224,7 +248,6 @@ const CalendarPage: React.FC = () => {
             c.status !== CustomerStatus.LOST
         ), [customers, todayStr]);
 
-    // Hết CS Dài hạn hôm nay - khách có is_long_term = true VÀ recare_date = hôm nay
     const longTermDueToday = useMemo(() =>
         customers.filter(c =>
             c.is_long_term === true &&
@@ -232,6 +255,49 @@ const CalendarPage: React.FC = () => {
             c.status !== CustomerStatus.WON &&
             c.status !== CustomerStatus.LOST
         ), [customers, todayStr]);
+
+    // --- ORDERS / DEALS LISTS ---
+    // Helper to check date range
+    const isInDateRange = (dateStr?: string) => {
+        if (!dateStr) return false;
+        // Compare only YYYY-MM-DD parts
+        const d = dateStr.split('T')[0];
+        return d >= orderDateRange.start && d <= orderDateRange.end;
+    };
+
+    const processingDeals = useMemo(() => customers.filter(c =>
+        c.status === CustomerStatus.WON &&
+        (c.deal_status === 'processing' || c.deal_status === 'completed_pending') &&
+        isInDateRange(c.won_at || c.created_at)
+    ), [customers, orderDateRange]);
+
+    const completedDeals = useMemo(() => customers.filter(c =>
+        c.status === CustomerStatus.WON &&
+        c.deal_status === 'completed' &&
+        isInDateRange(c.won_at || c.created_at)
+    ), [customers, orderDateRange]);
+
+    const refundedDeals = useMemo(() => customers.filter(c =>
+        (c.deal_status === 'refunded' || c.deal_status === 'refund_pending') &&
+        isInDateRange(c.won_at || c.created_at)
+    ), [customers, orderDateRange]);
+
+    const suspendedDeals = useMemo(() => customers.filter(c =>
+        (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') &&
+        isInDateRange(c.won_at || c.created_at)
+    ), [customers, orderDateRange]);
+
+    // Helper to get active list
+    const activeOrderList = useMemo(() => {
+        switch (activeOrderTab) {
+            case 'processing': return processingDeals;
+            case 'completed': return completedDeals;
+            case 'refund': return refundedDeals;
+            case 'suspended': return suspendedDeals;
+            default: return [];
+        }
+    }, [activeOrderTab, processingDeals, completedDeals, refundedDeals, suspendedDeals]);
+
 
     const totalTasks = specialCare.length + dueToday.length + overdue.length + longTermDueToday.length + userTasks.length;
 
@@ -306,6 +372,8 @@ const CalendarPage: React.FC = () => {
         const tier = userProfile.member_tier;
         return tier === MembershipTier.GOLD || tier === MembershipTier.PLATINUM || tier === MembershipTier.DIAMOND;
     }, [userProfile, isAdmin, isMod]);
+
+
 
     // --- Task Creation ---
     const handleCreateTask = async () => {
@@ -416,23 +484,64 @@ const CalendarPage: React.FC = () => {
     const CustomerCard = ({ customer, isOverdue = false, contextIds = [] }: { customer: Customer; isOverdue?: boolean; contextIds?: string[] }) => (
         <div
             onClick={() => navigate(`/customers/${customer.id}`, { state: { from: '/calendar', customerIds: contextIds } })}
-            className={`p-3 rounded-xl border transition-all cursor-pointer hover:shadow-md group
-                ${isOverdue ? 'border-red-200 bg-red-50 hover:bg-red-100' : 'border-gray-100 bg-white hover:border-blue-200'}`}
+            className={`rounded-xl border transition-all cursor-pointer group relative bg-white overflow-hidden mt-1
+                ${isOverdue
+                    ? 'border-l-4 border-l-red-500 border-y border-r border-gray-100 shadow-[0_2px_8px_rgba(239,68,68,0.05)] hover:shadow-md'
+                    : 'border-l-4 border-l-transparent border-y border-r border-gray-100 hover:border-l-blue-500 hover:shadow-md'
+                }`}
         >
-            <div className="flex justify-between items-start mb-2">
-                <div className="flex items-center gap-2">
-                    {customer.classification === 'Hot' && <Flame size={14} className="text-red-500 fill-red-500" />}
-                    <h4 className="font-bold text-gray-800 text-sm group-hover:text-blue-700 truncate max-w-[120px]">{customer.name}</h4>
+            {/* Mini Progress Bar */}
+            {customer.status === CustomerStatus.WON && (
+                <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-100 z-10">
+                    <div
+                        className="h-full bg-green-500 rounded-r-full transition-all duration-500"
+                        style={{ width: `${((['deposited', 'contract_signed', 'procedure_complete', 'money_received', 'delivery_scheduled', 'delivery_complete'].indexOf(customer.deal_status || '') + 1) / 6) * 100}%` }}
+                    />
                 </div>
-                {getCustomerStatusDisplay(customer)}
-            </div>
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Phone size={10} />
-                <span className="truncate">{customer.phone}</span>
-            </div>
-            {customer.interest && (
-                <span className="text-xs font-bold text-primary-600 mt-1 block truncate uppercase">{customer.interest}</span>
             )}
+
+            <div className={`p-4 ${customer.status === CustomerStatus.WON ? 'pt-5' : ''}`}>
+                <div className="flex justify-between items-start mb-2.5">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                        {customer.classification === 'Hot' && <div className="p-1 bg-red-100 rounded-full shrink-0"><Flame size={12} className="text-red-600 fill-red-600" /></div>}
+                        <h4 className="font-bold text-gray-800 text-sm group-hover:text-primary-700 truncate">{customer.name}</h4>
+                    </div>
+                    {getCustomerStatusDisplay(customer)}
+                </div>
+
+                <div className="flex items-center gap-3 mb-1">
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-md">
+                        <Phone size={10} className="text-gray-400" />
+                        <span className="font-medium">{customer.phone}</span>
+                    </div>
+                    {customer.interest && (
+                        <span className="text-[10px] font-bold text-gray-500 uppercase bg-gray-50 px-2 py-1 rounded-md border border-gray-100">{customer.interest}</span>
+                    )}
+                </div>
+
+                {/* Quick Note Button - Subtle */}
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (!canCreateTask) {
+                            alert('🔒 Tính năng này chỉ dành cho thành viên Gold trở lên!');
+                            return;
+                        }
+                        setTaskForm(prev => ({
+                            ...prev,
+                            title: `Ghi chú: ${customer.name}`,
+                            applyToCustomer: true,
+                            customer_id: customer.id
+                        }));
+                        setSelectedCustomerName(`${customer.name} - ${customer.phone}`);
+                        setShowTaskModal(true);
+                    }}
+                    className="absolute bottom-2 right-2 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-md hover:shadow-lg transition-all z-10 opacity-90 hover:opacity-100"
+                    title="Thêm ghi chú nhanh"
+                >
+                    <Plus size={14} />
+                </button>
+            </div>
         </div>
     );
 
@@ -498,10 +607,21 @@ const CalendarPage: React.FC = () => {
     };
 
     // --- Column Component ---
-    const Column = ({ title, icon: Icon, iconColor, items, type, emptyText }: {
+    type ThemeColor = 'orange' | 'blue' | 'red' | 'purple' | 'sky' | 'green';
+
+    const THEMES: Record<ThemeColor, { bg: string, border: string, headerBg: string, iconBg: string, iconText: string, badge: string, badgeText: string }> = {
+        orange: { bg: 'bg-orange-50/30', border: 'border-orange-200', headerBg: 'bg-orange-50/80', iconBg: 'bg-orange-100', iconText: 'text-orange-600', badge: 'bg-orange-100', badgeText: 'text-orange-700' },
+        blue: { bg: 'bg-blue-50/30', border: 'border-blue-200', headerBg: 'bg-blue-50/80', iconBg: 'bg-blue-100', iconText: 'text-blue-600', badge: 'bg-blue-100', badgeText: 'text-blue-700' },
+        red: { bg: 'bg-red-50/30', border: 'border-red-200', headerBg: 'bg-red-50/80', iconBg: 'bg-red-100', iconText: 'text-red-600', badge: 'bg-red-100', badgeText: 'text-red-700' },
+        purple: { bg: 'bg-purple-50/30', border: 'border-purple-200', headerBg: 'bg-purple-50/80', iconBg: 'bg-purple-100', iconText: 'text-purple-600', badge: 'bg-purple-100', badgeText: 'text-purple-700' },
+        sky: { bg: 'bg-sky-50/30', border: 'border-sky-200', headerBg: 'bg-sky-50/80', iconBg: 'bg-sky-100', iconText: 'text-sky-600', badge: 'bg-sky-100', badgeText: 'text-sky-700' },
+        green: { bg: 'bg-green-50/30', border: 'border-green-200', headerBg: 'bg-green-50/80', iconBg: 'bg-green-100', iconText: 'text-green-600', badge: 'bg-green-100', badgeText: 'text-green-700' },
+    };
+
+    const Column = ({ title, icon: Icon, theme, items, type, emptyText }: {
         title: string;
         icon: React.ElementType;
-        iconColor: string;
+        theme: ThemeColor;
         items: Customer[] | UserTask[];
         type: 'customer' | 'task';
         emptyText: string;
@@ -511,15 +631,20 @@ const CalendarPage: React.FC = () => {
             return [];
         }, [items, type]);
 
+        const styles = THEMES[theme];
+
         return (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col overflow-hidden">
-                <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                    <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm">
-                        <Icon size={16} className={iconColor} /> {title}
+            <div className={`${styles.bg} rounded-2xl border ${styles.border} flex flex-col overflow-hidden h-full shadow-sm`}>
+                <div className={`p-4 flex items-center justify-between border-b ${styles.border} ${styles.headerBg} backdrop-blur-sm`}>
+                    <h3 className="font-bold text-gray-800 flex items-center gap-2.5 text-sm uppercase tracking-wide">
+                        <div className={`p-1.5 rounded-lg ${styles.iconBg} ${styles.iconText}`}>
+                            <Icon size={14} />
+                        </div>
+                        {title}
                     </h3>
-                    <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
+                    <span className={`${styles.badge} ${styles.badgeText} text-xs font-bold px-2.5 py-0.5 rounded-lg shadow-sm`}>{items.length}</span>
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar max-h-[550px]">
+                <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar bg-white/50 max-h-[350px] lg:max-h-none">
                     {items.length === 0 ? (
                         <div className="text-center py-6 text-gray-400 text-sm">
                             <CheckCircle2 size={24} className="mx-auto mb-2 text-gray-300" />
@@ -548,115 +673,190 @@ const CalendarPage: React.FC = () => {
     return (
         <div className="space-y-6">
             {/* HEADER */}
-            <div className="bg-gradient-to-r from-primary-600 to-blue-600 rounded-2xl p-6 text-white shadow-lg">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                        <h1 className="text-2xl font-bold mb-1">
-                            Xin chào {userProfile?.full_name || 'bạn'}! 👋
-                        </h1>
-                        <p className="text-white/80">
-                            Hôm nay bạn có <span className="font-bold text-yellow-300">{totalTasks}</span> công việc cần xử lý
-                        </p>
-                    </div>
-                    <button
-                        onClick={() => setShowCalendarModal(true)}
-                        className="flex items-center gap-2 bg-white/20 hover:bg-white/30 backdrop-blur-sm px-4 py-2 rounded-xl font-bold transition-all"
-                    >
-                        <CalendarIcon size={18} />
-                        Xem lịch
-                    </button>
+            {/* HEADER - Clean Design */}
+            <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900 mb-1 flex items-center gap-2">
+                        Xin chào, {userProfile?.full_name || 'bạn'}! <span className="text-2xl">👋</span>
+                    </h1>
+                    <p className="text-gray-500 font-medium">
+                        Hôm nay bạn có <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold text-sm mx-1">{totalTasks}</span> công việc cần xử lý
+                    </p>
                 </div>
+                <button
+                    onClick={() => setShowCalendarModal(true)}
+                    className="group flex items-center gap-2 bg-gray-50 hover:bg-white text-gray-700 hover:text-primary-600 border border-gray-200 hover:border-primary-100 px-5 py-2.5 rounded-xl font-bold transition-all shadow-sm hover:shadow-md"
+                >
+                    <CalendarIcon size={18} className="text-gray-500 group-hover:text-primary-600 transition-colors" />
+                    Xem lịch tháng
+                </button>
             </div>
 
-            {/* CS ĐẶC BIỆT - Grid Section with Scroll */}
-            {specialCare.length > 0 && (
-                <div className="bg-gradient-to-r from-pink-50 to-rose-50 rounded-2xl border-2 border-pink-200 shadow-sm p-4">
-                    <div className="flex items-center justify-between mb-3">
-                        <h3 className="font-bold text-pink-800 flex items-center gap-2">
-                            <Flame size={18} className="text-pink-500" /> CS Đặc biệt
-                        </h3>
-                        <span className="bg-pink-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">{specialCare.length}</span>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[200px] overflow-y-auto pb-2 custom-scrollbar">
-                        {specialCare.map(c => (
-                            <div
-                                key={c.id}
-                                onClick={() => navigate(`/customers/${c.id}`, { state: { from: '/calendar', customerIds: specialCare.map(x => x.id) } })}
-                                className="p-3 bg-white rounded-xl border border-pink-100 hover:border-pink-300 hover:shadow-md transition-all cursor-pointer"
-                            >
-                                <div className="flex items-center gap-2 mb-1">
-                                    <Flame size={12} className="text-pink-500 fill-pink-500" />
-                                    <h4 className="font-bold text-gray-800 text-sm truncate">{c.name}</h4>
-                                </div>
-                                <p className="text-xs text-gray-500 flex items-center gap-1">
-                                    <Phone size={10} /> {c.phone}
-                                </p>
-                                {c.interest && <p className="text-xs text-pink-600 mt-1 truncate font-bold uppercase">{c.interest}</p>}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* 4 COLUMNS */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Column
-                    title="Cần CS hôm nay"
-                    icon={Timer}
-                    iconColor="text-orange-500"
-                    items={dueToday}
-                    type="customer"
-                    emptyText="Không có khách cần CS hôm nay"
-                />
-                <Column
-                    title="Hết CS Dài hạn"
-                    icon={Calendar}
-                    iconColor="text-blue-500"
-                    items={longTermDueToday}
-                    type="customer"
-                    emptyText="Không có khách dài hạn hết hạn"
-                />
-                <Column
-                    title="Quá hạn CS"
-                    icon={AlertCircle}
-                    iconColor="text-red-500"
-                    items={overdue}
-                    type="customer"
-                    emptyText="Không có khách quá hạn"
-                />
-
-                {/* TASKS COLUMN with Create Button */}
-                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col overflow-hidden">
-                    <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                        <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm">
-                            <ListTodo size={16} className="text-purple-500" /> Công việc
-                        </h3>
-                        <div className="flex items-center gap-2">
-                            <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">{userTasks.length}</span>
+            {/* NEW SPLIT LAYOUT */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:h-[calc(100vh-180px)] lg:min-h-[600px] h-auto">
+                {/* LEFT PANEL - TABS (Customers / Orders) - Gray Background */}
+                <div className="lg:col-span-8 flex flex-col bg-gray-50 rounded-3xl border border-gray-100 shadow-sm overflow-hidden min-h-[500px]">
+                    {/* Tabs Header - Clean White on Gray */}
+                    <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/50 p-2 gap-2">
+                        <div className="flex gap-2 flex-1">
                             <button
-                                onClick={() => {
-                                    if (!canCreateTask) {
-                                        alert('🔒 Tính năng này chỉ dành cho thành viên Gold trở lên!');
-                                        return;
-                                    }
-                                    setShowTaskModal(true);
-                                }}
-                                className={`p-1.5 rounded-lg transition-colors ${!canCreateTask ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-purple-500 text-white hover:bg-purple-600'}`}
-                                title={!canCreateTask ? "Chỉ dành cho thành viên Gold trở lên" : "Tạo công việc mới"}
+                                onClick={() => setActiveMainTab('customers')}
+                                className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeMainTab === 'customers'
+                                    ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5'
+                                    : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+                                    }`}
                             >
-                                {!canCreateTask ? <Lock size={14} /> : <Plus size={14} />}
+                                <Users size={18} />
+                                KHÁCH HÀNG CẦN XỬ LÝ
+                            </button>
+                            <button
+                                onClick={() => setActiveMainTab('orders')}
+                                className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeMainTab === 'orders'
+                                    ? 'bg-white text-green-600 shadow-sm ring-1 ring-black/5'
+                                    : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+                                    }`}
+                            >
+                                <ListTodo size={18} />
+                                ĐƠN HÀNG CẦN XỬ LÝ
                             </button>
                         </div>
+
+                        {/* Order Date Filter */}
+                        {activeMainTab === 'orders' && (
+                            <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-gray-200 shadow-sm animate-fade-in">
+                                <span className="text-xs font-bold text-gray-500 whitespace-nowrap">Lọc từ:</span>
+                                <input
+                                    type="date"
+                                    value={orderDateRange.start}
+                                    onChange={e => setOrderDateRange(prev => ({ ...prev, start: e.target.value }))}
+                                    className="bg-gray-50 border-gray-200 rounded-lg text-xs font-medium text-gray-700 py-1 px-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                                <span className="text-gray-300">-</span>
+                                <input
+                                    type="date"
+                                    value={orderDateRange.end}
+                                    onChange={e => setOrderDateRange(prev => ({ ...prev, end: e.target.value }))}
+                                    className="bg-gray-50 border-gray-200 rounded-lg text-xs font-medium text-gray-700 py-1 px-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                            </div>
+                        )}
                     </div>
-                    <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar max-h-[550px]">
-                        {userTasks.length === 0 ? (
-                            <div className="text-center py-6 text-gray-400 text-sm">
-                                <ListTodo size={24} className="mx-auto mb-2 text-gray-300" />
-                                Chưa có công việc nào
+
+                    {/* Tab Content */}
+                    <div className="flex-1 p-4 bg-gray-50/30 overflow-hidden">
+                        {activeMainTab === 'customers' ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:h-full h-auto">
+                                <Column
+                                    title="CS Đặc biệt"
+                                    icon={Flame}
+                                    theme="orange"
+                                    items={specialCare} // Moved Special Care here
+                                    type="customer"
+                                    emptyText="Không có khách đặc biệt"
+                                />
+                                <Column
+                                    title="Cần CS hôm nay"
+                                    icon={Timer}
+                                    theme="green"
+                                    items={dueToday}
+                                    type="customer"
+                                    emptyText="Không có khách cần CS hôm nay"
+                                />
+                                <Column
+                                    title="Hết CS Dài hạn"
+                                    icon={Calendar}
+                                    theme="sky"
+                                    items={longTermDueToday}
+                                    type="customer"
+                                    emptyText="Không có khách dài hạn hết hạn"
+                                />
+                                <Column
+                                    title="Quá hạn CS"
+                                    icon={AlertCircle}
+                                    theme="red"
+                                    items={overdue}
+                                    type="customer"
+                                    emptyText="Không có khách quá hạn"
+                                />
                             </div>
                         ) : (
-                            userTasks.map(task => <TaskCard key={task.id} task={task} />)
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:h-full h-auto">
+                                <Column
+                                    title="Đang xử lý"
+                                    icon={LayoutList}
+                                    theme="blue"
+                                    items={processingDeals}
+                                    type="customer"
+                                    emptyText="Không có đơn đang xử lý"
+                                />
+                                <Column
+                                    title="Đã hoàn thành"
+                                    icon={CheckSquare}
+                                    theme="green"
+                                    items={completedDeals}
+                                    type="customer"
+                                    emptyText="Không có đơn hoàn thành"
+                                />
+                                <Column
+                                    title="Trả cọc"
+                                    icon={Banknote}
+                                    theme="orange"
+                                    items={refundedDeals}
+                                    type="customer"
+                                    emptyText="Không có đơn trả cọc"
+                                />
+                                <Column
+                                    title="Hồ sơ treo"
+                                    icon={PauseCircle}
+                                    theme="red"
+                                    items={suspendedDeals}
+                                    type="customer"
+                                    emptyText="Không có hồ sơ treo"
+                                />
+                            </div>
                         )}
+                    </div>
+                </div>
+
+                {/* RIGHT PANEL - TASKS - Blue Background - Wider */}
+                <div className="lg:col-span-4 h-auto lg:h-full min-h-[500px]">
+                    <div className="bg-blue-50/50 rounded-3xl border border-blue-100 flex flex-col overflow-hidden h-full shadow-sm">
+                        <div className="p-4 flex items-center justify-between border-b border-blue-100 bg-white/80 backdrop-blur-sm shadow-sm z-10">
+                            <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm uppercase tracking-wide">
+                                <div className="p-1.5 rounded-lg bg-purple-100 text-purple-600">
+                                    <ListTodo size={14} />
+                                </div>
+                                Danh sách công việc
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                <span className="bg-purple-50 text-purple-700 text-xs font-bold px-2.5 py-0.5 rounded-lg border border-purple-100">{userTasks.length}</span>
+                                <button
+                                    onClick={() => {
+                                        if (!canCreateTask) {
+                                            alert('🔒 Tính năng này chỉ dành cho thành viên Gold trở lên!');
+                                            return;
+                                        }
+                                        setShowTaskModal(true);
+                                    }}
+                                    className={`p-1.5 rounded-lg transition-colors ${!canCreateTask ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-purple-600 text-white hover:bg-purple-700 shadow-sm shadow-purple-200/50'}`}
+                                    title={!canCreateTask ? "Chỉ dành cho thành viên Gold trở lên" : "Tạo công việc mới"}
+                                >
+                                    {!canCreateTask ? <Lock size={12} /> : <Plus size={12} />}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar bg-gray-50/30">
+                            {userTasks.length === 0 ? (
+                                <div className="text-center py-10 text-gray-400 text-sm flex flex-col items-center">
+                                    <div className="p-3 bg-gray-100 rounded-full mb-3">
+                                        <ListTodo size={24} className="text-gray-300" />
+                                    </div>
+                                    Chưa có công việc nào
+                                </div>
+                            ) : (
+                                userTasks.map(task => <TaskCard key={task.id} task={task} />)
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -686,33 +886,60 @@ const CalendarPage: React.FC = () => {
                                     <div key={d} className="py-3 text-center text-sm font-bold text-gray-500 uppercase">{d}</div>
                                 ))}
                             </div>
-                            <div className="flex-1 grid grid-rows-6 p-3">
+                            <div className="flex-1 grid grid-rows-6">
                                 {grid.map((row: (number | null)[], i: number) => (
-                                    <div key={i} className="grid grid-cols-7">
+                                    <div key={i} className="grid grid-cols-7 border-b border-gray-50 last:border-0 h-full">
                                         {row.map((day: number | null, j: number) => {
-                                            if (!day) return <div key={j} className="p-1"></div>;
+                                            if (!day) return <div key={j} className="bg-gray-50/30 border-r border-gray-50 last:border-0"></div>;
+
                                             const cellDateStr = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
                                             const isSelected = cellDateStr === selectedDateStr;
                                             const isToday = cellDateStr === todayStr;
+
+                                            // Get day's data
                                             const data = tasksByDate[cellDateStr] || { customerTasks: [], customTasks: [] };
-                                            const hasItems = data.customerTasks.length > 0 || data.customTasks.length > 0;
+                                            const totalItems = data.customerTasks.length + data.customTasks.length;
 
                                             return (
                                                 <div
                                                     key={j}
                                                     onClick={() => handleDayClick(day)}
-                                                    className={`p-2 cursor-pointer transition-colors rounded-lg m-0.5
-                                                        ${isSelected ? 'bg-blue-100 ring-2 ring-blue-400' : hasItems ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-100'}
-                                                        ${isToday ? 'ring-2 ring-yellow-400' : ''}`}
+                                                    className={`relative min-h-[80px] p-2 cursor-pointer transition-all border-r border-gray-50 last:border-0 flex flex-col justify-between group hover:bg-gray-50
+                                                        ${isSelected ? 'bg-blue-50/40' : ''}
+                                                    `}
                                                 >
-                                                    <span className={`text-base font-medium flex items-center justify-center w-8 h-8 rounded-full ${isToday ? 'bg-blue-600 text-white' : ''}`}>
-                                                        {day}
-                                                    </span>
-                                                    {hasItems && (
-                                                        <div className="flex justify-center mt-1">
-                                                            <span className="h-2 w-2 rounded-full bg-orange-500"></span>
+                                                    <div className="flex justify-between items-start">
+                                                        <span className={`text-sm font-medium w-7 h-7 flex items-center justify-center rounded-full transition-all
+                                                            ${isToday
+                                                                ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
+                                                                : isSelected
+                                                                    ? 'bg-blue-100 text-blue-700'
+                                                                    : 'text-gray-700 group-hover:bg-white'}
+                                                        `}>
+                                                            {day}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Indicators */}
+                                                    {totalItems > 0 && (
+                                                        <div className="flex flex-col gap-1 mt-1">
+                                                            {data.customerTasks.length > 0 && (
+                                                                <div className="flex items-center gap-1">
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-pink-500"></div>
+                                                                    <span className="text-[10px] text-gray-500 font-medium truncate hidden md:inline">{data.customerTasks.length} khách</span>
+                                                                </div>
+                                                            )}
+                                                            {data.customTasks.length > 0 && (
+                                                                <div className="flex items-center gap-1">
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>
+                                                                    <span className="text-[10px] text-gray-500 font-medium truncate hidden md:inline">{data.customTasks.length} việc</span>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
+
+                                                    {/* Selection Marker (Active Border) */}
+                                                    {isSelected && <div className="absolute inset-0 border-2 border-blue-400/30 rounded-lg pointer-events-none"></div>}
                                                 </div>
                                             );
                                         })}
@@ -804,10 +1031,13 @@ const CalendarPage: React.FC = () => {
             {showTaskModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-                        <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-primary-50 to-white">
-                            <h2 className="text-lg font-bold text-gray-800">Tạo công việc mới</h2>
-                            <button onClick={() => setShowTaskModal(false)} className="p-2 hover:bg-white/80 rounded-full transition-colors">
-                                <X size={18} className="text-gray-500" />
+                        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-white">
+                            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                <span className="p-2 bg-purple-50 text-purple-600 rounded-lg"><ListTodo size={20} /></span>
+                                Tạo công việc mới
+                            </h2>
+                            <button onClick={() => setShowTaskModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                                <X size={20} className="text-gray-400 hover:text-gray-600" />
                             </button>
                         </div>
                         <div className="p-5 space-y-4">

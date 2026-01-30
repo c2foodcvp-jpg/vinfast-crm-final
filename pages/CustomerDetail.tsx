@@ -2,12 +2,14 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, Interaction, CustomerClassification, UserProfile, UserRole, Distributor, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType, DeliveryProgress } from '../types';
+import { Customer, CustomerStatus, Interaction, CustomerClassification, UserProfile, UserRole, Distributor, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType, DeliveryProgress, MembershipTier } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
-    ArrowLeft, Phone, Edit, MessageCircle, Send, User as UserIcon, Calendar, Flame, Ban, CheckCircle2, Mail, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, FileCheck2, Trash2, UserCheck, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, Check, Eye, Share2, Archive, Calculator, Truck
+    ArrowLeft, Phone, Edit, MessageCircle, Send, User as UserIcon, Calendar, Flame, Ban, CheckCircle2, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, FileCheck2, Trash2, UserCheck, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, Check, Eye, Share2, Archive, Calculator, Truck,
+    ListTodo, Lock
 } from 'lucide-react';
 import CustomerProgressModal, { DELIVERY_STEPS } from '../components/CustomerProgressModal';
+import TaskCreationModal from '../components/TaskCreationModal';
 
 const { useParams, useNavigate, useLocation } = ReactRouterDOM as any;
 
@@ -93,6 +95,9 @@ const CustomerDetail: React.FC = () => {
 
     // Progress Modal
     const [showProgressModal, setShowProgressModal] = useState(false);
+
+    // Task Modal State
+    const [showTaskModal, setShowTaskModal] = useState(false);
 
     const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
     const longTermTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -310,6 +315,12 @@ const CustomerDetail: React.FC = () => {
         return false;
     }, [isAdmin, isMod, customer, userProfile, isAssignedRep]);
 
+    const canCreateTask = useMemo(() => {
+        // Feature restricted to Platinum and Diamond members
+        if (!userProfile?.member_tier) return false;
+        return [MembershipTier.PLATINUM, MembershipTier.DIAMOND].includes(userProfile.member_tier);
+    }, [userProfile]);
+
     const showActionButtons = canEdit;
 
     // --- LOGIC: SAME TEAM, SAME/LOWER LEVEL ---
@@ -361,7 +372,11 @@ const CustomerDetail: React.FC = () => {
         return [];
     }, [employees, userProfile, isAdmin, isMod]);
 
-    // ... (Keep existing handler functions: handleAddNote, handleTrackAction, updateCustomerField, handleSaveInfo, handleAcknowledge, handleClassificationChange, handleDateChange, toggleSpecialCare, toggleLongTerm, handleStopCare, handleReopenCare, handleApproveRequest, handleApproveTransfer, handleRejectTransfer, prepareChangeSales, executeChangeSales, handleOpenShareModal, handleShareCustomer, executeRevokeShare, executeDeleteCustomer, handleDealAction, confirmSuspend, handleAddRevenue, handleAddIncurredExpense, handleRequestExpense, handleRepayAdvance, handleSubmitDealerDebt, handleDealerDebtPaid, executeDealerDebtPaid, handleRequestWin, confirmDeleteTransaction) ...
+    // ... (Keep existing handler functions ...)
+
+    // --- CREATE TASK HANDLER ---
+
+
     const handleAddNote = async (type: Interaction['type'] = 'note', customContent?: string) => {
         if (isDelegatedViewOnly) { showToast("Bạn chỉ có quyền xem, không thể thêm ghi chú.", 'error'); return; }
         if (!id || (!newNote.trim() && !customContent)) return;
@@ -920,26 +935,43 @@ const CustomerDetail: React.FC = () => {
                         <div className="bg-red-50 rounded-2xl p-6 shadow-sm border border-red-100 text-center animate-fade-in"><div className="flex justify-center mb-3"><Ban size={48} className="text-red-400" /></div><h3 className="font-bold text-red-700 text-lg mb-2">Khách hàng đang Ngưng Chăm Sóc</h3><p className="text-red-600 text-sm mb-4 italic">"{customer.stop_reason || 'Không có lý do'}"</p><button onClick={handleReopenCare} disabled={isDelegatedViewOnly} className="w-full py-2.5 bg-primary-600 text-white rounded-xl font-bold hover:bg-primary-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"><RefreshCcw size={18} /> Mở lại chăm sóc</button></div>
                     )}
                     {isWon && (
-                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-green-200 animate-fade-in"><h3 className="font-bold text-green-800 mb-4 flex items-center gap-2"><FileCheck2 size={20} /> Trạng thái đơn hàng</h3><div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center mb-4"><p className="text-xs text-green-600 font-bold uppercase mb-1">TÌNH TRẠNG HIỆN TẠI</p><p className="text-xl font-bold text-green-800">{isCompleted ? 'Đã hoàn thành' : isRefunded ? 'Đã trả cọc' : isSuspended ? 'Hồ sơ Treo' : customer.deal_status === 'completed_pending' ? 'Chờ duyệt hoàn thành' : customer.deal_status === 'refund_pending' ? 'Chờ duyệt trả cọc' : customer.deal_status === 'suspended_pending' ? 'Chờ duyệt Treo' : 'Đang Xử Lý'}</p></div><div className="space-y-3"><button className="w-full py-2.5 bg-white border border-green-600 text-green-700 rounded-xl font-bold text-sm hover:bg-green-50 flex items-center justify-center gap-2"><FileCheck2 size={16} /> Quản lý Đơn hàng</button>{!isCompleted && !isRefunded && !isSuspended && customer.deal_status !== 'refund_pending' && !isDelegatedViewOnly && (<><button onClick={() => handleDealAction('complete')} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 flex items-center justify-center gap-2"><CheckCircle2 size={16} /> Hoàn thành Đơn hàng</button><div className="grid grid-cols-2 gap-2"><button onClick={() => setShowRefundConfirm(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Trả cọc</button><button onClick={() => handleDealAction('suspend')} className="py-2.5 bg-gray-100 text-gray-700 border border-gray-200 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><Archive size={16} /> Treo hồ sơ</button></div></>)}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-green-200 animate-fade-in">
+                            <div className="flex justify-between items-center mb-4 border-b border-green-100 pb-2">
+                                <h3 className="font-bold text-green-800 flex items-center gap-2"><FileCheck2 size={20} /> Trạng thái đơn hàng</h3>
+                                <button
+                                    onClick={() => {
+                                        if (!canCreateTask) {
+                                            showToast('🔒 Tính năng này chỉ dành cho thành viên Platinum trở lên!', 'error');
+                                            return;
+                                        }
+                                        setShowTaskModal(true);
+                                    }}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-xs transition-all shadow-sm border ${canCreateTask ? 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50' : 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed'}`}
+                                    title={canCreateTask ? "Thêm nhắc nhở" : "Chỉ dành cho Platinum+"}
+                                >
+                                    {canCreateTask ? <ListTodo size={14} /> : <Lock size={14} />} Thêm nhắc nhở
+                                </button>
+                            </div><div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center mb-4"><p className="text-xs text-green-600 font-bold uppercase mb-1">TÌNH TRẠNG HIỆN TẠI</p><p className="text-xl font-bold text-green-800">{isCompleted ? 'Đã hoàn thành' : isRefunded ? 'Đã trả cọc' : isSuspended ? 'Hồ sơ Treo' : customer.deal_status === 'completed_pending' ? 'Chờ duyệt hoàn thành' : customer.deal_status === 'refund_pending' ? 'Chờ duyệt trả cọc' : customer.deal_status === 'suspended_pending' ? 'Chờ duyệt Treo' : 'Đang Xử Lý'}</p></div><div className="space-y-3"><button className="w-full py-2.5 bg-white border border-green-600 text-green-700 rounded-xl font-bold text-sm hover:bg-green-50 flex items-center justify-center gap-2"><FileCheck2 size={16} /> Quản lý Đơn hàng</button>
+                                {!isCompleted && !isRefunded && !isSuspended && customer.deal_status !== 'refund_pending' && !isDelegatedViewOnly && (<><button onClick={() => handleDealAction('complete')} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 flex items-center justify-center gap-2"><CheckCircle2 size={16} /> Hoàn thành Đơn hàng</button><div className="grid grid-cols-2 gap-2"><button onClick={() => setShowRefundConfirm(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Trả cọc</button><button onClick={() => handleDealAction('suspend')} className="py-2.5 bg-gray-100 text-gray-700 border border-gray-200 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><Archive size={16} /> Treo hồ sơ</button></div></>)}
 
-                            {/* REFUND PENDING STATE */}
-                            {customer.deal_status === 'refund_pending' && (
-                                <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200 mb-3 animate-fade-in">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <p className="text-yellow-800 font-bold flex items-center gap-2 text-sm">
-                                            <Loader2 size={16} className="animate-spin" /> Yêu cầu Trả cọc đang chờ duyệt
-                                        </p>
-                                        {(isAdmin || isMod) && !isDelegatedViewOnly && (
-                                            <button onClick={() => handleDealAction('refund')} className="px-3 py-1.5 bg-green-600 text-white font-bold rounded-lg text-xs hover:bg-green-700 shadow-sm">
-                                                Duyệt ngay
-                                            </button>
-                                        )}
+                                {/* REFUND PENDING STATE */}
+                                {customer.deal_status === 'refund_pending' && (
+                                    <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200 mb-3 animate-fade-in">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <p className="text-yellow-800 font-bold flex items-center gap-2 text-sm">
+                                                <Loader2 size={16} className="animate-spin" /> Yêu cầu Trả cọc đang chờ duyệt
+                                            </p>
+                                            {(isAdmin || isMod) && !isDelegatedViewOnly && (
+                                                <button onClick={() => handleDealAction('refund')} className="px-3 py-1.5 bg-green-600 text-white font-bold rounded-lg text-xs hover:bg-green-700 shadow-sm">
+                                                    Duyệt ngay
+                                                </button>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-yellow-600 italic">Vui lòng đợi Admin/Mod xác nhận hoàn tiền cọc.</p>
                                     </div>
-                                    <p className="text-xs text-yellow-600 italic">Vui lòng đợi Admin/Mod xác nhận hoàn tiền cọc.</p>
-                                </div>
-                            )}
+                                )}
 
-                            {(isRefunded || isSuspended) && !isDelegatedViewOnly && (<div className="space-y-2">{customer.deal_status === 'refund_pending' && (isAdmin || isMod) && <button onClick={() => handleDealAction('refund')} className="w-full py-2.5 bg-red-600 text-white border border-red-700 rounded-xl font-bold text-sm hover:bg-red-700 flex items-center justify-center gap-2 animate-pulse"><CheckCircle2 size={16} /> Duyệt Trả Cọc</button>}<button onClick={() => handleDealAction('reopen')} className="w-full py-2.5 bg-orange-100 text-orange-700 border border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Mở xử lý lại</button></div>)}{(isAdmin || isMod) && (<button onClick={() => handleDealAction('cancel')} className="w-full py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Hủy chốt / Mở lại CS</button>)}</div></div>
+                                {(isRefunded || isSuspended) && !isDelegatedViewOnly && (<div className="space-y-2">{customer.deal_status === 'refund_pending' && (isAdmin || isMod) && <button onClick={() => handleDealAction('refund')} className="w-full py-2.5 bg-red-600 text-white border border-red-700 rounded-xl font-bold text-sm hover:bg-red-700 flex items-center justify-center gap-2 animate-pulse"><CheckCircle2 size={16} /> Duyệt Trả Cọc</button>}<button onClick={() => handleDealAction('reopen')} className="w-full py-2.5 bg-orange-100 text-orange-700 border border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Mở xử lý lại</button></div>)}{(isAdmin || isMod) && (<button onClick={() => handleDealAction('cancel')} className="w-full py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Hủy chốt / Mở lại CS</button>)}</div></div>
                     )}
                     {!hideCarePanel && (
                         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
@@ -989,7 +1021,20 @@ const CustomerDetail: React.FC = () => {
                                     )}
                                 </>
                             )}
-                            <div className="space-y-3"><button className="w-full py-2.5 bg-gray-800 text-white rounded-xl font-bold text-sm hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200"><Mail size={16} /> Đặt lịch Lái thử</button><div className="grid grid-cols-2 gap-3"><button disabled={(isDelegatedViewOnly)} onClick={() => setShowStopModal(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"><Ban size={16} /> Ngưng CS</button><button disabled={(isDelegatedViewOnly)} onClick={() => setShowWinModal(true)} className="py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-1 disabled:opacity-50"><CheckCircle2 size={16} /> Chốt Deal</button></div></div>
+                            <div className="space-y-3">
+                                <button
+                                    onClick={() => {
+                                        if (!canCreateTask) {
+                                            showToast('🔒 Tính năng này chỉ dành cho thành viên Platinum trở lên!', 'error');
+                                            return;
+                                        }
+                                        setShowTaskModal(true);
+                                    }}
+                                    className={`w-full py-2.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200 ${canCreateTask ? 'bg-gray-800 text-white hover:bg-black' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                                >
+                                    {canCreateTask ? <ListTodo size={16} /> : <Lock size={16} />} Thêm nhắc nhở
+                                </button>
+                                <div className="grid grid-cols-2 gap-3"><button disabled={(isDelegatedViewOnly)} onClick={() => setShowStopModal(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"><Ban size={16} /> Ngưng CS</button><button disabled={(isDelegatedViewOnly)} onClick={() => setShowWinModal(true)} className="py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-1 disabled:opacity-50"><CheckCircle2 size={16} /> Chốt Deal</button></div></div>
                         </div>
                     )}
                     {/* ... Customer Info & Finance Panels ... */}
@@ -1589,6 +1634,18 @@ const CustomerDetail: React.FC = () => {
                         </button>
                     </div>
                 </div>
+            )}
+            {/* CREATE TASK MODAL */}
+            {/* CREATE TASK MODAL */}
+            {showTaskModal && customer && (
+                <TaskCreationModal
+                    visible={showTaskModal}
+                    onClose={() => setShowTaskModal(false)}
+                    customer={{ id: customer.id, name: customer.name }}
+                    userProfile={userProfile}
+                    onSuccess={(note) => handleAddNote('note', note)}
+                    showToast={showToast}
+                />
             )}
         </div >
     );
