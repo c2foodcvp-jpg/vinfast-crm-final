@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { X, Loader2, BellRing, ListTodo } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Loader2, BellRing, ListTodo, Mic } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { UserProfile } from '../types';
+import { UserProfile, MembershipTier } from '../types';
+import VoiceRecordingModal from './VoiceRecordingModal';
 
 interface TaskCreationModalProps {
     visible: boolean;
@@ -22,6 +23,67 @@ const TaskCreationModal: React.FC<TaskCreationModalProps> = ({ visible, onClose,
         reminderEnabled: false
     });
     const [savingTask, setSavingTask] = useState(false);
+
+    // Voice to Text
+    const [showVoiceModal, setShowVoiceModal] = useState(false);
+    const [tempTranscript, setTempTranscript] = useState('');
+    const [isListening, setIsListening] = useState(false);
+    const recognitionRef = useRef<any>(null);
+
+    const startVoiceSession = () => {
+        const isPlatinumOrHigher = userProfile?.member_tier === MembershipTier.PLATINUM ||
+            userProfile?.member_tier === MembershipTier.DIAMOND ||
+            userProfile?.role === 'admin' ||
+            userProfile?.role === 'mod';
+
+        if (!isPlatinumOrHigher) {
+            showToast('Tính năng Voice to Text chỉ dành cho thành viên Platinum trở lên!', 'error');
+            return;
+        }
+
+        setShowVoiceModal(true);
+        setTempTranscript('');
+
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            showToast('Trình duyệt không hỗ trợ chuyển giọng nói thành văn bản.', 'error');
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'vi-VN';
+        recognition.interimResults = true;
+        recognition.continuous = true;
+
+        recognition.onstart = () => setIsListening(true);
+        recognition.onend = () => setIsListening(false);
+        recognition.onerror = (event: any) => {
+            console.error('Lỗi voice:', event.error);
+            setIsListening(false);
+        };
+        recognition.onresult = (event: any) => {
+            const currentText = Array.from(event.results)
+                .map((r: any) => r[0].transcript)
+                .join('');
+            setTempTranscript(currentText);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+    };
+
+    const handleVoiceConfirm = () => {
+        if (recognitionRef.current) recognitionRef.current.stop();
+        setIsListening(false);
+        setTaskForm(prev => ({ ...prev, content: (prev.content ? prev.content + ' ' : '') + tempTranscript }));
+        setShowVoiceModal(false);
+    };
+
+    const handleVoiceCancel = () => {
+        if (recognitionRef.current) recognitionRef.current.stop();
+        setIsListening(false);
+        setShowVoiceModal(false);
+    };
 
     // Reset form when opening
     useEffect(() => {
@@ -104,15 +166,22 @@ const TaskCreationModal: React.FC<TaskCreationModalProps> = ({ visible, onClose,
                             autoFocus
                         />
                     </div>
-                    <div>
+                    <div className="relative">
                         <label className="block text-sm font-bold text-gray-700 mb-1.5">Nội dung</label>
                         <textarea
                             value={taskForm.content}
                             onChange={e => setTaskForm(prev => ({ ...prev, content: e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-4 py-2.5 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 resize-none transition-all"
+                            className="w-full border border-gray-200 rounded-xl px-4 py-2.5 pr-10 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 resize-none transition-all"
                             rows={3}
                             placeholder="Mô tả chi tiết..."
                         />
+                        <button
+                            onClick={startVoiceSession}
+                            className="absolute bottom-3 right-3 p-1.5 rounded-full bg-gray-100 text-gray-400 hover:text-red-600 hover:bg-gray-200 transition-colors"
+                            title="Nhập bằng giọng nói (Platinum+)"
+                        >
+                            <Mic size={16} />
+                        </button>
                     </div>
                     <div className="grid grid-cols-3 gap-3">
                         <div>
@@ -191,6 +260,14 @@ const TaskCreationModal: React.FC<TaskCreationModalProps> = ({ visible, onClose,
                     </button>
                 </div>
             </div>
+            {/* Voice Modal */}
+            <VoiceRecordingModal
+                isOpen={showVoiceModal}
+                onClose={handleVoiceCancel}
+                onConfirm={handleVoiceConfirm}
+                transcript={tempTranscript}
+                isListening={isListening}
+            />
         </div>
     );
 };

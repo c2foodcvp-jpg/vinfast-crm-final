@@ -6,18 +6,45 @@ import { Customer, CustomerStatus, Interaction, CustomerClassification, UserProf
 import { useAuth } from '../contexts/AuthContext';
 import {
     ArrowLeft, Phone, Edit, MessageCircle, Send, User as UserIcon, Calendar, Flame, Ban, CheckCircle2, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, FileCheck2, Trash2, UserCheck, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, Check, Eye, Share2, Archive, Calculator, Truck,
-    ListTodo, Lock
+    ListTodo, Lock, Mic, MicOff
 } from 'lucide-react';
 import CustomerProgressModal, { DELIVERY_STEPS } from '../components/CustomerProgressModal';
 import TaskCreationModal from '../components/TaskCreationModal';
+import VoiceRecordingModal from '../components/VoiceRecordingModal';
 
 const { useParams, useNavigate, useLocation } = ReactRouterDOM as any;
 
 const CustomerDetail: React.FC = () => {
-    const { id } = useParams();
+    const { id: paramId } = useParams();
     const navigate = useNavigate();
     const location = useLocation();
     const { userProfile, isMod, isAdmin } = useAuth();
+
+    // ID Resolution State (Support UUID or Phone in URL)
+    const [id, setId] = useState<string | undefined>(undefined);
+
+    useEffect(() => {
+        if (!paramId) return;
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(paramId)) {
+            setId(paramId);
+        } else {
+            // Try resolving by Phone
+            (async () => {
+                const { data } = await supabase.from('customers')
+                    .select('id')
+                    .or(`phone.eq.${paramId},secondary_phone.eq.${paramId}`)
+                    .maybeSingle();
+                if (data) setId(data.id);
+                else {
+                    // If fail, maybe redirection logic or 404? 
+                    // For now, let's just stop loading to show "Empty/Error" state if needed, or redirect.
+                    // But simplest is to let 'id' be null and maybe show 'Customer not found'
+                    setId('not-found');
+                }
+            })();
+        }
+    }, [paramId]);
 
     const [customer, setCustomer] = useState<Customer | null>(null);
     const [interactions, setInteractions] = useState<Interaction[]>([]);
@@ -28,7 +55,7 @@ const CustomerDetail: React.FC = () => {
     // Info Editing State
     const [isEditingInfo, setIsEditingInfo] = useState(false);
     const [editForm, setEditForm] = useState({
-        name: '', interest: '', location: '', source: '', phone: '', secondary_phone: ''
+        name: '', interest: '', location: '', source: '', phone: '', secondary_phone: '', email: ''
     });
 
     const [distributors, setDistributors] = useState<Distributor[]>([]);
@@ -41,6 +68,68 @@ const CustomerDetail: React.FC = () => {
     const [isSpecialCare, setIsSpecialCare] = useState(false);
     const [isLongTerm, setIsLongTerm] = useState(false);
 
+    // Voice to Text State & Logic
+    const [showVoiceModal, setShowVoiceModal] = useState(false);
+    const [tempTranscript, setTempTranscript] = useState('');
+    const [isListening, setIsListening] = useState(false);
+    const recognitionRef = useRef<any>(null);
+
+    const startVoiceSession = () => {
+        // PERMISSION CHECK
+        const isPlatinumOrHigher = userProfile?.member_tier === MembershipTier.PLATINUM || userProfile?.member_tier === MembershipTier.DIAMOND || isAdmin || isMod;
+
+        if (!isPlatinumOrHigher) {
+            // Use toast or alert
+            showToast('Tính năng Voice to Text chỉ dành cho thành viên Platinum trở lên!', 'error');
+            // Optionally show upgrade popup if we had one accessible here
+            return;
+        }
+
+        setShowVoiceModal(true);
+        setTempTranscript('');
+
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            showToast('Trình duyệt không hỗ trợ chuyển giọng nói thành văn bản.', 'error');
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'vi-VN';
+        recognition.interimResults = true;
+        recognition.continuous = true;
+
+        recognition.onstart = () => setIsListening(true);
+        recognition.onend = () => setIsListening(false);
+        recognition.onerror = (event: any) => {
+            console.error('Voice Error:', event.error);
+            setIsListening(false);
+        };
+
+        recognition.onresult = (event: any) => {
+            const currentText = Array.from(event.results)
+                .map((r: any) => r[0].transcript)
+                .join('');
+            setTempTranscript(currentText);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+    };
+
+    const handleVoiceConfirm = () => {
+        if (recognitionRef.current) recognitionRef.current.stop();
+        setIsListening(false);
+        setNewNote(prev => (prev ? prev + ' ' : '') + tempTranscript);
+        setShowVoiceModal(false);
+    };
+
+    const handleVoiceCancel = () => {
+        if (recognitionRef.current) recognitionRef.current.stop();
+        setIsListening(false);
+        setShowVoiceModal(false);
+    };
+
     // Delegation State (Renamed to avoid conflict)
     const [dbViewPermission, setDbViewPermission] = useState(false);
 
@@ -50,8 +139,9 @@ const CustomerDetail: React.FC = () => {
     // Initialize from location state if available to ensure context persists on first render
     const [customerListContext, setCustomerListContext] = useState<string[]>(location.state?.customerIds || []);
 
-    // Back navigation path
+    // Back navigation path and state
     const backPath = location.state?.from || '/customers';
+    const calendarTab = location.state?.calendarTab as 'customers' | 'orders' | undefined;
 
     // Modals
     const [showStopModal, setShowStopModal] = useState(false);
@@ -181,6 +271,15 @@ const CustomerDetail: React.FC = () => {
         return () => { window.removeEventListener('keydown', handleKeyDown); };
     }, [prevCustomerId, nextCustomerId, customerListContext, id, navigate, backPath]);
 
+    // Auto-open Stop Modal if navigated with openStopModal state
+    useEffect(() => {
+        if (location.state?.openStopModal && customer) {
+            setShowStopModal(true);
+            // Clear the state so it doesn't re-trigger on refresh
+            window.history.replaceState({ ...location.state, openStopModal: false }, document.title);
+        }
+    }, [location.state?.openStopModal, customer]);
+
     useEffect(() => { if (toast) { const timer = setTimeout(() => setToast(null), 3000); return () => clearTimeout(timer); } }, [toast]);
 
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => setToast({ msg, type });
@@ -259,7 +358,7 @@ const CustomerDetail: React.FC = () => {
             }
 
             setIsSpecialCare(!!data.is_special_care);
-            setEditForm({ name: data.name, interest: data.interest || '', location: data.location || '', source: data.source || '', phone: data.phone || '', secondary_phone: data.secondary_phone || '' });
+            setEditForm({ name: data.name, interest: data.interest || '', location: data.location || '', source: data.source || '', phone: data.phone || '', secondary_phone: data.secondary_phone || '', email: data.email || '' });
 
             const { data: interactionData } = await supabase.from('interactions').select('*').eq('customer_id', id).order('created_at', { ascending: false });
             if (interactionData) setInteractions(interactionData as Interaction[]);
@@ -408,7 +507,7 @@ const CustomerDetail: React.FC = () => {
     const handleSaveInfo = async () => {
         if (customer?.status === CustomerStatus.WON && !isAdmin && !isMod) { showToast("Khách đã chốt không thể sửa thông tin!", 'error'); return; }
         if (!editForm.name.trim()) { showToast("Tên khách hàng không được để trống!", 'error'); return; }
-        await updateCustomerField({ name: editForm.name, interest: editForm.interest, location: editForm.location, source: editForm.source, secondary_phone: editForm.secondary_phone });
+        await updateCustomerField({ name: editForm.name, interest: editForm.interest, location: editForm.location, source: editForm.source, secondary_phone: editForm.secondary_phone, email: editForm.email });
         setIsEditingInfo(false); handleAddNote('note', `Đã cập nhật thông tin khách hàng (Tên mới: ${editForm.name}).`); showToast("Cập nhật thông tin thành công!");
     };
 
@@ -852,7 +951,7 @@ const CustomerDetail: React.FC = () => {
             <div className="flex flex-col gap-3 mb-2">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <button onClick={() => navigate(backPath)} className="p-2 hover:bg-white rounded-full transition-colors text-gray-500"><ArrowLeft size={24} /></button>
+                        <button onClick={() => navigate(backPath, { state: calendarTab ? { tab: calendarTab } : undefined })} className="p-2 hover:bg-white rounded-full transition-colors text-gray-500"><ArrowLeft size={24} /></button>
                     </div>
                     <div className="flex gap-2">
                         <button onClick={() => prevCustomerId && navigate(`/customers/${prevCustomerId}`, { state: { customerIds: customerListContext, from: backPath } })} disabled={!prevCustomerId} className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-bold text-gray-600 disabled:opacity-50 hover:bg-gray-50 flex items-center gap-1 group">
@@ -886,7 +985,7 @@ const CustomerDetail: React.FC = () => {
                         )}
 
                         {/* NEW: Quote Button */}
-                        <button onClick={() => navigate(`/quote?fromCustomer=${id}`)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><Calculator size={16} /> Báo giá</button>
+                        <button onClick={() => navigate(`/quote?fromCustomer=${id}&customerName=${encodeURIComponent(customer?.name || '')}&customerEmail=${encodeURIComponent(customer?.email || '')}`)} className="px-3 py-2 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2"><Calculator size={16} /> Báo giá</button>
 
                         {/* NEW: Delivery Progress Button - Hide if Completed */}
                         {/* NEW: Delivery Progress Button - Hide if Completed/Refunded/Suspended */}
@@ -1039,8 +1138,17 @@ const CustomerDetail: React.FC = () => {
                     )}
                     {/* ... Customer Info & Finance Panels ... */}
                     <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 relative">
-                        <h3 className="font-bold text-gray-900 mb-4 border-b pb-2 flex justify-between items-center">Thông tin khách hàng{!isEditingInfo && !isWon && !isLost && !isDelegatedViewOnly && (<button onClick={() => setIsEditingInfo(true)} className="text-primary-600 hover:text-primary-700 text-xs flex items-center gap-1 font-bold"><Edit size={14} /> Sửa</button>)}</h3>
-                        {isEditingInfo && !isWon && !isLost ? (<div className="space-y-3 animate-fade-in"><input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none focus:border-primary-500" placeholder="Tên khách hàng..." /><input value={editForm.phone} disabled className="w-full border rounded px-2 py-1 text-sm font-bold bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" /><input value={editForm.secondary_phone} onChange={e => setEditForm({ ...editForm, secondary_phone: e.target.value })} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập thêm số..." /><select value={editForm.interest} onChange={e => setEditForm({ ...editForm, interest: e.target.value })} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none"><option value="">-- Chọn dòng xe --</option>{carList.map(m => <option key={m} value={m}>{m}</option>)}</select><input value={editForm.source} onChange={e => setEditForm({ ...editForm, source: e.target.value })} disabled={editForm.source.includes('MKT Group') && !isAdmin && !isMod} className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold outline-none ${(editForm.source.includes('MKT Group') && !isAdmin && !isMod) ? 'bg-gray-100' : 'bg-white'}`} /><input value={editForm.location} onChange={e => setEditForm({ ...editForm, location: e.target.value })} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập địa chỉ..." /><div className="flex gap-2 pt-2"><button type="button" onClick={() => setIsEditingInfo(false)} className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded">Hủy</button><button onClick={handleSaveInfo} className="flex-1 py-1.5 bg-primary-600 text-white text-xs font-bold rounded flex items-center justify-center gap-1"><Save size={14} /> Lưu</button></div></div>) : (<div className="space-y-4 text-sm"><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Điện thoại</span><span className="font-bold text-gray-900">{customer.phone}</span></div>{customer.secondary_phone && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">SĐT Phụ</span><span className="font-bold text-gray-900">{customer.secondary_phone}</span></div>}
+                        <h3 className="font-bold text-gray-900 mb-4 border-b pb-2 flex justify-between items-center">
+                            Thông tin khách hàng
+                            {!isEditingInfo && !isLost && !isDelegatedViewOnly && (
+                                !isWon ? (
+                                    <button onClick={() => setIsEditingInfo(true)} className="text-primary-600 hover:text-primary-700 text-xs flex items-center gap-1 font-bold"><Edit size={14} /> Sửa</button>
+                                ) : (
+                                    <button onClick={() => setIsEditingInfo(true)} className="text-blue-600 hover:text-blue-700 text-xs flex items-center gap-1 font-bold bg-blue-50 px-2 py-1 rounded-lg border border-blue-100"><Edit size={14} /> Bổ sung TT</button>
+                                )
+                            )}
+                        </h3>
+                        {isEditingInfo && !isLost ? (<div className="space-y-3 animate-fade-in"><input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none focus:border-primary-500" placeholder="Tên khách hàng..." /><input value={editForm.phone} disabled className="w-full border rounded px-2 py-1 text-sm font-bold bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" /><input value={editForm.secondary_phone} onChange={e => setEditForm({ ...editForm, secondary_phone: e.target.value })} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập thêm số..." /><input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Email khách hàng..." /><select value={editForm.interest} onChange={e => setEditForm({ ...editForm, interest: e.target.value })} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none"><option value="">-- Chọn dòng xe --</option>{carList.map(m => <option key={m} value={m}>{m}</option>)}</select><input value={editForm.source} onChange={e => setEditForm({ ...editForm, source: e.target.value })} disabled={editForm.source.includes('MKT Group') && !isAdmin && !isMod} className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold outline-none ${(editForm.source.includes('MKT Group') && !isAdmin && !isMod) ? 'bg-gray-100' : 'bg-white'}`} /><input value={editForm.location} onChange={e => setEditForm({ ...editForm, location: e.target.value })} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-bold bg-white text-gray-900 outline-none" placeholder="Nhập địa chỉ..." /><div className="flex gap-2 pt-2"><button type="button" onClick={() => setIsEditingInfo(false)} className="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded">Hủy</button><button onClick={handleSaveInfo} className="flex-1 py-1.5 bg-primary-600 text-white text-xs font-bold rounded flex items-center justify-center gap-1"><Save size={14} /> Lưu</button></div></div>) : (<div className="space-y-4 text-sm"><div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Điện thoại</span><span className="font-bold text-gray-900">{customer.phone}</span></div>{customer.secondary_phone && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">SĐT Phụ</span><span className="font-bold text-gray-900">{customer.secondary_phone}</span></div>}{customer.email && <div className="flex justify-between border-b border-gray-50 pb-2"><span className="text-gray-500">Email</span><span className="font-bold text-gray-900">{customer.email}</span></div>}
                             <div className="flex gap-2 mb-2">
                                 <a href={`tel:${customer.phone}`} onClick={() => handleTrackAction('call', 'Đã thực hiện cuộc gọi đi.')} className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 shadow-sm transition-colors cursor-pointer">
                                     <Phone size={14} /> Gọi điện
@@ -1139,10 +1247,18 @@ const CustomerDetail: React.FC = () => {
                                 <span className="flex items-center gap-1"><MessageCircle size={12} /> {messageCount}</span>
                             </div>
                         </div>
-                        {!isLost && (!isDelegatedViewOnly || isAssignedRep) && (<div className="p-4 border-b border-gray-100 bg-white"><div className="flex gap-4"><div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 font-bold shrink-0"><UserIcon size={20} /></div><div className="flex-1"><textarea className="w-full border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary-100 focus:border-primary-500 outline-none resize-none bg-gray-50 text-gray-900 font-medium" rows={3} placeholder="Ghi chú..." value={newNote} onChange={(e) => setNewNote(e.target.value)}></textarea><div className="flex justify-end mt-2"><button onClick={() => handleAddNote('note')} disabled={!newNote.trim()} className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-black disabled:opacity-50 transition-colors"><Send size={14} /> Lưu</button></div></div></div></div>)}<div className="p-6 bg-gray-50 min-h-[400px] max-h-[600px] overflow-y-auto"><div className="space-y-6 relative before:absolute before:left-5 before:top-2 before:bottom-0 before:w-0.5 before:bg-gray-200">{interactions.map((item) => (<div key={item.id} className="relative pl-12 animate-fade-in"><div className={`absolute left-0 top-0 w-10 h-10 rounded-full border-4 border-gray-50 flex items-center justify-center z-10 ${item.type === 'call' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{item.type === 'call' ? <Phone size={16} /> : <MessageCircle size={16} />}</div><div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm"><div className="flex justify-between items-start mb-2"><span className="font-bold text-gray-900 text-sm">{item.type === 'call' ? 'Cuộc gọi đi' : item.type === 'zalo' ? 'Chat Zalo' : 'Ghi chú'}</span><span className="text-xs text-gray-500 font-medium">{new Date(item.created_at).toLocaleString('vi-VN')}</span></div><p className="text-gray-900 text-sm leading-relaxed">{item.content}</p></div></div>))}</div></div>
+                        {!isLost && (!isDelegatedViewOnly || isAssignedRep) && (<div className="p-4 border-b border-gray-100 bg-white"><div className="flex gap-4"><div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 font-bold shrink-0"><UserIcon size={20} /></div><div className="flex-1"><textarea className="w-full border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary-100 focus:border-primary-500 outline-none resize-none bg-gray-50 text-gray-900 font-medium" rows={3} placeholder="Ghi chú..." value={newNote} onChange={(e) => setNewNote(e.target.value)}></textarea><div className="flex justify-end mt-2 gap-2"><button onClick={startVoiceSession} className="p-2 rounded-lg transition-colors flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-red-600" title="Nhập bằng giọng nói"><Mic size={18} /></button><button onClick={() => handleAddNote('note')} disabled={!newNote.trim()} className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-black disabled:opacity-50 transition-colors"><Send size={14} /> Lưu</button></div></div></div></div>)}<div className="p-6 bg-gray-50 min-h-[400px] max-h-[600px] overflow-y-auto"><div className="space-y-6 relative before:absolute before:left-5 before:top-2 before:bottom-0 before:w-0.5 before:bg-gray-200">{interactions.map((item) => (<div key={item.id} className="relative pl-12 animate-fade-in"><div className={`absolute left-0 top-0 w-10 h-10 rounded-full border-4 border-gray-50 flex items-center justify-center z-10 ${item.type === 'call' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>{item.type === 'call' ? <Phone size={16} /> : <MessageCircle size={16} />}</div><div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm"><div className="flex justify-between items-start mb-2"><span className="font-bold text-gray-900 text-sm">{item.type === 'call' ? 'Cuộc gọi đi' : item.type === 'zalo' ? 'Chat Zalo' : 'Ghi chú'}</span><span className="text-xs text-gray-500 font-medium">{new Date(item.created_at).toLocaleString('vi-VN')}</span></div><p className="text-gray-900 text-sm leading-relaxed">{item.content}</p></div></div>))}</div></div>
                     </div>
                 </div>
             </div>
+
+            <VoiceRecordingModal
+                isOpen={showVoiceModal}
+                onClose={handleVoiceCancel} // Cancel logic
+                onConfirm={handleVoiceConfirm}
+                transcript={tempTranscript}
+                isListening={isListening}
+            />
 
             {/* ... Modals ... */}
             {

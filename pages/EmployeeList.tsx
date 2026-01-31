@@ -1,12 +1,15 @@
 
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { UserProfile, UserRole, AccessDelegation } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { CheckCircle, XCircle, Search, Shield, User, Edit2, Save, X, AlertTriangle, ShieldCheck, Users, Copy, Terminal, Trash2, Clock, LogOut, ArrowRightLeft, Share2, Database, Eye, Lock, UserMinus, Key, RotateCcw } from 'lucide-react';
+import { CheckCircle, XCircle, Search, Shield, User, Edit2, Save, X, AlertTriangle, ShieldCheck, Users, Copy, Terminal, Trash2, Clock, LogOut, ArrowRightLeft, Share2, Database, Eye, Lock, UserMinus, Key, RotateCcw, ExternalLink } from 'lucide-react';
+import UserStatusIndicator from '../components/UserStatusIndicator';
 
 const EmployeeList: React.FC = () => {
     const { userProfile } = useAuth();
+    const navigate = useNavigate();
     const [employees, setEmployees] = useState<UserProfile[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'all' | 'pending'>('pending');
@@ -450,52 +453,69 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
                             {filteredEmployees.length === 0 ? (
                                 <tr><td colSpan={4} className="p-12 text-center text-gray-500">Không có dữ liệu.</td></tr>
                             ) : (
-                                filteredEmployees.map(emp => (
-                                    <tr key={emp.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="h-10 w-10 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-500 font-bold overflow-hidden">{emp.avatar_url ? (<img src={emp.avatar_url} alt="" className="w-full h-full object-cover" />) : (emp.full_name?.charAt(0).toUpperCase())}</div>
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="font-semibold text-gray-900 cursor-pointer hover:text-primary-600" onClick={() => (isAdmin || isMod) && emp.status === 'active' && window.location.assign('#/employees/' + emp.id)}>{emp.full_name}</p>
-                                                        {emp.is_part_time && (<span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[9px] font-bold rounded uppercase border border-orange-200">Part-time</span>)}
-                                                        {/* Permission Icons */}
-                                                        {(emp.is_locked_add || emp.is_locked_view) && <div className="flex gap-1 ml-1" title="Bị hạn chế quyền"><Lock size={12} className="text-red-500" /></div>}
+                                filteredEmployees.map(emp => {
+                                    const canViewDetail = (isAdmin || isMod) && emp.status === 'active';
+                                    return (
+                                        <tr
+                                            key={emp.id}
+                                            className={`group transition-colors ${canViewDetail ? 'hover:bg-primary-50 cursor-pointer' : 'hover:bg-gray-50'}`}
+                                            onClick={() => canViewDetail && navigate(`/employees/${emp.id}`)}
+                                        >
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="relative">
+                                                        <div className={`h-10 w-10 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-500 font-bold overflow-hidden transition-all ${canViewDetail ? 'group-hover:border-primary-400 group-hover:ring-2 group-hover:ring-primary-100' : ''}`}>{emp.avatar_url ? (<img src={emp.avatar_url} alt="" className="w-full h-full object-cover" />) : (emp.full_name?.charAt(0).toUpperCase())}</div>
+                                                        <div className="absolute -bottom-0.5 -right-0.5 bg-white rounded-full p-[1.5px]">
+                                                            <UserStatusIndicator userId={emp.id} />
+                                                        </div>
                                                     </div>
-                                                    <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${emp.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : emp.status === 'blocked' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{emp.status}</span>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <p className={`font-semibold text-gray-900 transition-colors ${canViewDetail ? 'group-hover:text-primary-600' : ''}`}>{emp.full_name}</p>
+                                                            {canViewDetail && <ExternalLink size={14} className="text-gray-400 group-hover:text-primary-500 transition-colors opacity-0 group-hover:opacity-100" />}
+                                                            {emp.is_part_time && (<span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[9px] font-bold rounded uppercase border border-orange-200">Part-time</span>)}
+                                                            {/* Permission Icons */}
+                                                            {(emp.is_locked_add || emp.is_locked_view) && <div className="flex gap-1 ml-1" title="Bị hạn chế quyền"><Lock size={12} className="text-red-500" /></div>}
+                                                        </div>
+                                                        <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${emp.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : emp.status === 'blocked' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{emp.status}</span>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-sm"><p className="text-gray-900 font-medium">{emp.phone}</p><p className="text-gray-500">{emp.email}</p></td>
-                                        <td className="px-6 py-4">
-                                            {isAdmin && editingId === emp.id ? (
-                                                <div className="flex flex-col gap-2 bg-white border border-primary-300 rounded-lg p-2 shadow-sm min-w-[200px]">
-                                                    <div className="flex items-center gap-2"><select value={tempRole} onChange={(e) => setTempRole(e.target.value as UserRole)} className="text-sm border rounded px-1 py-1 w-full bg-white outline-none focus:ring-1 focus:ring-primary-500"><option value={UserRole.EMPLOYEE}>Nhân viên</option><option value={UserRole.MOD}>Quản lý (MOD)</option><option value={UserRole.ADMIN}>Admin</option></select></div>
-                                                    {tempRole === UserRole.EMPLOYEE && (<><select value={tempManagerId} onChange={(e) => setTempManagerId(e.target.value)} className="text-xs border rounded px-1 py-1 w-full bg-white outline-none text-gray-700"><option value="">-- Chọn quản lý --</option>{employees.filter(m => (m.role === 'admin' || m.role === 'mod') && m.id !== emp.id).map(m => (<option key={m.id} value={m.id}>{m.full_name}</option>))}</select><div className="flex items-center gap-2 mt-1"><input type="checkbox" id={`parttime-${emp.id}`} checked={tempIsPartTime} onChange={e => setTempIsPartTime(e.target.checked)} className="rounded text-orange-600 focus:ring-orange-500" /><label htmlFor={`parttime-${emp.id}`} className="text-xs font-bold text-orange-700">Part-time</label></div></>)}
-                                                    <div className="flex justify-end gap-2 mt-1"><button onClick={() => saveRole(emp.id)} className="text-green-600 hover:bg-green-50 p-1 rounded-md transition-colors bg-green-50"><Save size={16} /></button><button onClick={() => setEditingId(null)} className="text-gray-400 hover:bg-gray-100 p-1 rounded-md transition-colors bg-gray-50"><X size={16} /></button></div>
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-1"><div className="flex items-center gap-2"><span className={`inline-flex items-center gap-1.5 text-sm font-medium px-2.5 py-1 rounded-md border ${emp.role === UserRole.ADMIN ? 'bg-red-50 text-red-700 border-red-100' : emp.role === UserRole.MOD ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-gray-50 text-gray-700 border-gray-200'}`}>{emp.role === UserRole.ADMIN && <Shield size={12} />}{emp.role === UserRole.MOD ? 'Quản lý' : emp.role === UserRole.ADMIN ? 'Admin' : 'Sales'}</span>{isAdmin && emp.status === 'active' && (<button onClick={() => startEditRole(emp)} className="text-gray-400 hover:text-primary-600 p-1 rounded hover:bg-gray-100 transition-colors"><Edit2 size={14} /></button>)}</div>{emp.manager_id && emp.role === UserRole.EMPLOYEE && (<div className="flex items-center gap-1 text-xs text-gray-500"><Users size={12} className="text-gray-400" /> Quản lý bởi: <span className="font-semibold text-gray-700">{getManagerName(emp.manager_id)}</span></div>)}</div>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            {emp.status === 'pending' && (isAdmin || isMod) ? (<div className="flex justify-end gap-2"><button onClick={() => openApprovalModal(emp)} className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 shadow-md shadow-green-200 transition-all active:scale-95"><CheckCircle size={14} /> Duyệt</button><button onClick={() => handleReject(emp.id)} className="flex items-center gap-1 px-3 py-1.5 bg-white text-red-600 border border-red-200 rounded-lg text-xs font-bold hover:bg-red-50 transition-all active:scale-95"><XCircle size={14} /> Từ chối</button></div>) :
-                                                (isAdmin || isMod) && emp.status === 'active' ? (
-                                                    <div className="flex justify-end gap-2">
-                                                        <button onClick={() => openPermissionModal(emp)} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Cấu hình Quyền hạn (Khóa/Mở)"><Key size={18} /></button>
-                                                        <button onClick={() => handleTerminateContract(emp)} className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Chấm dứt Hợp đồng"><UserMinus size={18} /></button>
-                                                        {isAdmin && <button onClick={() => handleDeleteUser(emp.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Xóa Vĩnh viễn"><Trash2 size={18} /></button>}
+                                            </td>
+                                            <td className="px-6 py-4 text-sm"><p className="text-gray-900 font-medium">{emp.phone}</p><p className="text-gray-500">{emp.email}</p></td>
+                                            <td className="px-6 py-4">
+                                                {isAdmin && editingId === emp.id ? (
+                                                    <div className="flex flex-col gap-2 bg-white border border-primary-300 rounded-lg p-2 shadow-sm min-w-[200px]">
+                                                        <div className="flex items-center gap-2"><select value={tempRole} onChange={(e) => setTempRole(e.target.value as UserRole)} className="text-sm border rounded px-1 py-1 w-full bg-white outline-none focus:ring-1 focus:ring-primary-500"><option value={UserRole.EMPLOYEE}>Nhân viên</option><option value={UserRole.MOD}>Quản lý (MOD)</option><option value={UserRole.ADMIN}>Admin</option></select></div>
+                                                        {tempRole === UserRole.EMPLOYEE && (<><select value={tempManagerId} onChange={(e) => setTempManagerId(e.target.value)} className="text-xs border rounded px-1 py-1 w-full bg-white outline-none text-gray-700"><option value="">-- Chọn quản lý --</option>{employees.filter(m => (m.role === 'admin' || m.role === 'mod') && m.id !== emp.id).map(m => (<option key={m.id} value={m.id}>{m.full_name}</option>))}</select><div className="flex items-center gap-2 mt-1"><input type="checkbox" id={`parttime-${emp.id}`} checked={tempIsPartTime} onChange={e => setTempIsPartTime(e.target.checked)} className="rounded text-orange-600 focus:ring-orange-500" /><label htmlFor={`parttime-${emp.id}`} className="text-xs font-bold text-orange-700">Part-time</label></div></>)}
+                                                        <div className="flex justify-end gap-2 mt-1"><button onClick={() => saveRole(emp.id)} className="text-green-600 hover:bg-green-50 p-1 rounded-md transition-colors bg-green-50"><Save size={16} /></button><button onClick={() => setEditingId(null)} className="text-gray-400 hover:bg-gray-100 p-1 rounded-md transition-colors bg-gray-50"><X size={16} /></button></div>
                                                     </div>
-                                                ) : (isAdmin && emp.status === 'blocked') ? (
-                                                    <div className="flex justify-end gap-2">
-                                                        <button onClick={() => handleReactivate(emp)} className="p-2 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Mở lại Hợp đồng"><RotateCcw size={18} /></button>
-                                                        <button onClick={() => handleDeleteUser(emp.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Xóa Vĩnh viễn"><Trash2 size={18} /></button>
-                                                    </div>
-                                                ) : null
-                                            }
-                                        </td>
-                                    </tr>
-                                ))
+                                                ) : (
+                                                    <div className="space-y-1"><div className="flex items-center gap-2"><span className={`inline-flex items-center gap-1.5 text-sm font-medium px-2.5 py-1 rounded-md border ${emp.role === UserRole.ADMIN ? 'bg-red-50 text-red-700 border-red-100' : emp.role === UserRole.MOD ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-gray-50 text-gray-700 border-gray-200'}`}>{emp.role === UserRole.ADMIN && <Shield size={12} />}{emp.role === UserRole.MOD ? 'Quản lý' : emp.role === UserRole.ADMIN ? 'Admin' : 'Sales'}</span>{isAdmin && emp.status === 'active' && (<button onClick={() => startEditRole(emp)} className="text-gray-400 hover:text-primary-600 p-1 rounded hover:bg-gray-100 transition-colors"><Edit2 size={14} /></button>)}</div>{emp.manager_id && emp.role === UserRole.EMPLOYEE && (<div className="flex items-center gap-1 text-xs text-gray-500"><Users size={12} className="text-gray-400" /> Quản lý bởi: <span className="font-semibold text-gray-700">{getManagerName(emp.manager_id)}</span></div>)}</div>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                                                {emp.status === 'pending' && (isAdmin || isMod) ? (<div className="flex justify-end gap-2"><button onClick={() => openApprovalModal(emp)} className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 shadow-md shadow-green-200 transition-all active:scale-95"><CheckCircle size={14} /> Duyệt</button><button onClick={() => handleReject(emp.id)} className="flex items-center gap-1 px-3 py-1.5 bg-white text-red-600 border border-red-200 rounded-lg text-xs font-bold hover:bg-red-50 transition-all active:scale-95"><XCircle size={14} /> Từ chối</button></div>) :
+                                                    (isAdmin || isMod) && emp.status === 'active' ? (
+                                                        <div className="flex justify-end gap-2">
+                                                            {(isAdmin || emp.role !== UserRole.ADMIN) && (
+                                                                <>
+                                                                    <button onClick={() => openPermissionModal(emp)} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Cấu hình Quyền hạn (Khóa/Mở)"><Key size={18} /></button>
+                                                                    <button onClick={() => handleTerminateContract(emp)} className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Chấm dứt Hợp đồng"><UserMinus size={18} /></button>
+                                                                </>
+                                                            )}
+                                                            {isAdmin && <button onClick={() => handleDeleteUser(emp.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Xóa Vĩnh viễn"><Trash2 size={18} /></button>}
+                                                        </div>
+                                                    ) : (isAdmin && emp.status === 'blocked') ? (
+                                                        <div className="flex justify-end gap-2">
+                                                            <button onClick={() => handleReactivate(emp)} className="p-2 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Mở lại Hợp đồng"><RotateCcw size={18} /></button>
+                                                            <button onClick={() => handleDeleteUser(emp.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Xóa Vĩnh viễn"><Trash2 size={18} /></button>
+                                                        </div>
+                                                    ) : null
+                                                }
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>

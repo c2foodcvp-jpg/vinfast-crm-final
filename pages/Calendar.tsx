@@ -1,15 +1,18 @@
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { Customer, CustomerStatus, MembershipTier } from '../types';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
     Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2, Phone, User, Clock,
     Plus, CheckCircle2, Flame, AlertCircle, X,
     AlertTriangle, Timer, ListTodo, Flag, Activity, Calendar, Star, Bell, BellRing,
-    Users, UserCircle, Lock, LayoutList, CheckSquare, Banknote, PauseCircle
+    Users, UserCircle, Lock, LayoutList, CheckSquare, Banknote, PauseCircle, ExternalLink, Mic
 } from 'lucide-react';
+import QuickInteractionModal from '../components/QuickInteractionModal';
+import CustomerProgressModal, { DELIVERY_STEPS } from '../components/CustomerProgressModal';
+import VoiceRecordingModal from '../components/VoiceRecordingModal';
 
 // Task interface
 interface UserTask {
@@ -37,6 +40,17 @@ const PRIORITY_CONFIG = {
 const CalendarPage: React.FC = () => {
     const { userProfile, isAdmin, isMod, refreshProfile } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
+
+    // Check if returning from CustomerDetail with a specific tab
+    useEffect(() => {
+        const tabFromState = (location.state as any)?.tab as 'customers' | 'orders' | undefined;
+        if (tabFromState) {
+            setActiveMainTab(tabFromState);
+            // Clear the state so it doesn't persist on refresh
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state]);
 
     const [loading, setLoading] = useState(true);
     const [customers, setCustomers] = useState<Customer[]>([]);
@@ -64,6 +78,74 @@ const CalendarPage: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [customerSearch, setCustomerSearch] = useState('');
     const [selectedCustomerName, setSelectedCustomerName] = useState('');
+
+    // Voice to Text
+    const [showVoiceModal, setShowVoiceModal] = useState(false);
+    const [tempTranscript, setTempTranscript] = useState('');
+    const [isListening, setIsListening] = useState(false);
+    const recognitionRef = useRef<any>(null);
+
+    const startVoiceSession = () => {
+        const isPlatinumOrHigher = userProfile?.member_tier === MembershipTier.PLATINUM ||
+            userProfile?.member_tier === MembershipTier.DIAMOND ||
+            isAdmin || isMod;
+
+        if (!isPlatinumOrHigher) {
+            alert('Tính năng Voice to Text chỉ dành cho thành viên Platinum trở lên!');
+            return;
+        }
+
+        setShowVoiceModal(true);
+        setTempTranscript('');
+
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert('Trình duyệt không hỗ trợ chuyển giọng nói thành văn bản.');
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'vi-VN';
+        recognition.interimResults = true;
+        recognition.continuous = true;
+
+        recognition.onstart = () => setIsListening(true);
+        recognition.onend = () => setIsListening(false);
+        recognition.onerror = (event: any) => {
+            console.error('Lỗi voice:', event.error);
+            setIsListening(false);
+        };
+        recognition.onresult = (event: any) => {
+            const currentText = Array.from(event.results)
+                .map((r: any) => r[0].transcript)
+                .join('');
+            setTempTranscript(currentText);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+    };
+
+    const handleVoiceConfirm = () => {
+        if (recognitionRef.current) recognitionRef.current.stop();
+        setIsListening(false);
+        setTaskForm(prev => ({ ...prev, content: (prev.content ? prev.content + ' ' : '') + tempTranscript }));
+        setShowVoiceModal(false);
+    };
+
+    const handleVoiceCancel = () => {
+        if (recognitionRef.current) recognitionRef.current.stop();
+        setIsListening(false);
+        setShowVoiceModal(false);
+    };
+
+    // Quick Interaction Modal State
+    const [selectedCustomerForQuick, setSelectedCustomerForQuick] = useState<Customer | null>(null);
+    const [showQuickModal, setShowQuickModal] = useState(false);
+
+    // Progress Modal State (For Orders Tab)
+    const [showProgressModal, setShowProgressModal] = useState(false);
+    const [selectedCustomerForProgress, setSelectedCustomerForProgress] = useState<Customer | null>(null);
 
     // UI Logic States
     const [activeMainTab, setActiveMainTab] = useState<'customers' | 'orders'>('customers');
@@ -149,13 +231,20 @@ const CalendarPage: React.FC = () => {
         }
     };
 
+    const handleCloseQuickInteraction = React.useCallback(() => {
+        setShowQuickModal(false);
+        setSelectedCustomerForQuick(null);
+    }, []);
+
+
+
     useEffect(() => {
         fetchData();
     }, [userProfile]);
 
-    const fetchData = async (consultantModeOverride?: boolean) => {
+    const fetchData = async (silent: boolean = false, consultantModeOverride?: boolean) => {
         if (!userProfile) return;
-        setLoading(true);
+        if (!silent) setLoading(true); // Only show spinner on full load
         try {
             // Determine if consultant mode should be used
             const useConsultantMode = consultantModeOverride !== undefined
@@ -181,7 +270,7 @@ const CalendarPage: React.FC = () => {
             // to allow showing Deals/Orders that might be WON or missing recare date
             let query = supabase
                 .from('customers')
-                .select('id, name, phone, status, recare_date, interest, classification, sales_rep, creator_id, created_at, is_special_care, is_long_term, deal_status')
+                .select('id, name, phone, status, recare_date, interest, classification, sales_rep, creator_id, created_at, is_special_care, is_long_term, deal_status, deal_details, delivery_progress, won_at')
                 .neq('status', CustomerStatus.LOST);
 
             if (!isAdmin) {
@@ -190,7 +279,16 @@ const CalendarPage: React.FC = () => {
             }
 
             const { data: customerData } = await query;
-            setCustomers(customerData as Customer[] || []);
+            const fetchedCustomers = customerData as Customer[] || [];
+            setCustomers(fetchedCustomers);
+
+            // Sync selectedCustomerForProgress with fresh data if it exists
+            if (activeMainTab === 'orders' && selectedCustomerForProgress) {
+                const updatedSelected = fetchedCustomers.find(c => c.id === selectedCustomerForProgress.id);
+                if (updatedSelected) {
+                    setSelectedCustomerForProgress(updatedSelected);
+                }
+            }
 
             // --- Fetch User Tasks ---
             const { data: taskData } = await supabase
@@ -209,12 +307,12 @@ const CalendarPage: React.FC = () => {
         } catch (e) {
             console.error("Error fetching data", e);
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     };
 
     // Helper for toggling mode
-    const fetchDataWithMode = (mode: boolean) => fetchData(mode);
+    const fetchDataWithMode = (mode: boolean) => fetchData(false, mode);
 
     // --- Computed Customer Lists ---
     // CS Đặc biệt - khách có is_special_care = true
@@ -481,69 +579,99 @@ const CalendarPage: React.FC = () => {
     };
 
     // --- Customer Card Component ---
-    const CustomerCard = ({ customer, isOverdue = false, contextIds = [] }: { customer: Customer; isOverdue?: boolean; contextIds?: string[] }) => (
-        <div
-            onClick={() => navigate(`/customers/${customer.id}`, { state: { from: '/calendar', customerIds: contextIds } })}
-            className={`rounded-xl border transition-all cursor-pointer group relative bg-white overflow-hidden mt-1
+    const CustomerCard = ({ customer, isOverdue = false, contextIds = [], onClick }: { customer: Customer; isOverdue?: boolean; contextIds?: string[]; onClick?: (c: Customer) => void }) => {
+        // Calculate Progress Percentage
+        const progressPercent = useMemo(() => {
+            if (customer.status !== CustomerStatus.WON) return 0;
+            const steps = DELIVERY_STEPS.filter(step => !step.condition || step.condition(customer));
+            if (steps.length === 0) return 0;
+            const completed = steps.filter(s => customer.delivery_progress?.[s.key]?.completed).length;
+            return (completed / steps.length) * 100;
+        }, [customer]);
+
+        return (
+            <div
+                onClick={() => {
+                    if (onClick) {
+                        onClick(customer);
+                    } else {
+                        setSelectedCustomerForQuick(customer);
+                        setShowQuickModal(true);
+                    }
+                }}
+                className={`rounded-xl border transition-all cursor-pointer group relative bg-white overflow-hidden mt-1
                 ${isOverdue
-                    ? 'border-l-4 border-l-red-500 border-y border-r border-gray-100 shadow-[0_2px_8px_rgba(239,68,68,0.05)] hover:shadow-md'
-                    : 'border-l-4 border-l-transparent border-y border-r border-gray-100 hover:border-l-blue-500 hover:shadow-md'
-                }`}
-        >
-            {/* Mini Progress Bar */}
-            {customer.status === CustomerStatus.WON && (
-                <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-100 z-10">
-                    <div
-                        className="h-full bg-green-500 rounded-r-full transition-all duration-500"
-                        style={{ width: `${((['deposited', 'contract_signed', 'procedure_complete', 'money_received', 'delivery_scheduled', 'delivery_complete'].indexOf(customer.deal_status || '') + 1) / 6) * 100}%` }}
-                    />
-                </div>
-            )}
-
-            <div className={`p-4 ${customer.status === CustomerStatus.WON ? 'pt-5' : ''}`}>
-                <div className="flex justify-between items-start mb-2.5">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                        {customer.classification === 'Hot' && <div className="p-1 bg-red-100 rounded-full shrink-0"><Flame size={12} className="text-red-600 fill-red-600" /></div>}
-                        <h4 className="font-bold text-gray-800 text-sm group-hover:text-primary-700 truncate">{customer.name}</h4>
+                        ? 'border-l-4 border-l-red-500 border-y border-r border-gray-100 shadow-[0_2px_8px_rgba(239,68,68,0.05)] hover:shadow-md'
+                        : 'border-l-4 border-l-transparent border-y border-r border-gray-100 hover:border-l-blue-500 hover:shadow-md'
+                    }`}
+            >
+                {/* Mini Progress Bar */}
+                {customer.status === CustomerStatus.WON && (
+                    <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-100 z-10">
+                        <div
+                            className="h-full bg-green-500 rounded-r-full transition-all duration-500"
+                            style={{ width: `${progressPercent}%` }}
+                        />
                     </div>
-                    {getCustomerStatusDisplay(customer)}
-                </div>
+                )}
 
-                <div className="flex items-center gap-3 mb-1">
-                    <div className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-md">
-                        <Phone size={10} className="text-gray-400" />
-                        <span className="font-medium">{customer.phone}</span>
+                <div className={`p-4 ${customer.status === CustomerStatus.WON ? 'pt-5' : ''}`}>
+                    <div className="flex justify-between items-start mb-2.5">
+                        <div className="flex items-center gap-2 overflow-hidden flex-1">
+                            {customer.classification === 'Hot' && <div className="p-1 bg-red-100 rounded-full shrink-0"><Flame size={12} className="text-red-600 fill-red-600" /></div>}
+                            <h4 className="font-bold text-gray-800 text-sm group-hover:text-primary-700 truncate">{customer.name}</h4>
+                        </div>
+                        {getCustomerStatusDisplay(customer)}
                     </div>
-                    {customer.interest && (
-                        <span className="text-[10px] font-bold text-gray-500 uppercase bg-gray-50 px-2 py-1 rounded-md border border-gray-100">{customer.interest}</span>
-                    )}
-                </div>
 
-                {/* Quick Note Button - Subtle */}
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (!canCreateTask) {
-                            alert('🔒 Tính năng này chỉ dành cho thành viên Gold trở lên!');
-                            return;
-                        }
-                        setTaskForm(prev => ({
-                            ...prev,
-                            title: `Ghi chú: ${customer.name}`,
-                            applyToCustomer: true,
-                            customer_id: customer.id
-                        }));
-                        setSelectedCustomerName(`${customer.name} - ${customer.phone}`);
-                        setShowTaskModal(true);
-                    }}
-                    className="absolute bottom-2 right-2 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-md hover:shadow-lg transition-all z-10 opacity-90 hover:opacity-100"
-                    title="Thêm ghi chú nhanh"
-                >
-                    <Plus size={14} />
-                </button>
+                    <div className="flex items-center gap-3 mb-1">
+                        <div className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-md">
+                            <Phone size={10} className="text-gray-400" />
+                            <span className="font-medium">{customer.phone}</span>
+                        </div>
+                        {customer.interest && (
+                            <span className="text-[10px] font-bold text-gray-500 uppercase bg-gray-50 px-2 py-1 rounded-md border border-gray-100">{customer.interest}</span>
+                        )}
+                    </div>
+
+                    {/* Quick Actions Overlay on Hover */}
+                    <div className="absolute bottom-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/customers/${customer.id}`, { state: { from: '/calendar', customerIds: contextIds } });
+                            }}
+                            className="p-2 bg-gray-100 hover:bg-white text-gray-600 rounded-full shadow-sm border border-gray-200 hover:border-blue-200 hover:text-blue-600 transition-all"
+                            title="Xem chi tiết (Trang riêng)"
+                        >
+                            <ExternalLink size={14} />
+                        </button>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (!canCreateTask) {
+                                    alert('🔒 Tính năng này chỉ dành cho thành viên Gold trở lên!');
+                                    return;
+                                }
+                                setTaskForm(prev => ({
+                                    ...prev,
+                                    title: `Ghi chú: ${customer.name}`,
+                                    applyToCustomer: true,
+                                    customer_id: customer.id
+                                }));
+                                setSelectedCustomerName(`${customer.name} - ${customer.phone}`);
+                                setShowTaskModal(true);
+                            }}
+                            className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-md hover:shadow-lg transition-all"
+                            title="Tạo lịch nhắc hẹn"
+                        >
+                            <Plus size={14} />
+                        </button>
+                    </div>
+                </div>
             </div>
-        </div>
-    );
+        );
+    };
 
     // --- Task Card Component ---
     const TaskCard = ({ task }: { task: UserTask }) => {
@@ -618,13 +746,14 @@ const CalendarPage: React.FC = () => {
         green: { bg: 'bg-green-50/30', border: 'border-green-200', headerBg: 'bg-green-50/80', iconBg: 'bg-green-100', iconText: 'text-green-600', badge: 'bg-green-100', badgeText: 'text-green-700' },
     };
 
-    const Column = ({ title, icon: Icon, theme, items, type, emptyText }: {
+    const Column = ({ title, icon: Icon, theme, items, type, emptyText, onCardClick }: {
         title: string;
         icon: React.ElementType;
         theme: ThemeColor;
         items: Customer[] | UserTask[];
         type: 'customer' | 'task';
         emptyText: string;
+        onCardClick?: (item: any) => void;
     }) => {
         const contextIds = useMemo(() => {
             if (type === 'customer') return (items as Customer[]).map(c => c.id);
@@ -653,7 +782,7 @@ const CalendarPage: React.FC = () => {
                     ) : (
                         items.map((item: any) =>
                             type === 'customer'
-                                ? <CustomerCard key={item.id} customer={item} isOverdue={item.recare_date < todayStr} contextIds={contextIds} />
+                                ? <CustomerCard key={item.id} customer={item} isOverdue={item.recare_date < todayStr} contextIds={contextIds} onClick={onCardClick} />
                                 : <TaskCard key={item.id} task={item} />
                         )
                     )}
@@ -788,6 +917,10 @@ const CalendarPage: React.FC = () => {
                                     items={processingDeals}
                                     type="customer"
                                     emptyText="Không có đơn đang xử lý"
+                                    onCardClick={(c) => {
+                                        setSelectedCustomerForProgress(c);
+                                        setShowProgressModal(true);
+                                    }}
                                 />
                                 <Column
                                     title="Đã hoàn thành"
@@ -796,6 +929,10 @@ const CalendarPage: React.FC = () => {
                                     items={completedDeals}
                                     type="customer"
                                     emptyText="Không có đơn hoàn thành"
+                                    onCardClick={(c) => {
+                                        setSelectedCustomerForProgress(c);
+                                        setShowProgressModal(true);
+                                    }}
                                 />
                                 <Column
                                     title="Trả cọc"
@@ -804,6 +941,10 @@ const CalendarPage: React.FC = () => {
                                     items={refundedDeals}
                                     type="customer"
                                     emptyText="Không có đơn trả cọc"
+                                    onCardClick={(c) => {
+                                        setSelectedCustomerForProgress(c);
+                                        setShowProgressModal(true);
+                                    }}
                                 />
                                 <Column
                                     title="Hồ sơ treo"
@@ -812,6 +953,10 @@ const CalendarPage: React.FC = () => {
                                     items={suspendedDeals}
                                     type="customer"
                                     emptyText="Không có hồ sơ treo"
+                                    onCardClick={(c) => {
+                                        setSelectedCustomerForProgress(c);
+                                        setShowProgressModal(true);
+                                    }}
                                 />
                             </div>
                         )}
@@ -862,6 +1007,20 @@ const CalendarPage: React.FC = () => {
             </div>
 
             {/* CALENDAR MODAL */}
+            {/* NEW: Quick Interaction Modal */}
+            <QuickInteractionModal
+                isOpen={showQuickModal}
+                onClose={() => setShowQuickModal(false)}
+                customer={selectedCustomerForQuick}
+                userProfile={userProfile}
+                onSuccess={() => {
+                    fetchData();
+                    // Optional: Show Success Toast? Component handles alert currently? 
+                    // Let component show alert or silent refresh.
+                }}
+            />
+
+            {/* Calendar Modal */}
             {showCalendarModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 pl-4 lg:pl-[220px] animate-fade-in">
                     <div className="bg-white rounded-3xl shadow-2xl w-full max-w-[85vw] xl:max-w-[1200px] h-[90vh] overflow-hidden flex flex-col lg:flex-row border border-gray-100">
@@ -1051,15 +1210,22 @@ const CalendarPage: React.FC = () => {
                                     placeholder="Nhập tên công việc..."
                                 />
                             </div>
-                            <div>
+                            <div className="relative">
                                 <label className="block text-sm font-bold text-gray-700 mb-1.5">Nội dung</label>
                                 <textarea
                                     value={taskForm.content}
                                     onChange={e => setTaskForm(prev => ({ ...prev, content: e.target.value }))}
-                                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 resize-none transition-all"
+                                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 pr-10 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 resize-none transition-all"
                                     rows={3}
                                     placeholder="Mô tả chi tiết công việc..."
                                 />
+                                <button
+                                    onClick={startVoiceSession}
+                                    className="absolute bottom-3 right-3 p-1.5 rounded-full bg-gray-100 text-gray-400 hover:text-red-600 hover:bg-gray-200 transition-colors"
+                                    title="Nhập bằng giọng nói (Platinum+)"
+                                >
+                                    <Mic size={16} />
+                                </button>
                             </div>
                             <div className="grid grid-cols-3 gap-3">
                                 <div>
@@ -1230,6 +1396,29 @@ const CalendarPage: React.FC = () => {
                 </div>
             )}
 
+            {/* Quick Interaction Modal */}
+            <QuickInteractionModal
+                isOpen={showQuickModal}
+                onClose={handleCloseQuickInteraction}
+                customer={selectedCustomerForQuick}
+                userProfile={userProfile}
+                onSuccess={() => {
+                    setShowQuickModal(false);
+                    fetchData(true); // Call fetchData with silent=true
+                }}
+            />
+
+            {/* Progress/Finance Modal for Orders */}
+            {/* Progress Modal (Orders Tab) */}
+            {selectedCustomerForProgress && (
+                <CustomerProgressModal
+                    customer={selectedCustomerForProgress}
+                    visible={showProgressModal}
+                    onClose={() => setShowProgressModal(false)}
+                    onUpdate={() => fetchData(true)}
+                />
+            )}
+
             {/* MOD CONSULTANT MODE TOGGLE - Floating Button */}
             {userProfile?.role === 'mod' && (
                 <button
@@ -1253,6 +1442,15 @@ const CalendarPage: React.FC = () => {
                     </span>
                 </button>
             )}
+
+            {/* Voice Recording Modal */}
+            <VoiceRecordingModal
+                isOpen={showVoiceModal}
+                onClose={handleVoiceCancel}
+                onConfirm={handleVoiceConfirm}
+                transcript={tempTranscript}
+                isListening={isListening}
+            />
         </div>
     );
 };

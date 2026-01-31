@@ -15,6 +15,7 @@ import NewCustomerNotification from './NewCustomerNotification';
 import VersionChecker from './VersionChecker';
 import { useTheme } from '../contexts/ThemeContext';
 import ApprovalBadge from './ApprovalBadge';
+import UserStatusIndicator from './UserStatusIndicator';
 
 interface NavItemDef {
     key: string;
@@ -249,10 +250,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                         <div className="overflow-hidden flex-1">
                             <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{userProfile?.full_name || 'User'}</p>
                             <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                                <span className="relative flex h-2 w-2 flex-shrink-0">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                </span>
+                                {userProfile?.id && <UserStatusIndicator userId={userProfile.id} showText={false} />}
                                 <p className="text-xs text-slate-500 dark:text-slate-400 capitalize font-medium whitespace-nowrap">{userProfile?.role || 'Sales'}</p>
                                 {userProfile?.is_part_time && <span className="text-[9px] bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded-md uppercase font-bold tracking-wider border border-orange-200 dark:border-orange-800">Part-time</span>}
                                 {userProfile?.member_tier && (

@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, UserProfile, Transaction } from '../types';
+import { Customer, CustomerStatus, UserProfile, Transaction, UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
     ArrowLeft, Users, CheckCircle, TrendingUp, Calendar, Loader2, BadgeDollarSign, Wallet, ArrowUpRight, ArrowDownLeft, Target, Trophy, X, Flame, Briefcase, Copy, Terminal, Lock
@@ -209,7 +209,7 @@ create policy "Write KPIs" on public.employee_kpis for all using (
     // --- FINANCIAL CHART DATA (Monthly - Last 6 Months) ---
     // Keeps existing logic for the chart to show trend
     const financialData = useMemo(() => {
-        const last6Months = [];
+        const last6Months: any[] = [];
         const now = new Date();
         for (let i = 5; i >= 0; i--) {
             const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -358,7 +358,7 @@ create policy "Write KPIs" on public.employee_kpis for all using (
             </div>
 
             {/* LOCK CONTROLS FOR MOD/ADMIN */}
-            {(isAdmin || isMod) && (
+            {(isAdmin || isMod) && (isAdmin || employee.role !== UserRole.ADMIN) && (
                 <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
                     <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Lock size={18} className="text-red-500" /> Quản lý Quyền truy cập</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">

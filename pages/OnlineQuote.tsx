@@ -385,6 +385,15 @@ const OnlineQuote: React.FC = () => {
         fetchQuoteData();
     }, [userProfile]);
 
+    // Auto-fill email from URL params when navigating from CustomerDetail
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const urlEmail = params.get('customerEmail');
+        const urlName = params.get('customerName');
+        if (urlEmail) setEmailRecipient(decodeURIComponent(urlEmail));
+        if (urlName) setCustomerName(decodeURIComponent(urlName));
+    }, []);
+
     // Track previous model ID to detect user-initiated changes (not initial load)
     const previousModelId = useRef<string | null>(null);
 
@@ -1796,6 +1805,8 @@ const OnlineQuote: React.FC = () => {
 
                             <div className="flex gap-3 pt-2">
                                 <button
+                                    onClick={() => setShowEmailModal(false)}
+                                    className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200"
                                 >
                                     Đóng
                                 </button>

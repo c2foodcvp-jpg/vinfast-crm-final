@@ -178,6 +178,7 @@ export interface Customer {
   id: string;
   name: string;
   phone: string;
+  email?: string; // Email khách hàng (Optional)
   secondary_phone?: string;
   location?: string;
   status: CustomerStatus;

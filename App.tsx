@@ -59,77 +59,81 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
 import SupportWidget from './components/SupportWidget';
 
+import { PresenceProvider } from './contexts/PresenceContext';
+
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <SystemConfigListener />
-      <ForceUpdatePopup />
-      <SystemNotificationModal />
-      <ThemeProvider>
-        <NotificationProvider>
-          <BrowserRouter>
-            <SupportWidget />
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/update-password" element={<UpdatePassword />} />
-              <Route path="/intro" element={<LandingPage />} />
+      <PresenceProvider>
+        <SystemConfigListener />
+        <ForceUpdatePopup />
+        <SystemNotificationModal />
+        <ThemeProvider>
+          <NotificationProvider>
+            <BrowserRouter>
+              <SupportWidget />
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/update-password" element={<UpdatePassword />} />
+                <Route path="/intro" element={<LandingPage />} />
 
-              <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-              <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
-              <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+                <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
+                <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
 
-              {/* Customer Management */}
-              <Route path="/customers" element={<ProtectedRoute><CustomerList /></ProtectedRoute>} />
-              <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetail /></ProtectedRoute>} />
+                {/* Customer Management */}
+                <Route path="/customers" element={<ProtectedRoute><CustomerList /></ProtectedRoute>} />
+                <Route path="/customers/:id" element={<ProtectedRoute><CustomerDetail /></ProtectedRoute>} />
 
-              {/* Lead Management */}
-              <Route path="/leads/assign" element={<ProtectedRoute><AssignCustomers /></ProtectedRoute>} />
-              <Route path="/leads/new" element={<ProtectedRoute><LeadsFromForm /></ProtectedRoute>} />
-              <Route path="/leads/queue" element={<ProtectedRoute><LeadsQueue /></ProtectedRoute>} />
+                {/* Lead Management */}
+                <Route path="/leads/assign" element={<ProtectedRoute><AssignCustomers /></ProtectedRoute>} />
+                <Route path="/leads/new" element={<ProtectedRoute><LeadsFromForm /></ProtectedRoute>} />
+                <Route path="/leads/queue" element={<ProtectedRoute><LeadsQueue /></ProtectedRoute>} />
 
-              {/* Sales & Orders */}
-              <Route path="/deals" element={<ProtectedRoute><Deals /></ProtectedRoute>} />
-              <Route path="/proposals" element={<ProtectedRoute><Proposals /></ProtectedRoute>} />
-              <Route path="/quote" element={<ProtectedRoute><OnlineQuote /></ProtectedRoute>} />
-              <Route path="/loan-calculator" element={<ProtectedRoute><BankCalculator /></ProtectedRoute>} />
+                {/* Sales & Orders */}
+                <Route path="/deals" element={<ProtectedRoute><Deals /></ProtectedRoute>} />
+                <Route path="/proposals" element={<ProtectedRoute><Proposals /></ProtectedRoute>} />
+                <Route path="/quote" element={<ProtectedRoute><OnlineQuote /></ProtectedRoute>} />
+                <Route path="/bank-calculator" element={<ProtectedRoute><BankCalculator /></ProtectedRoute>} />
 
-              {/* HR & Profile */}
-              <Route path="/employees" element={<ProtectedRoute><EmployeeList /></ProtectedRoute>} />
-              <Route path="/employees/:id" element={<ProtectedRoute><EmployeeDetail /></ProtectedRoute>} />
-              <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+                {/* HR & Profile */}
+                <Route path="/employees" element={<ProtectedRoute><EmployeeList /></ProtectedRoute>} />
+                <Route path="/employees/:id" element={<ProtectedRoute><EmployeeDetail /></ProtectedRoute>} />
+                <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
 
-              {/* Finance */}
-              <Route path="/finance" element={<ProtectedRoute><Finance /></ProtectedRoute>} />
-              <Route path="/fund" element={<ProtectedRoute><TeamFund /></ProtectedRoute>} />
+                {/* Finance */}
+                <Route path="/finance" element={<ProtectedRoute><Finance /></ProtectedRoute>} />
+                <Route path="/fund" element={<ProtectedRoute><TeamFund /></ProtectedRoute>} />
 
-              {/* Resources */}
-              <Route path="/resources/promotions" element={<ProtectedRoute><Promotions /></ProtectedRoute>} />
-              <Route path="/resources/cars" element={<ProtectedRoute><CarPrices /></ProtectedRoute>} />
-              <Route path="/resources/banks" element={<ProtectedRoute><BankRates /></ProtectedRoute>} />
-              <Route path="/resources/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
+                {/* Resources */}
+                <Route path="/resources/promotions" element={<ProtectedRoute><Promotions /></ProtectedRoute>} />
+                <Route path="/resources/cars" element={<ProtectedRoute><CarPrices /></ProtectedRoute>} />
+                <Route path="/resources/banks" element={<ProtectedRoute><BankRates /></ProtectedRoute>} />
+                <Route path="/resources/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
 
-              {/* System */}
-              <Route path="/utilities" element={<ProtectedRoute><Utilities /></ProtectedRoute>} />
-              <Route path="/system" element={<ProtectedRoute><Configuration /></ProtectedRoute>} />
-              <Route path="/distributors" element={<Navigate to="/system" replace />} />
-              <Route path="/configuration" element={<Navigate to="/system" replace />} />
+                {/* System */}
+                <Route path="/utilities" element={<ProtectedRoute><Utilities /></ProtectedRoute>} />
+                <Route path="/system" element={<ProtectedRoute><Configuration /></ProtectedRoute>} />
+                <Route path="/distributors" element={<Navigate to="/system" replace />} />
+                <Route path="/configuration" element={<Navigate to="/system" replace />} />
 
-              {/* Legacy Redirects */}
-              <Route path="/team-fund" element={<Navigate to="/fund" replace />} />
-              <Route path="/car-prices" element={<Navigate to="/resources/cars" replace />} />
-              <Route path="/bank-rates" element={<Navigate to="/resources/banks" replace />} />
-              <Route path="/inventory" element={<Navigate to="/resources/inventory" replace />} />
-              <Route path="/promotions" element={<Navigate to="/resources/promotions" replace />} />
-              <Route path="/leads-form" element={<Navigate to="/leads/new" replace />} />
-              <Route path="/leads-queue" element={<Navigate to="/leads/queue" replace />} />
-              <Route path="/assign" element={<Navigate to="/leads/assign" replace />} />
+                {/* Legacy Redirects */}
+                <Route path="/team-fund" element={<Navigate to="/fund" replace />} />
+                <Route path="/car-prices" element={<Navigate to="/resources/cars" replace />} />
+                <Route path="/bank-rates" element={<Navigate to="/resources/banks" replace />} />
+                <Route path="/inventory" element={<Navigate to="/resources/inventory" replace />} />
+                <Route path="/promotions" element={<Navigate to="/resources/promotions" replace />} />
+                <Route path="/leads-form" element={<Navigate to="/leads/new" replace />} />
+                <Route path="/leads-queue" element={<Navigate to="/leads/queue" replace />} />
+                <Route path="/assign" element={<Navigate to="/leads/assign" replace />} />
 
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </BrowserRouter>
-        </NotificationProvider>
-      </ThemeProvider>
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+          </NotificationProvider>
+        </ThemeProvider>
+      </PresenceProvider>
     </AuthProvider>
   );
 };
