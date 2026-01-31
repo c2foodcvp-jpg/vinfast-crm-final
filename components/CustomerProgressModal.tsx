@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { CheckCircle2, Circle, X, History, Truck, CarFront, BadgeDollarSign, ExternalLink, Calendar, Mail, Loader2 } from 'lucide-react';
 import { Transaction } from '../types';
 import { useNavigate } from 'react-router-dom';
+import PaymentNotificationModal from './PaymentNotificationModal';
 
 interface Props {
     customer: Customer;
@@ -42,6 +43,11 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
     });
     const [sendingEmail, setSendingEmail] = useState(false);
     const [showUpgradePopup, setShowUpgradePopup] = useState(false);
+
+    // PAYMENT NOTIFICATION STATE (Diamond Feature)
+    const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [pendingPaymentStep, setPendingPaymentStep] = useState(false);
 
     // Save preference when toggled
     const toggleEmailNotification = () => {
@@ -333,6 +339,17 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
     };
 
     const handleToggleStep = async (stepKey: string) => {
+        // Special handling for payment_invoice step (Diamond feature)
+        if (stepKey === 'payment_invoice' && !progress[stepKey]?.completed && isDiamond) {
+            setPendingPaymentStep(true);
+            setShowPaymentConfirm(true);
+            return;
+        }
+
+        await processStepToggle(stepKey);
+    };
+
+    const processStepToggle = async (stepKey: string, skipPaymentNotification = false) => {
         const isCompleted = !progress[stepKey]?.completed;
         const newProgress = {
             ...progress,
@@ -343,11 +360,6 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
         };
 
         setProgress(newProgress);
-
-        // Auto-save logic can be here, or use a "Save" button. 
-        // User asked for "Check click", implying immediate interaction or simple flow.
-        // Let's autosave for smooth UX, but maybe debounced? 
-        // Or just save immediately since it's a critical state.
 
         try {
             const { error } = await supabase
@@ -360,15 +372,41 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
 
             // Send email notification if enabled and step was completed
             // Exclude financial/internal steps: collection_return, money_recovered
+            // Also exclude payment_invoice when PaymentNotificationModal sends its own email
             const excludedFromEmail = ['collection_return', 'money_recovered'];
             if (isCompleted && sendEmailNotification && customer.email && !excludedFromEmail.includes(stepKey)) {
-                const step = DELIVERY_STEPS.find(s => s.key === stepKey);
-                if (step) sendProgressEmail(step.label);
+                // For payment_invoice: skip progress email if PaymentNotificationModal handles it
+                if (stepKey === 'payment_invoice' && skipPaymentNotification) {
+                    // Skip - PaymentNotificationModal already sent detailed payment email
+                } else {
+                    const step = DELIVERY_STEPS.find(s => s.key === stepKey);
+                    if (step) sendProgressEmail(step.label);
+                }
             }
         } catch (err: any) {
             console.error("Error saving progress:", err);
             alert("Lỗi lưu tiến trình: " + err.message);
         }
+    };
+
+    // Handle payment confirmation response
+    const handlePaymentConfirmNo = async () => {
+        setShowPaymentConfirm(false);
+        setPendingPaymentStep(false);
+        // Process step normally WITH progress email (skipPaymentNotification = false)
+        await processStepToggle('payment_invoice', false);
+    };
+
+    const handlePaymentConfirmYes = () => {
+        setShowPaymentConfirm(false);
+        setShowPaymentModal(true);
+    };
+
+    const handlePaymentComplete = async () => {
+        // Process step after payment notification sent
+        await processStepToggle('payment_invoice', true);
+        setShowPaymentModal(false);
+        setPendingPaymentStep(false);
     };
 
     if (!visible) return null;
@@ -655,6 +693,50 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
                     </div>
                 </div>
             )}
+
+            {/* Payment Confirmation Popup (Diamond Only) */}
+            {showPaymentConfirm && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-scale-in">
+                        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-6 text-center">
+                            <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <span className="text-3xl">💳</span>
+                            </div>
+                            <h3 className="text-xl font-bold text-white">Gửi thông báo đóng tiền?</h3>
+                        </div>
+                        <div className="p-6 text-center">
+                            <p className="text-gray-600 mb-6">
+                                Bạn có muốn gửi thông báo chi tiết <strong className="text-emerald-600">đóng tiền</strong> cho khách hàng <strong>{customer.name}</strong> không?
+                            </p>
+                        </div>
+                        <div className="px-6 pb-6 flex gap-3">
+                            <button
+                                onClick={handlePaymentConfirmNo}
+                                className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors"
+                            >
+                                Không
+                            </button>
+                            <button
+                                onClick={handlePaymentConfirmYes}
+                                className="flex-1 py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-200"
+                            >
+                                Có, Gửi ngay
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Payment Notification Modal */}
+            <PaymentNotificationModal
+                visible={showPaymentModal}
+                customer={customer}
+                onClose={() => {
+                    setShowPaymentModal(false);
+                    setPendingPaymentStep(false);
+                }}
+                onComplete={handlePaymentComplete}
+            />
         </div>
     );
 };

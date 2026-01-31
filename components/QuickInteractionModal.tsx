@@ -5,6 +5,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { X, Phone, MessageCircle, Calendar, Save, CheckCircle2, MapPin, Loader2, ExternalLink, History, CalendarDays, Flame, ListTodo, BellRing, Lock, Calculator, Ban, AlertTriangle, Mic, MicOff } from 'lucide-react';
 import { MembershipTier } from '../types';
 import VoiceRecordingModal from './VoiceRecordingModal';
+import ShareCustomerModal from './ShareCustomerModal';
+import ChangeSalesModal from './ChangeSalesModal';
+import { RefreshCw, Share2, ArrowRightLeft } from 'lucide-react';
 
 interface QuickInteractionModalProps {
     isOpen: boolean;
@@ -51,6 +54,24 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
     const [tempTranscript, setTempTranscript] = useState('');
     const [isListening, setIsListening] = useState(false);
     const recognitionRef = useRef<any>(null);
+
+    // New State for UI/UX Pro Max Features
+    const [showShareModal, setShowShareModal] = useState(false);
+    const [showChangeSalesModal, setShowChangeSalesModal] = useState(false);
+
+    // Car Model Logic
+    const [newInterest, setNewInterest] = useState('');
+    const [isEditingInterest, setIsEditingInterest] = useState(false);
+    const [carList, setCarList] = useState<string[]>([]);
+
+    useEffect(() => {
+        // Fetch Car Models once
+        const fetchCars = async () => {
+            const { data } = await supabase.from('car_models').select('name').order('priority', { ascending: true });
+            if (data) setCarList(data.map(c => c.name));
+        };
+        fetchCars();
+    }, []);
 
     const startVoiceSession = () => {
         const isPlatinumOrHigher = userProfile?.member_tier === MembershipTier.PLATINUM ||
@@ -131,6 +152,7 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
             if (customer.classification) setNewClassification(customer.classification);
             setIsSpecialCare(!!customer.is_special_care);
             setIsLongTerm(!!customer.is_long_term);
+            setNewInterest(customer.interest || ''); // Init interest
 
             fetchHistory(customer.id);
         }
@@ -252,7 +274,8 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
         const hasChanges = content.trim() || updateRecare ||
             (newClassification && newClassification !== customer.classification) ||
             (isSpecialCare !== !!customer.is_special_care) ||
-            (isLongTerm !== !!customer.is_long_term);
+            (isLongTerm !== !!customer.is_long_term) ||
+            (newInterest && newInterest !== customer.interest);
 
         if (!hasChanges) {
             alert("Vui lòng nhập nội dung hoặc thay đổi trạng thái!");
@@ -310,6 +333,11 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                 }
             }
 
+            // Interest
+            if (newInterest && newInterest !== customer.interest) {
+                updates.interest = newInterest;
+            }
+
             if (Object.keys(updates).length > 0) {
                 await supabase.from('customers').update(updates).eq('id', customer.id);
             }
@@ -355,9 +383,33 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                             <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
                                 {customer.name}
                             </h3>
-                            <div className="flex items-center gap-2 text-xs text-gray-500">
-                                <span className="flex items-center gap-1"><Phone size={10} /> {customer.phone}</span>
-                                {customer.interest && <span className="px-1.5 py-0.5 bg-gray-100 rounded text-gray-600 capitalize">• {customer.interest}</span>}
+                            <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                                <span className="flex items-center gap-1"><Phone size={12} /> {customer.phone}</span>
+                                {isEditingInterest ? (
+                                    <div className="flex items-center gap-1 animate-fade-in">
+                                        <select
+                                            value={newInterest}
+                                            onChange={(e) => { setNewInterest(e.target.value); setIsEditingInterest(false); }}
+                                            className="px-2 py-1 bg-white border border-blue-300 rounded text-xs font-bold text-blue-700 outline-none focus:ring-2 focus:ring-blue-100"
+                                            autoFocus
+                                        >
+                                            <option value="">-- Chọn xe --</option>
+                                            {carList.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                        <button onClick={() => setIsEditingInterest(false)} className="p-1 hover:bg-gray-100 rounded text-gray-500"><X size={12} /></button>
+                                    </div>
+                                ) : (
+                                    <span className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-100 rounded hover:bg-gray-200 transition-colors group relative">
+                                        <span className="text-gray-600 capitalize font-medium">{newInterest || 'Chưa quan tâm xe'}</span>
+                                        <button
+                                            onClick={() => setIsEditingInterest(true)}
+                                            className="ml-1 p-0.5 text-gray-400 hover:text-blue-600 bg-white rounded-full shadow-sm hover:shadow opacity-0 group-hover:opacity-100 transition-all"
+                                            title="Đổi dòng xe"
+                                        >
+                                            <RefreshCw size={10} />
+                                        </button>
+                                    </span>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -624,6 +676,22 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                                         <Lock size={14} /> Báo giá
                                     </button>
                                 )}
+
+                                {/* New Share & Change Sales Buttons */}
+                                <button
+                                    onClick={() => setShowShareModal(true)}
+                                    className="flex items-center gap-2 px-3 py-2 text-teal-600 hover:bg-teal-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-teal-100"
+                                    title="Chia sẻ khách hàng"
+                                >
+                                    <Share2 size={14} /> Chia sẻ
+                                </button>
+                                <button
+                                    onClick={() => setShowChangeSalesModal(true)}
+                                    className="flex items-center gap-2 px-3 py-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-orange-100"
+                                    title="Chuyển quyền chăm sóc"
+                                >
+                                    <ArrowRightLeft size={14} /> Đổi Sales
+                                </button>
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={onClose} className="px-4 py-2 text-gray-600 font-bold text-sm hover:bg-gray-200 rounded-xl transition-colors">Hủy</button>
@@ -681,7 +749,7 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
 
                 </div>
             </div>
-        </div>
+        </div >
     );
 
     // Render Stop Care Modal
@@ -753,6 +821,20 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                 onConfirm={handleVoiceConfirm}
                 transcript={tempTranscript}
                 isListening={isListening}
+            />
+            {/* New Modals */}
+            <ShareCustomerModal
+                isOpen={showShareModal}
+                onClose={() => setShowShareModal(false)}
+                customer={customer}
+                currentUser={userProfile}
+            />
+            <ChangeSalesModal
+                isOpen={showChangeSalesModal}
+                onClose={() => setShowChangeSalesModal(false)}
+                customer={customer}
+                currentUser={userProfile}
+                onSuccess={() => { onClose(); onSuccess(); }}
             />
         </>
     );

@@ -88,7 +88,7 @@ const AssignCustomers: React.FC = () => {
 
     const fetchCarModels = async () => {
         try {
-            const { data } = await supabase.from('car_models').select('name').order('created_at', { ascending: false });
+            const { data } = await supabase.from('car_models').select('name').order('priority', { ascending: true });
             if (data && data.length > 0) {
                 setCarList(data.map(c => c.name));
             }

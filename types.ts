@@ -32,6 +32,7 @@ export interface CarModel {
   id: string;
   name: string;
   manager_id?: string; // Team isolation
+  priority?: number; // Sorting order
   created_at?: string;
 }
 
@@ -110,6 +111,7 @@ export interface Distributor {
   id: string;
   name: string;
   address?: string;
+  image_url?: string; // URL of the uploaded image
   manager_id?: string; // Team isolation
   created_at?: string;
 }
@@ -126,10 +128,41 @@ export interface DealDetails {
 }
 
 export enum MembershipTier {
+  MEMBER = 'Member',
   GOLD = 'Gold',
   PLATINUM = 'Platinum',
   DIAMOND = 'Diamond'
 }
+
+// Payment Account for Registration Fee Transfer
+export interface PaymentAccount {
+  id: string;
+  user_id: string;
+  name: string;
+  content?: string;
+  qr_code_url?: string;
+  is_default?: boolean;
+  created_at?: string;
+}
+
+// Default Registration Fee Values (VND)
+export const DEFAULT_REGISTRATION_FEES = {
+  tax: 0,                           // Thuế bạ
+  plate_fee: 14_000_000,            // Lệ phí đăng ký biển số
+  road_fee: 1_560_000,              // Phí đường bộ
+  inspection_book_fee: 94_680,      // Lệ phí cấp sổ đăng kiểm
+  civil_insurance: 530_700,         // Bảo hiểm trách nhiệm dân sự
+  vehicle_insurance_rate: 0.014,    // 1.4% giá xe
+  registration_service: 3_000_000   // Dịch vụ đăng ký xe
+};
+
+// Membership tier account limits
+export const TIER_ACCOUNT_LIMITS: Record<string, number> = {
+  'Member': 1,
+  'Gold': 2,
+  'Platinum': 3,
+  'Diamond': 5
+};
 
 export interface UserProfile {
   id: string;
@@ -161,6 +194,7 @@ export interface UserProfile {
   qr_code_url?: string;
 
   created_at?: string;
+  last_login_at?: string; // Track last login time
   discord_config?: any;
 }
 

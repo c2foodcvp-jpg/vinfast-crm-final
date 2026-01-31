@@ -397,7 +397,29 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
             {/* Auto Update Checker */}
             <VersionChecker />
-        </div >
+
+            {/* Locked Account Popup (5 Days Inactivity) */}
+            {userProfile?.role === UserRole.EMPLOYEE && userProfile.is_locked_view && userProfile.is_locked_add && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl text-center border-2 border-red-100 flex flex-col items-center">
+                        <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-6 animate-pulse">
+                            <span className="text-red-600">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                            </span>
+                        </div>
+                        <h2 className="text-2xl font-bold text-gray-900 mb-2">Tài khoản tạm thời khoá</h2>
+                        <p className="text-gray-600 mb-6 px-4">
+                            Do không đăng nhập trong <strong className="text-red-600">05 ngày</strong>, chức năng Xem và Thêm khách hàng đã bị tạm khóa.
+                            <br /><br />
+                            <span className="bg-red-50 text-red-700 px-3 py-1 rounded-lg text-sm font-bold border border-red-100">Vui lòng liên hệ Quản lý để mở khóa</span>
+                        </p>
+                        <button onClick={() => window.location.reload()} className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors w-full">
+                            Đã hiểu
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
     );
 };
 

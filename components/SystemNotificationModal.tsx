@@ -10,6 +10,7 @@ interface SystemNotification {
     target_scope: 'all' | 'team';
     target_team_id?: string;
     created_at: string;
+    display_type?: 'popup' | 'dashboard' | 'both';
 }
 
 const SystemNotificationModal: React.FC = () => {
@@ -44,6 +45,9 @@ const SystemNotificationModal: React.FC = () => {
 
                 // 3. Filter relevant notifications
                 const pending = allNotifs.filter(n => {
+                    // Filter out Dashboard Only notifications
+                    if (n.display_type === 'dashboard') return false;
+
                     // Already acknowledged?
                     if (ackIds.has(n.id)) return false;
 

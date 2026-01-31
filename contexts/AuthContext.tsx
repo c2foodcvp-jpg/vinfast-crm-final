@@ -90,6 +90,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             data.status = 'active';
           }
         }
+
+        // --- NEW: Check Last Login & Lock Logic ---
+        const now = new Date();
+        const lastLogin = data.last_login_at ? new Date(data.last_login_at) : null;
+        const FIVE_DAYS = 5 * 24 * 60 * 60 * 1000;
+
+        // Apply to Sales (Employees)
+        if (data.role === UserRole.EMPLOYEE && lastLogin) {
+          if (now.getTime() - lastLogin.getTime() > FIVE_DAYS) {
+            // Lock functionalities
+            const updates = { is_locked_add: true, is_locked_view: true };
+            await supabase.from('profiles').update(updates).eq('id', userId);
+            data.is_locked_add = true;
+            data.is_locked_view = true;
+          }
+        }
+
+        // Update Last Login
+        await supabase.from('profiles').update({ last_login_at: now.toISOString() }).eq('id', userId);
+
         setUserProfile(data as UserProfile);
       }
     } catch (error) {

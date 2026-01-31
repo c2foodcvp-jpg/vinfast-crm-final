@@ -445,6 +445,7 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
                             <tr>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Thông tin</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Liên hệ</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Truy cập</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Vai trò / Quản lý bởi</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase">Hành động</th>
                             </tr>
@@ -482,6 +483,30 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 text-sm"><p className="text-gray-900 font-medium">{emp.phone}</p><p className="text-gray-500">{emp.email}</p></td>
+                                            <td className="px-6 py-4 text-sm">
+                                                {(() => {
+                                                    if (!emp.last_login_at) return <span className="text-gray-400 italic text-xs">Chưa đăng nhập</span>;
+                                                    const date = new Date(emp.last_login_at);
+                                                    const now = new Date();
+                                                    const diffMs = now.getTime() - date.getTime();
+                                                    const diffHours = diffMs / (1000 * 60 * 60);
+
+                                                    if (diffHours < 24) {
+                                                        const hours = Math.floor(diffHours);
+                                                        const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                                                        if (hours === 0) return <span className="text-green-600 font-bold text-xs">Vừa xong ({minutes}p trước)</span>;
+                                                        return <span className="text-green-600 font-bold text-xs">Đăng nhập {hours} giờ trước</span>;
+                                                    } else {
+                                                        const diffDays = Math.floor(diffHours / 24);
+                                                        return (
+                                                            <div>
+                                                                <p className="text-gray-600 text-xs font-medium">Ngày: {date.toLocaleDateString('vi-VN')}</p>
+                                                                {diffDays >= 5 && <p className="text-red-500 text-[10px] font-bold">({diffDays} ngày)</p>}
+                                                            </div>
+                                                        );
+                                                    }
+                                                })()}
+                                            </td>
                                             <td className="px-6 py-4">
                                                 {isAdmin && editingId === emp.id ? (
                                                     <div className="flex flex-col gap-2 bg-white border border-primary-300 rounded-lg p-2 shadow-sm min-w-[200px]">
@@ -723,7 +748,10 @@ using (
 create policy "Users can update own profile"
 on profiles for update
 to authenticated
-using ( auth.uid() = id );`}</pre><button onClick={() => {
+using ( auth.uid() = id );
+
+-- 3. Bổ sung cột Last Login
+alter table profiles add column if not exists last_login_at timestamptz;`}</pre><button onClick={() => {
                     const code = `-- 1. Bổ sung cột phân quyền hạn chế (Fix lỗi 400 Bad Request)
 alter table profiles add column if not exists is_locked_add boolean default false;
 alter table profiles add column if not exists is_locked_view boolean default false;
@@ -744,7 +772,10 @@ using (
 create policy "Users can update own profile"
 on profiles for update
 to authenticated
-using ( auth.uid() = id );`; navigator.clipboard.writeText(code); alert("Đã sao chép SQL!");
+using ( auth.uid() = id );
+
+-- 3. Bổ sung cột Last Login
+alter table profiles add column if not exists last_login_at timestamptz;`; navigator.clipboard.writeText(code); alert("Đã sao chép SQL!");
                 }} className="absolute top-3 right-3 p-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors flex items-center gap-2 text-xs font-bold"><Copy size={14} /> Sao chép</button></div></div></div></div>)}
 
         </div>

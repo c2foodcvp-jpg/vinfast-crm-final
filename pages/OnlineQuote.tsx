@@ -477,7 +477,7 @@ const OnlineQuote: React.FC = () => {
         setLoading(true);
         try {
             const [modelsRes, versionsRes, promosRes, feesRes, banksRes, giftsRes, memberRes, warrantyRes, regServicesRes] = await Promise.all([
-                supabase.from('car_models').select('*'),
+                supabase.from('car_models').select('*').order('priority', { ascending: true }),
                 supabase.from('car_versions').select('*'),
                 supabase.from('quote_configs').select('*').eq('type', 'promotion').eq('is_active', true).order('priority', { ascending: true }),
                 supabase.from('quote_configs').select('*').eq('type', 'fee').eq('is_active', true).order('priority', { ascending: true }),

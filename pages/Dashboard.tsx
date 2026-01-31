@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../supabaseClient';
 import * as ReactRouterDOM from 'react-router-dom';
 import {
-    Users, TrendingUp, CheckCircle, Plus, Loader2, AlertTriangle, Clock, Calendar, BellRing, ChevronRight, Send, X, Settings, Zap, MessageSquarePlus, BarChart3, UserPlus, Mail, Copy, Terminal, ExternalLink, ArrowRightLeft, FileCheck2, FileText, Save, Bell, Hand, Filter, Briefcase, Trophy, UserX, MapPin, CarFront, ChevronDown, BadgeDollarSign
+    Users, TrendingUp, CheckCircle, Plus, Loader2, AlertTriangle, Clock, Calendar, BellRing, ChevronRight, Send, X, Settings, Zap, MessageSquarePlus, BarChart3, UserPlus, Mail, Copy, Terminal, ExternalLink, ArrowRightLeft, FileCheck2, FileText, Save, Bell, Hand, Filter, Briefcase, Trophy, UserX, MapPin, CarFront, ChevronDown, BadgeDollarSign, Megaphone
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { CustomerStatus, Customer, UserProfile, UserRole, CustomerClassification } from '../types';
@@ -64,8 +64,47 @@ const Dashboard: React.FC = () => {
     const [isNotiOpen, setIsNotiOpen] = useState(false);
     const notiRef = useRef<HTMLDivElement>(null);
 
+    // --- SYSTEM NOTIFICATIONS ---
+    const [systemNotifications, setSystemNotifications] = useState<any[]>([]);
+
     // --- ADD CUSTOMER MODAL STATE ---
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+    useEffect(() => {
+        if (userProfile) fetchSystemNotifications();
+    }, [userProfile]);
+
+    const fetchSystemNotifications = async () => {
+        if (!userProfile) return;
+
+        try {
+            // First fetch ALL active dashboard notifications
+            const { data, error } = await supabase
+                .from('system_notifications')
+                .select('*')
+                .eq('is_active', true)
+                .or(`display_type.eq.dashboard,display_type.eq.both`)
+                .gt('expires_at', new Date().toISOString())
+                .order('created_at', { ascending: false });
+
+            if (data) {
+                // Filter by scope in memory (easiest for robust logic)
+                const visible = data.filter((n: any) => {
+                    if (n.target_scope === 'all') return true;
+                    if (n.target_scope === 'team') {
+                        // If I am the target team leader
+                        if (userProfile.id === n.target_team_id) return true;
+                        // If my manager is the target team leader
+                        if (userProfile?.manager_id === n.target_team_id) return true;
+                    }
+                    return false;
+                });
+                setSystemNotifications(visible);
+            }
+        } catch (err) {
+            console.error("Fetch notifs error", err);
+        }
+    };
 
     // Get Tomorrow Str for Auto-Reschedule
     const getTomorrowStr = () => {
@@ -430,6 +469,41 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* ALERT BANNERS */}
+            {/* --- SYSTEM NOTIFICATIONS (NEW) --- */}
+            {systemNotifications.length > 0 && (
+                <div className="flex flex-col gap-3 mb-6 animate-fade-in">
+                    {systemNotifications.map(note => (
+                        <div key={note.id} className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-2 opacity-10">
+                                <Megaphone size={60} className="text-amber-600" />
+                            </div>
+                            <div className="flex items-start gap-4 relative z-10">
+                                <div className="h-12 w-12 rounded-xl bg-white text-amber-600 flex items-center justify-center shrink-0 shadow-sm border border-amber-100">
+                                    <Megaphone size={24} className="animate-pulse" />
+                                </div>
+                                <div className="flex-1">
+                                    <h4 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                                        {note.title}
+                                        <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold uppercase tracking-wider animate-pulse">Thông báo</span>
+                                    </h4>
+                                    <div
+                                        className="text-gray-700 text-sm mt-1 prose prose-sm max-w-none prose-p:my-0 prose-ul:my-0 prose-li:my-0"
+                                        dangerouslySetInnerHTML={{ __html: note.content }}
+                                    />
+                                    <div className="mt-2 text-xs font-medium text-amber-700 flex items-center gap-2">
+                                        <span>Từ: {note.sender_name}</span>
+                                        <span>•</span>
+                                        <span>{new Date(note.created_at).toLocaleDateString('vi-VN')}</span>
+                                        {/* @ts-ignore */}
+                                        {note.expires_at && <span>• Hết hạn: {new Date(note.expires_at).toLocaleDateString('vi-VN')}</span>}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in">
                 {(!isAdmin && !isMod) && alerts.assignedTodayToMe > 0 && (<div onClick={() => navigate('/customers', { state: { filterType: 'today' } })} className="bg-green-50 border border-green-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-green-100 transition-colors shadow-sm md:col-span-3 lg:col-span-1"><div className="h-12 w-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center shrink-0 animate-bounce"><Hand size={24} /></div><div className="flex-1"><h4 className="font-bold text-green-800">Cần tiếp nhận khách!</h4><p className="text-sm text-green-700">Bạn có <span className="font-bold text-lg ml-1">{alerts.assignedTodayToMe}</span> khách mới chưa bấm "Đã nhận".</p></div><ChevronRight className="text-green-400" /></div>)}
                 {(isAdmin || isMod) && alerts.pendingFinance > 0 && (<div onClick={() => navigate('/finance')} className="bg-purple-50 border border-purple-100 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-purple-100 transition-colors shadow-sm"><div className="h-12 w-12 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center shrink-0 animate-pulse"><BadgeDollarSign size={24} /></div><div className="flex-1"><h4 className="font-bold text-purple-800">Duyệt Quỹ / Tài chính</h4><p className="text-sm text-purple-700">Có <span className="font-bold text-lg ml-1">{alerts.pendingFinance}</span> yêu cầu chờ duyệt.</p></div><ChevronRight className="text-purple-400" /></div>)}

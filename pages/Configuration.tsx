@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { CarModel, CarVersion, QuoteConfig, BankConfig, QuoteConfigOption, BankPackage, Distributor, DemoCar, UserProfile, RegistrationService } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Trash2, Edit2, X, MapPin, Building2, Loader2, Copy, Terminal, Database, Car, Settings, CheckCircle2, AlertTriangle, Key, ChevronDown, Percent, Landmark, Wallet, Layers, Gift, Crown, ShieldCheck, Coins, RefreshCw, Megaphone } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, MapPin, Building2, Loader2, Copy, Terminal, Database, Car, Settings, CheckCircle2, AlertTriangle, Key, ChevronDown, Percent, Landmark, Wallet, Layers, Gift, Crown, ShieldCheck, Coins, RefreshCw, Megaphone, Upload } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import SystemSettingsPanel from '../components/SystemSettingsPanel';
 import SystemNotificationSender from '../components/SystemNotificationSender';
@@ -130,7 +130,17 @@ const Configuration: React.FC = () => {
         try {
             // Build Isolation Logic
             const getQuery = (table: string) => {
-                let query = supabase.from(table).select('*').order('created_at', { ascending: false });
+                let query = supabase.from(table).select('*');
+
+                // Sort Logic
+                if (table === 'registration_services') {
+                    query = query.order('priority', { ascending: true });
+                } else if (table === 'car_models') {
+                    query = query.order('priority', { ascending: true });
+                } else {
+                    query = query.order('created_at', { ascending: false });
+                }
+
                 // Some tables might not have manager_id, but the RLS policies in SQL handle permission.
                 // For tables with manager_id:
                 if (['distributors', 'car_models', 'car_versions', 'demo_cars', 'quote_configs', 'banks'].includes(table)) {
@@ -268,6 +278,51 @@ const Configuration: React.FC = () => {
         setBankPackages(newPkgs);
     };
 
+    // Drag & Drop State
+    const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+
+    const handleDragStart = (e: React.DragEvent, index: number) => {
+        setDraggedItemIndex(index);
+        e.dataTransfer.effectAllowed = "move";
+        // Ghost image enhancement (optional)
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault(); // Necessary to allow dropping
+        e.dataTransfer.dropEffect = "move";
+    };
+
+    const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+        e.preventDefault();
+        if (draggedItemIndex === null || draggedItemIndex === dropIndex) return;
+
+        // Reorder locally
+        const newItems = [...carModels];
+        const [movedItem] = newItems.splice(draggedItemIndex, 1);
+        newItems.splice(dropIndex, 0, movedItem);
+        setCarModels(newItems);
+        setDraggedItemIndex(null);
+
+        // Update DB
+        try {
+            const updates = newItems.map((item, index) => ({
+                id: item.id,
+                priority: index
+            }));
+
+            // Parallel update for performance
+            await Promise.all(updates.map(u =>
+                supabase.from('car_models').update({ priority: u.priority }).eq('id', u.id)
+            ));
+
+            showToast("Đã cập nhật thứ tự hiển thị!", 'success');
+        } catch (err) {
+            console.error("Reorder error", err);
+            showToast("Lỗi lưu thứ tự", 'error');
+            fetchData(); // Revert on error
+        }
+    };
+
     // Helper for Promo Car Model Multi-Select
     const toggleModelSelection = (modelId: string) => {
         let current = formData.apply_to_model_ids || [];
@@ -278,6 +333,42 @@ const Configuration: React.FC = () => {
         }
         // Also clear version selection if model selection changes to avoid stale versions
         setFormData({ ...formData, apply_to_model_ids: current, apply_to_version_ids: [] });
+    };
+
+    // Image Upload Handler
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files || e.target.files.length === 0) return;
+        const file = e.target.files[0];
+
+        if (file.size > 1024 * 1024) { // 1MB
+            showToast("File quá lớn! Vui lòng chọn ảnh dưới 1MB.", 'error');
+            return;
+        }
+
+        try {
+            const fileExt = file.name.split('.').pop();
+            const fileName = `dist_${Date.now()}.${fileExt}`;
+            const filePath = `${fileName}`;
+
+            // Create bucket if not exists logic is not here, assuming 'images' bucket exists
+            const { error: uploadError } = await supabase.storage
+                .from('images')
+                .upload(filePath, file);
+
+            if (uploadError) throw uploadError;
+
+            const { data } = supabase.storage.from('images').getPublicUrl(filePath);
+            setFormData({ ...formData, image_url: data.publicUrl });
+            showToast("Upload ảnh thành công!", 'success');
+        } catch (error: any) {
+            const msg = error.message || String(error);
+            if (msg.includes('Bucket not found')) {
+                setErrorMsg("DB_ERROR"); // Trigger the setup SQL display
+                showToast('Chưa tạo Storage Bucket! Vui lòng chạy SQL bên dưới.', 'error');
+            } else {
+                showToast('Lỗi upload ảnh: ' + msg, 'error');
+            }
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -298,7 +389,10 @@ const Configuration: React.FC = () => {
             }
 
             if (activeTab === 'distributors') table = 'distributors';
-            else if (activeTab === 'cars') { table = 'car_models'; }
+            else if (activeTab === 'cars') {
+                table = 'car_models';
+                payload.priority = typeof payload.priority === 'number' ? payload.priority : 0;
+            }
             else if (activeTab === 'versions') {
                 table = 'car_versions';
                 payload.price = Number(String(payload.price).replace(/\D/g, ''));
@@ -459,7 +553,66 @@ alter table public.quote_configs add column if not exists options jsonb; -- Stor
 alter table public.banks add column if not exists packages jsonb;
 
 -- Cập nhật cấu trúc cũ (nếu có)
+-- Cập nhật cấu trúc cũ (nếu có)
 update public.quote_configs set target_type = 'invoice' where target_type is null;
+
+-- Bổ sung cột ảnh cho đại lý
+alter table public.distributors add column if not exists image_url text;
+
+-- 4. Tạo Bucket 'images' (nếu chưa có)
+insert into storage.buckets (id, name, public)
+values ('images', 'images', true)
+on conflict (id) do nothing;
+
+-- 5. Cấp quyền truy cập Storage
+-- Cho phép mọi người xem ảnh (Public)
+drop policy if exists "Public Access" on storage.objects;
+create policy "Public Access"
+on storage.objects for select
+using ( bucket_id = 'images' );
+
+-- Cho phép người dùng đã đăng nhập upload ảnh
+drop policy if exists "Authenticated Upload" on storage.objects;
+create policy "Authenticated Upload"
+on storage.objects for insert
+with check ( bucket_id = 'images' and auth.role() = 'authenticated' );
+
+-- 6. Tạo bảng payment_accounts (Tài khoản đóng tiền đăng ký xe)
+create table if not exists public.payment_accounts (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id) on delete cascade,
+  name text not null,
+  content text,
+  qr_code_url text,
+  is_default boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table public.payment_accounts enable row level security;
+
+create policy "Users can manage own accounts" on public.payment_accounts
+  for all to authenticated using (auth.uid() = user_id);
+
+-- 7. Cập nhật bảng system_notifications cho tính năng Dashboard + Duration
+alter table public.system_notifications add column if not exists display_type text default 'popup'; -- 'popup', 'dashboard', 'both'
+alter table public.system_notifications add column if not exists expires_at timestamptz;
+
+-- Đảm bảo dữ liệu cũ (nếu có) là popup
+update public.system_notifications set display_type = 'popup' where display_type is null;
+
+-- 8. Fix RLS for Notification Acknowledgments (Allow Admins/Mods to view who read)
+drop policy if exists "Admins View All Acks" on public.notification_acknowledgments;
+create policy "Admins View All Acks" on public.notification_acknowledgments
+for select
+using (
+  exists (
+    select 1 from public.profiles
+    where profiles.id = auth.uid()
+    and (profiles.role = 'admin' or profiles.role = 'mod')
+  )
+);
+-- 9. Add Priority to Car Models for Drag & Drop Sorting
+alter table public.car_models add column if not exists priority int default 0;
 `;
 
     return (
@@ -556,7 +709,13 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                         <div key={dist.id} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all group relative">
                             <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="h-10 w-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center"><Building2 size={20} /></div>
+                                    <div className="h-12 w-12 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center overflow-hidden border border-blue-100 shrink-0">
+                                        {dist.image_url ? (
+                                            <img src={dist.image_url} alt={dist.name} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <Building2 size={24} />
+                                        )}
+                                    </div>
                                     <div><h3 className="font-bold text-gray-900">{dist.name}</h3>{dist.address && (<div className="flex items-center gap-1 text-xs text-gray-500 mt-1"><MapPin size={12} /> {dist.address}</div>)}</div>
                                 </div>
                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -567,12 +726,19 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                         </div>
                     ))}
 
-                    {activeTab === 'cars' && carModels.map(car => (
-                        <div key={car.id} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all group relative">
+                    {activeTab === 'cars' && carModels.map((car, index) => (
+                        <div
+                            key={car.id}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, index)}
+                            onDragOver={handleDragOver}
+                            onDrop={(e) => handleDrop(e, index)}
+                            className={`bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all group relative cursor-move ${draggedItemIndex === index ? 'opacity-50 ring-2 ring-blue-500 scale-95' : ''}`}
+                        >
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="h-10 w-10 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><Car size={20} /></div>
-                                    <h3 className="font-bold text-gray-900">{car.name}</h3>
+                                    <div className="h-10 w-10 rounded-lg bg-green-50 text-green-600 flex items-center justify-center pointer-events-none select-none"><Car size={20} /></div>
+                                    <h3 className="font-bold text-gray-900 select-none">{car.name}</h3>
                                 </div>
                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button onClick={() => handleOpenModal(car)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 size={16} /></button>
@@ -855,8 +1021,36 @@ update public.quote_configs set target_type = 'invoice' where target_type is nul
                                 <input required value={formData.name || ''} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-gray-900 focus:border-primary-500 outline-none" />
                             </div>
 
+                            {activeTab === 'cars' && (
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Thứ tự hiển thị (Nhỏ xếp trước)</label>
+                                    <input
+                                        type="number"
+                                        value={formData.priority || 0}
+                                        onChange={e => setFormData({ ...formData, priority: parseInt(e.target.value) })}
+                                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-gray-900 focus:border-primary-500 outline-none"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">VD: 0, 1, 2... Số càng nhỏ càng ở trên.</p>
+                                </div>
+                            )}
+
                             {activeTab === 'distributors' && (
-                                <div><label className="block text-sm font-bold text-gray-700 mb-1">Địa chỉ</label><input value={formData.address || ''} onChange={e => setFormData({ ...formData, address: e.target.value })} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-gray-900 outline-none" /></div>
+                                <>
+                                    <div><label className="block text-sm font-bold text-gray-700 mb-1">Địa chỉ</label><input value={formData.address || ''} onChange={e => setFormData({ ...formData, address: e.target.value })} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-gray-900 outline-none" /></div>
+                                    <div className="mt-2">
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">Hình ảnh (Max 1MB)</label>
+                                        <div className="flex items-center gap-4">
+                                            {formData.image_url && (
+                                                <img src={formData.image_url} alt="Preview" className="w-16 h-16 rounded-lg object-cover border border-gray-200" />
+                                            )}
+                                            <label className="flex items-center gap-2 cursor-pointer px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm font-bold text-gray-700 transition-colors">
+                                                <Upload size={16} />
+                                                {formData.image_url ? 'Thay đổi ảnh' : 'Tải lên ảnh'}
+                                                <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                                            </label>
+                                        </div>
+                                    </div>
+                                </>
                             )}
 
                             {activeTab === 'versions' && (

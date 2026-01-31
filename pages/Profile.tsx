@@ -3,9 +3,10 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  User, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Globe, Layout, ArrowUp, ArrowDown, RotateCcw, Camera, Crown, UploadCloud
+  User, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Globe, Layout, ArrowUp, ArrowDown, RotateCcw, Camera, Crown, CreditCard, Plus, Trash2, QrCode
 } from 'lucide-react';
-import { MembershipTier } from '../types';
+import { MembershipTier, PaymentAccount, TIER_ACCOUNT_LIMITS } from '../types';
+import AddPaymentAccountModal from '../components/AddPaymentAccountModal';
 
 const Profile: React.FC = () => {
   const { userProfile, session, isAdmin } = useAuth();
@@ -25,10 +26,17 @@ const Profile: React.FC = () => {
   const [menuOrder, setMenuOrder] = useState<string[]>([]);
   const [menuLabels, setMenuLabels] = useState<Record<string, string>>({});
 
-
+  // Password Change State
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Payment Accounts State
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [showAddAccountModal, setShowAddAccountModal] = useState(false);
+  const tierName = userProfile?.member_tier || 'Member';
+  const maxAccounts = TIER_ACCOUNT_LIMITS[tierName as keyof typeof TIER_ACCOUNT_LIMITS] || 1;
 
   const DEFAULT_MENU_KEYS = [
     { key: 'dashboard', label: 'Tổng quan' },
@@ -53,11 +61,49 @@ const Profile: React.FC = () => {
       setFullName(userProfile.full_name || '');
       setPhone(userProfile.phone || '');
       setAvatarUrl(userProfile.avatar_url || '');
+      fetchPaymentAccounts();
     }
     if (isAdmin) {
       fetchAppConfig();
     }
   }, [userProfile, isAdmin]);
+
+  // Fetch user's payment accounts
+  const fetchPaymentAccounts = async () => {
+    if (!userProfile?.id) return;
+    setLoadingAccounts(true);
+    try {
+      const { data } = await supabase
+        .from('payment_accounts')
+        .select('*')
+        .eq('user_id', userProfile.id)
+        .order('created_at', { ascending: true });
+      if (data) setPaymentAccounts(data as PaymentAccount[]);
+    } catch (err) {
+      console.error('Error fetching payment accounts:', err);
+    } finally {
+      setLoadingAccounts(false);
+    }
+  };
+
+  // Delete payment account
+  const handleDeleteAccount = async (accountId: string) => {
+    if (!confirm('Bạn có chắc muốn xóa tài khoản này?')) return;
+    try {
+      await supabase.from('payment_accounts').delete().eq('id', accountId);
+      setPaymentAccounts(prev => prev.filter(a => a.id !== accountId));
+      setMessage({ type: 'success', content: 'Đã xóa tài khoản thành công!' });
+    } catch (err: any) {
+      setMessage({ type: 'error', content: 'Lỗi xóa tài khoản: ' + err.message });
+    }
+  };
+
+  // Handle add account success
+  const handleAddAccountSuccess = (newAccount: PaymentAccount) => {
+    setPaymentAccounts(prev => [...prev, newAccount]);
+    setMessage({ type: 'success', content: 'Đã thêm tài khoản thành công!' });
+  };
+
 
   const fetchAppConfig = async () => {
     try {
@@ -342,8 +388,79 @@ const Profile: React.FC = () => {
             <div className="p-6 space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-2">Mật khẩu hiện tại</label><input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-gray-900 focus:border-green-500 outline-none font-medium" /></div><div><label className="block text-sm font-bold text-gray-700 mb-2">Mật khẩu mới</label><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-gray-900 focus:border-green-500 outline-none font-medium" /></div><div><label className="block text-sm font-bold text-gray-700 mb-2">Nhập lại mật khẩu mới</label><input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-gray-900 focus:border-green-500 outline-none font-medium" /></div></div>
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-100"><button type="submit" disabled={loading} className="w-full flex justify-center items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50">{loading ? <Loader2 className="animate-spin" size={18} /> : 'Đổi mật khẩu'}</button></div>
           </form>
+
+          {/* Payment Accounts Management */}
+          <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden">
+            <div className="p-6 border-b border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 rounded-lg text-blue-600">
+                  <CreditCard size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-900">Tài khoản đóng tiền đăng ký xe</h3>
+                  <p className="text-xs text-gray-500">{paymentAccounts.length}/{maxAccounts} tài khoản</p>
+                </div>
+              </div>
+              {paymentAccounts.length < maxAccounts && (
+                <button
+                  onClick={() => setShowAddAccountModal(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm transition-all"
+                >
+                  <Plus size={16} /> Thêm tài khoản
+                </button>
+              )}
+            </div>
+            <div className="p-6">
+              {loadingAccounts ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="animate-spin text-blue-500" size={24} />
+                </div>
+              ) : paymentAccounts.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <QrCode size={40} className="mx-auto mb-2 text-gray-300" />
+                  <p>Chưa có tài khoản nào</p>
+                  <p className="text-xs text-gray-400">Thêm tài khoản để gửi thông báo đóng tiền cho khách hàng</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {paymentAccounts.map((account) => (
+                    <div key={account.id} className="flex items-center gap-4 p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition-all">
+                      {account.qr_code_url ? (
+                        <img src={account.qr_code_url} alt="QR" className="w-14 h-14 rounded-lg object-cover border border-gray-200" />
+                      ) : (
+                        <div className="w-14 h-14 rounded-lg bg-gray-200 flex items-center justify-center">
+                          <QrCode size={24} className="text-gray-400" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-gray-800 truncate">{account.name}</p>
+                        {account.content && (
+                          <p className="text-xs text-gray-500 truncate">{account.content}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleDeleteAccount(account.id)}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Xóa tài khoản"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* Add Payment Account Modal */}
+      <AddPaymentAccountModal
+        visible={showAddAccountModal}
+        onClose={() => setShowAddAccountModal(false)}
+        onSuccess={handleAddAccountSuccess}
+        currentCount={paymentAccounts.length}
+      />
     </div>
   );
 };
