@@ -115,6 +115,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 return count || 0;
             }
         },
+        { key: 'fund_history', icon: FolderOpen, label: 'Lịch sử Quỹ', path: '/fund-history', roleReq: [UserRole.ADMIN, UserRole.MOD] },
         { key: 'utilities', icon: Sparkles, label: 'Tiện ích', path: '/utilities' },
         { key: 'configuration', icon: Settings, label: 'Cấu hình', path: '/system', roleReq: [UserRole.ADMIN, UserRole.MOD] },
         { key: 'profile', icon: User, label: 'Cá nhân', path: '/profile' },

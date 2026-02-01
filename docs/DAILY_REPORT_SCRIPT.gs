@@ -19,8 +19,13 @@ function sendDailyReport() {
 
   Logger.log('🔄 Bắt đầu chạy báo cáo ngày...');
   
-  const today = new Date();
-  today.setHours(0, 0, 0, 0); // Reset về đầu ngày 00:00:00
+  // Fix: Ensure 'today' is based on Vietnam Time (GMT+7)
+  const now = new Date();
+  const todayStr = Utilities.formatDate(now, "GMT+7", "yyyy-MM-dd");
+  // Create Date object from todayStr (Script interprets this as 00:00 local time)
+  // This matches how parseDate() works below
+  const parts = todayStr.split('-');
+  const today = new Date(parts[0], parts[1] - 1, parts[2]);
   
   // 1. Lấy danh sách nhân viên active
   const profiles = fetchSupabase('profiles', 'select=id,full_name,email&status=eq.active');

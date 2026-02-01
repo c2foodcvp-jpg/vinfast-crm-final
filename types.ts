@@ -247,6 +247,9 @@ export interface Customer {
 
   // Delivery Progress Tracking
   delivery_progress?: DeliveryProgress;
+
+  // Fund Period Assignment (for period-based fund closing)
+  fund_period_id?: string;
 }
 
 export interface DeliveryProgress {
@@ -336,6 +339,20 @@ export interface TeamFine {
   status: 'pending' | 'paid';
   created_at: string;
   paid_at?: string;
+}
+
+// NEW: Fund Period for period-based fund closing
+export interface FundPeriod {
+  id: string;
+  name: string;              // e.g. "Quỹ T1/2026"
+  start_date: string;        // ISO date (YYYY-MM-DD)
+  end_date?: string;         // ISO date, null = open period
+  closed_at?: string;        // ISO timestamp when closed
+  closed_by?: string;        // UUID of user who closed
+  is_completed?: boolean;    // NEW: Fund is fully completed/archived
+  completed_at?: string;     // NEW: When fund was marked as completed
+  manager_id?: string;       // Team isolation
+  created_at: string;
 }
 
 export interface AccessDelegation {

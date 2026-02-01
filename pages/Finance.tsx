@@ -2,13 +2,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import { Transaction, UserProfile, Customer, CustomerStatus, TransactionType, ProfitExclusion, EmployeeKPI } from '../types';
+import { Transaction, UserProfile, Customer, CustomerStatus, TransactionType, ProfitExclusion, EmployeeKPI, FundPeriod } from '../types';
 import { useNavigate } from 'react-router-dom';
 import {
     CheckCircle2, User, Filter,
     Loader2, X, ArrowUpRight, ArrowDownLeft, Trash2, Check, XCircle, AlertTriangle, Calendar,
     BadgeDollarSign, Settings2, Undo2, ExternalLink, Building2, QrCode,
-    Percent, MinusCircle, Gift, Scale, Hand
+    Percent, MinusCircle, Gift, Scale, Hand, Lock
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis, Legend } from 'recharts';
 
@@ -65,7 +65,7 @@ const Finance: React.FC = () => {
 
     // Missing Expense Modal State
     const [showExpenseModal, setShowExpenseModal] = useState(false);
-    const [expenseForm, setExpenseForm] = useState({ amount: '', reason: '' });
+    const [expenseForm, setExpenseForm] = useState({ amount: '', reason: '', fundPeriodId: '' });
 
     const [showConfigModal, setShowConfigModal] = useState(false);
     // NEW: QR Upload States (Replaces simple URL string)
@@ -96,6 +96,17 @@ const Finance: React.FC = () => {
     const [showBorrowModal, setShowBorrowModal] = useState(false);
     const [borrowForm, setBorrowForm] = useState({ customerId: '', amount: '', date: '', reason: '' });
 
+    // NEW: Fund Period States (Đóng Quỹ)
+    const [fundPeriods, setFundPeriods] = useState<FundPeriod[]>([]);
+    const [selectedFundPeriod, setSelectedFundPeriod] = useState<string>('all');
+    const [showCloseFundModal, setShowCloseFundModal] = useState(false);
+    const [closeFundForm, setCloseFundForm] = useState({
+        name: '',
+        startDate: '',
+        endDate: ''
+    });
+    const [isClosingFund, setIsClosingFund] = useState(false);
+
     const todayStr = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
 
 
@@ -107,7 +118,7 @@ const Finance: React.FC = () => {
         if (userProfile) {
             fetchDataWithIsolation();
         }
-    }, [userProfile]);
+    }, [userProfile, selectedTeam]); // Refetch when team changes for fund period isolation
 
     useEffect(() => {
         if (toast) {
@@ -150,6 +161,19 @@ const Finance: React.FC = () => {
             // NEW: Fetch all KPIs to link dynamically
             const { data: kpis } = await supabase.from('employee_kpis').select('*');
             if (kpis) setAllKPIs(kpis as EmployeeKPI[]);
+
+            // NEW: Fetch Fund Periods for this user's team (TEAM ISOLATED)
+            let periodsQuery = supabase.from('fund_periods').select('*');
+            if (isMod && userProfile) {
+                // Mod only sees their team's fund periods
+                periodsQuery = periodsQuery.eq('manager_id', userProfile.id);
+            } else if (isAdmin && selectedTeam !== 'all') {
+                // Admin viewing a specific team
+                periodsQuery = periodsQuery.eq('manager_id', selectedTeam);
+            }
+            // Admin with 'all' teams sees all fund periods (no filter)
+            const { data: periods } = await periodsQuery.order('start_date', { ascending: false });
+            if (periods) setFundPeriods(periods as FundPeriod[]);
 
             const extendedTrans: ExtendedTransaction[] = transList.map(t => {
                 const customer = t.customer_id ? custList.find(c => c.id === t.customer_id) : null;
@@ -290,7 +314,7 @@ const Finance: React.FC = () => {
                 approved_by: status === 'approved' ? userProfile?.id : null
             }]);
             if (error) throw error;
-            setShowExpenseModal(false); setExpenseForm({ amount: '', reason: '' }); fetchDataWithIsolation(); showToast(status === 'approved' ? "Đã duyệt Chi tiền" : "Đã gửi yêu cầu Chi!", 'success');
+            setShowExpenseModal(false); setExpenseForm({ amount: '', reason: '', fundPeriodId: '' }); fetchDataWithIsolation(); showToast(status === 'approved' ? "Đã duyệt Chi tiền" : "Đã gửi yêu cầu Chi!", 'success');
         } catch (e: any) { showToast("Lỗi: " + e.message, 'error'); }
     };
 
@@ -385,6 +409,323 @@ const Finance: React.FC = () => {
         } catch (e: any) { showToast("Lỗi: " + (e.message || "Unknown"), 'error'); } finally { setDealerDebtToConfirm(null); }
     };
 
+    // --- FUND PERIOD HANDLERS (Đóng Quỹ) ---
+    const handleCloseFund = async () => {
+        if (!closeFundForm.name || !closeFundForm.startDate) {
+            showToast("Vui lòng nhập tên quỹ và ngày bắt đầu", 'error');
+            return;
+        }
+
+        // VALIDATION: Check for overlap with existing fund periods (TEAM SCOPED)
+        const newStartDate = new Date(closeFundForm.startDate);
+
+        // Determine current team context for overlap check
+        const currentTeamId = isMod ? userProfile?.id : (isAdmin && selectedTeam !== 'all' ? selectedTeam : null);
+
+        // Only check overlap within the same team
+        for (const period of fundPeriods) {
+            // Skip periods from other teams (if team filter is active)
+            if (currentTeamId && period.manager_id !== currentTeamId) continue;
+
+            const existingStart = new Date(period.start_date);
+            const existingEnd = period.end_date ? new Date(period.end_date) : new Date(); // Open period assumes "now" as end
+
+            // Check if new start date falls within an existing period (inclusive)
+            if (newStartDate >= existingStart && newStartDate <= existingEnd) {
+                // Calculate next valid date (day after existing end)
+                const nextValidDate = new Date(existingEnd);
+                nextValidDate.setDate(nextValidDate.getDate() + 1);
+                const nextValidStr = nextValidDate.toISOString().split('T')[0];
+
+                showToast(`Ngày bắt đầu trùng với kỳ quỹ "${period.name}". Vui lòng chọn từ ngày ${nextValidStr} trở đi.`, 'error');
+                return;
+            }
+        }
+
+        setIsClosingFund(true);
+        try {
+            const newPeriod: Partial<FundPeriod> = {
+                name: closeFundForm.name,
+                start_date: closeFundForm.startDate,
+                end_date: closeFundForm.endDate || undefined,
+                closed_at: closeFundForm.endDate ? new Date().toISOString() : undefined,
+                closed_by: closeFundForm.endDate ? userProfile?.id : undefined,
+                manager_id: isMod ? userProfile?.id : (isAdmin && selectedTeam !== 'all' ? selectedTeam : undefined)
+            };
+
+            const { data, error } = await supabase
+                .from('fund_periods')
+                .insert([newPeriod])
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            setFundPeriods(prev => [data as FundPeriod, ...prev]);
+            setShowCloseFundModal(false);
+            setCloseFundForm({ name: '', startDate: '', endDate: '' });
+            showToast("Đã tạo kỳ quỹ mới!", 'success');
+        } catch (e: any) {
+            showToast("Lỗi đóng quỹ: " + e.message, 'error');
+        } finally {
+            setIsClosingFund(false);
+        }
+    };
+
+    // Fund Warning State
+    const [fundWarning, setFundWarning] = useState<{
+        visible: boolean;
+        periodId: string;
+        issues: { id: string; name: string; sales: string; reasons: string[] }[];
+        loading: boolean;
+    }>({ visible: false, periodId: '', issues: [], loading: false });
+
+    // Handle marking a fund period as completed (archived)
+    const handleCompleteFund = async (periodId: string, force = false) => {
+        if (!force) {
+            // Validation Phase
+            setFundWarning({ visible: true, periodId, issues: [], loading: true });
+            try {
+                const period = fundPeriods.find(p => p.id === periodId);
+                if (!period) throw new Error("Không tìm thấy kỳ quỹ");
+
+                // 1. COMPREHENSIVE IDENTIFICATION
+                // We need to identify ALL customers relevant to this period by TWO criteria:
+                // A. Customers CREATED in this period (New customers)
+                // B. Customers with TRANSACTIONS in this period (Old customers active now)
+
+                // Comprehensive Customer Identification (BROAD SCAN for MKT)
+                // We scan all MKT customers with relevant statuses to ensure "Silent Debtors" are caught
+                const distinctIds = new Set<string>();
+
+                // Strategy: Fetch ALL MKT Customers and filter in JS for maximum reliability
+                // This avoids complex OR queries and ensures we catch "Silent Debtors" (e.g. Completed but with Debt)
+                // INCREASED RANGE to 20,000 to avoid default 1000 row limit
+                let qBroad = supabase
+                    .from('customers')
+                    .select('id, status, deal_status')
+                    .ilike('source', '%mkt%')
+                    .range(0, 20000);
+
+                const { data: broadData, error: broadErr } = await qBroad;
+                if (broadErr) throw broadErr;
+
+                (broadData || []).forEach(c => {
+                    const statusLower = (c.status || '').toLowerCase();
+                    const dealStatus = (c.deal_status || '').toLowerCase();
+
+                    // Systematic Fix: REMOVE Status Filters
+                    // We scan ALL MKT customers to find "Silent Debtors" regardless of their status label.
+                    // We only exclude explicitly "Lost" or "Cancelled" customers.
+
+                    const isLost = statusLower.includes('hủy') || statusLower.includes('lost') || dealStatus.includes('cancel') || dealStatus.includes('lost');
+
+                    if (!isLost) {
+                        distinctIds.add(c.id);
+                    }
+                });
+
+                // Also include explicitly assigned customers (even if not MKT)
+                const { data: assignedIds } = await supabase.from('customers').select('id').eq('fund_period_id', periodId);
+                (assignedIds || []).forEach(x => distinctIds.add(x.id));
+
+                const targetCustomerIds = Array.from(distinctIds);
+                let periodCustomers: Customer[] = [];
+                let allCustTrans: any[] = [];
+
+                // 2. FETCH DETAILS (Chunked to avoid 400 Bad Request)
+                if (targetCustomerIds.length > 0) {
+                    const chunkSize = 20;
+                    const chunks = [];
+                    for (let i = 0; i < targetCustomerIds.length; i += chunkSize) {
+                        chunks.push(targetCustomerIds.slice(i, i + chunkSize));
+                    }
+
+                    // A. Fetch Customer Profiles
+                    const custPromises = chunks.map(chunk =>
+                        supabase.from('customers').select('*').in('id', chunk)
+                    );
+                    const custResults = await Promise.all(custPromises);
+                    for (const res of custResults) {
+                        if (res.error) throw res.error;
+                        if (res.data) periodCustomers = [...periodCustomers, ...res.data];
+                    }
+
+                    // B. Fetch Lifetime Transactions (for Debt Check)
+                    const transPromises = chunks.map(chunk =>
+                        supabase.from('transactions').select('*').in('customer_id', chunk)
+                    );
+                    const transResults = await Promise.all(transPromises);
+                    for (const res of transResults) {
+                        if (res.error) throw res.error;
+                        if (res.data) allCustTrans = [...allCustTrans, ...res.data];
+                    }
+                }
+
+                const periodTrans = allCustTrans;
+
+                const detectedIssues: { id: string; name: string; sales: string; reasons: string[] }[] = [];
+
+                // 3. Analyze each customer
+                for (const c of (periodCustomers as Customer[])) {
+                    // Skip LOST/REFUNDED customers
+                    if (['Đã hủy', 'Chờ duyệt hủy'].includes(c.status)) continue;
+
+                    // Allow suspended now as per broader logic, but skip refunded if no debt?
+                    // actually, keep skipping refunded unless debt check?
+                    // Previous logic skipped refunded. Let's stick to 'Active' statuses.
+                    if (['refunded', 'cancelled'].includes(c.deal_status || '')) continue;
+
+                    // Team Filter Logic (Case Insensitive Match)
+                    // Fixes issue where "Nguyễn Nhất TRung" (Customer) != "Nguyễn Nhất Trung" (Profile)
+                    const sRepName = (c.sales_rep || '').toLowerCase().trim();
+                    const salesProfile = allProfiles.find(p =>
+                        (p.full_name || '').toLowerCase().trim() === sRepName ||
+                        (p.email || '').toLowerCase().trim() === sRepName
+                    );
+
+                    if (isAdmin) {
+                        if (selectedTeam !== 'all') {
+                            if (salesProfile) {
+                                if (salesProfile.manager_id !== selectedTeam && salesProfile.id !== selectedTeam) continue;
+                            }
+                        }
+                    } else if (isMod) {
+                        // For Mods, if profile is not found (e.g. name typo), we strictly skip?
+                        // Or should we fallback to Creator ID?
+                        // Current logic: If name matches Self or Subordinate.
+                        // If name mismatch/unfound, filtered out.
+
+                        const isSelf = salesProfile?.id === userProfile?.id;
+                        const isSubordinate = salesProfile?.manager_id === userProfile?.id;
+                        if (!isSelf && !isSubordinate) continue;
+                    }
+
+                    // MKT Filter: Only warn for MKT Group customers
+                    if (!c.source?.toLowerCase().includes('mkt')) continue;
+
+                    // Only check WON or potential if logic dictates? Usually only WON matters for debt.
+                    // If status is NEW/CONTACTED/POTENTIAL, do they have debt? Maybe advance?
+
+                    const cReasons: string[] = [];
+                    // Filter transactions for this customer ONCE at top of loop
+                    const cTrans = (periodTrans as Transaction[]).filter(t => t.customer_id === c.id);
+
+                    // Check A: Money Recovery (For WON or Processing deals)
+                    // Expanded status check: WON, or Deal Processing, or has Deposit
+                    const hasDeal = c.status === CustomerStatus.WON ||
+                        c.status === CustomerStatus.WON_PENDING ||
+                        (c.deal_status === 'processing');
+
+                    if (hasDeal || c.delivery_progress?.['deposited']?.completed) {
+                        const isMoneyDone = c.delivery_progress?.['money_recovered']?.completed;
+                        if (!isMoneyDone) {
+                            // Calculate saleDebt: (Revenue - Incurred) - Deposited
+                            // This matches the getCustomerDebt logic in Deals.tsx
+                            const incurred = cTrans
+                                .filter(t => t.type === 'incurred_expense' && t.status === 'approved')
+                                .reduce((sum, t) => sum + t.amount, 0);
+                            const deposited = cTrans
+                                .filter(t => t.type === 'deposit' && t.status === 'approved')
+                                .reduce((sum, t) => sum + t.amount, 0);
+
+                            // Use actual_revenue first (like Deals.tsx line 733)
+                            const baseRevenue = c.deal_details?.actual_revenue || c.deal_details?.revenue || 0;
+                            const saleDebt = Math.max(0, (baseRevenue - incurred) - deposited);
+
+                            // Modified: Only warn if there is ACTUAL sale debt (> 0)
+                            // If debt is 0, we treat it as recovered (or not requiring recovery), ignoring the step checkbox
+                            if (saleDebt > 0) {
+                                const pendingStr = `: ${saleDebt.toLocaleString('vi-VN')} đ`;
+                                cReasons.push(`Chưa hoàn tất thu hồi công nợ (Chưa vào quỹ${pendingStr})`);
+                            }
+                        }
+                    }
+
+                    // Check B: Debt Balance (Lifetime for this customer)
+                    // cTrans is already defined above
+                    const debt = cTrans
+                        .filter(t => ['dealer_debt', 'advance', 'loan'].includes(t.type) && t.status === 'approved')
+                        .reduce((sum, t) => sum + t.amount, 0);
+                    const repaid = cTrans
+                        .filter(t => ['repayment', 'loan_repayment'].includes(t.type) && t.status === 'approved')
+                        .reduce((sum, t) => sum + t.amount, 0);
+
+                    const remainingDebt = debt - repaid;
+                    if (remainingDebt > 0) {
+                        cReasons.push(`Còn nợ quỹ: ${remainingDebt.toLocaleString('vi-VN')} đ`);
+                    }
+
+                    if (cReasons.length > 0) {
+                        // Find Sales Rep Name
+                        const salesProfile = allProfiles.find(p => p.full_name === c.sales_rep || p.email === c.sales_rep) || { full_name: c.sales_rep || 'N/A' };
+
+                        detectedIssues.push({
+                            id: c.id,
+                            name: c.name,
+                            sales: salesProfile.full_name,
+                            reasons: cReasons
+                        });
+                    }
+                }
+
+                if (detectedIssues.length > 0) {
+                    setFundWarning({
+                        visible: true,
+                        periodId,
+                        issues: detectedIssues,
+                        loading: false
+                    });
+                    return; // Stop here, show modal
+                } else {
+                    setFundWarning(prev => ({ ...prev, visible: false }));
+                    // No issues, proceed to confirm logic below
+                }
+
+            } catch (e: any) {
+                console.error(e);
+                showToast("Lỗi kiểm tra dữ liệu: " + e.message, 'error');
+                setFundWarning(prev => ({ ...prev, visible: false }));
+                return;
+            }
+        }
+
+        // CONFIRMATION (If no issues or forced)
+        if (!force && !window.confirm('Xác nhận hoàn thành quỹ? Quỹ sẽ được lưu trữ và không thể chỉnh sửa thêm.')) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('fund_periods')
+                .update({
+                    is_completed: true,
+                    completed_at: new Date().toISOString()
+                })
+                .eq('id', periodId);
+
+            if (error) throw error;
+
+            // Update local state
+            setFundPeriods(prev => prev.map(p =>
+                p.id === periodId
+                    ? { ...p, is_completed: true, completed_at: new Date().toISOString() }
+                    : p
+            ));
+
+            // Reset selection if completed fund was selected
+            if (selectedFundPeriod === periodId) {
+                setSelectedFundPeriod('all');
+            }
+
+            // Close modal if open
+            setFundWarning(prev => ({ ...prev, visible: false }));
+            showToast("Đã hoàn thành quỹ!", 'success');
+        } catch (e: any) {
+            showToast("Lỗi: " + e.message, 'error');
+        }
+    };
+
     // --- PROFIT SHARING HANDLERS ---
     const handleUpdateRatio = async (userId: string) => {
         const ratio = parseFloat(tempRatio);
@@ -453,11 +794,50 @@ const Finance: React.FC = () => {
             // 2. OR is 'personal_bonus' (demo car fees) - these often have user_id but no customer_id
             // 3. OR is 'advance'/'expense'/'adjustment' (no customer_id required)
             if (t.customer_id) {
-                return isMKT(t._source);
+                if (!isMKT(t._source)) return false;
             }
+
+            // NEW: Fund Period Filter for Transactions
+            // Key Logic: Transactions are assigned to a period based on their CUSTOMER's created_at
+            // This ensures that old customers' payments (even if made after closing) stay in old period
+            if (selectedFundPeriod !== 'all') {
+                const period = fundPeriods.find(p => p.id === selectedFundPeriod);
+                if (period) {
+                    if (t.customer_id) {
+                        // Transaction has customer → use customer's created_at
+                        const customer = allCustomers.find(c => c.id === t.customer_id);
+                        if (customer) {
+                            const customerDate = new Date(customer.created_at);
+                            const periodStart = new Date(period.start_date);
+
+                            if (customerDate < periodStart) return false;
+
+                            if (period.end_date) {
+                                const periodEnd = new Date(period.end_date);
+                                periodEnd.setHours(23, 59, 59, 999);
+                                if (customerDate > periodEnd) return false;
+                            }
+                        }
+                    } else {
+                        // Transaction has NO customer (advance, expense, adjustment, dealer_debt)
+                        // Use transaction's own created_at
+                        const transDate = new Date(t.created_at);
+                        const periodStart = new Date(period.start_date);
+
+                        if (transDate < periodStart) return false;
+
+                        if (period.end_date) {
+                            const periodEnd = new Date(period.end_date);
+                            periodEnd.setHours(23, 59, 59, 999);
+                            if (transDate > periodEnd) return false;
+                        }
+                    }
+                }
+            }
+
             return true;
         });
-    }, [transactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, allProfiles, userProfile]);
+    }, [transactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, allProfiles, userProfile, selectedFundPeriod, fundPeriods, allCustomers]);
 
     const filteredCustomers = useMemo(() => {
         return allCustomers.filter(c => {
@@ -504,9 +884,29 @@ const Finance: React.FC = () => {
             } else {
                 if (c.creator_id !== userProfile?.id) return false;
             }
+
+            // NEW: Fund Period Filter - Customers are assigned based on created_at
+            if (selectedFundPeriod !== 'all') {
+                const period = fundPeriods.find(p => p.id === selectedFundPeriod);
+                if (period) {
+                    const customerDate = new Date(c.created_at);
+                    const periodStart = new Date(period.start_date);
+
+                    // Customer must be created on or after period start
+                    if (customerDate < periodStart) return false;
+
+                    // If period has end_date, customer must be created on or before end
+                    if (period.end_date) {
+                        const periodEnd = new Date(period.end_date);
+                        periodEnd.setHours(23, 59, 59, 999); // Include entire end day
+                        if (customerDate > periodEnd) return false;
+                    }
+                }
+            }
+
             return true;
         });
-    }, [allCustomers, filterMode, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, allProfiles, userProfile]);
+    }, [allCustomers, filterMode, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, allProfiles, userProfile, selectedFundPeriod, fundPeriods]);
 
     const exclusionCandidates = useMemo(() => {
         if (!targetUserForExclusion) return [];
@@ -645,7 +1045,26 @@ const Finance: React.FC = () => {
 
                 // Use won_at (Deal Close) for KPI. If missing, use created_at (Deal Start).
                 const effectiveDate = c.won_at || c.created_at || '';
-                return isInMonthYear(effectiveDate);
+                if (!isInMonthYear(effectiveDate)) return false;
+
+                // NEW: Fund Period Filter for KPI - use customer's created_at
+                if (selectedFundPeriod !== 'all') {
+                    const period = fundPeriods.find(p => p.id === selectedFundPeriod);
+                    if (period) {
+                        const customerDate = new Date(c.created_at);
+                        const periodStart = new Date(period.start_date);
+
+                        if (customerDate < periodStart) return false;
+
+                        if (period.end_date) {
+                            const periodEnd = new Date(period.end_date);
+                            periodEnd.setHours(23, 59, 59, 999);
+                            if (customerDate > periodEnd) return false;
+                        }
+                    }
+                }
+
+                return true;
             }).length;
 
             const missedKpi = Math.max(0, kpiTarget - kpiActual);
@@ -798,7 +1217,7 @@ const Finance: React.FC = () => {
         });
 
         return rows;
-    }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, pnlNet, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, allKPIs]);
+    }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, pnlNet, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, allKPIs, selectedFundPeriod, fundPeriods]);
 
     // --- NEW: Employee Performance & Debt Stats ---
     const employeeStats = useMemo(() => {
@@ -1076,6 +1495,65 @@ const Finance: React.FC = () => {
                         <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm whitespace-nowrap text-center">
                             MKT Group
                         </div>
+
+                        {/* Fund Period Selector - Hide completed funds */}
+                        {fundPeriods.filter(p => !p.is_completed).length > 0 && (
+                            <div className="relative flex-1 sm:flex-none min-w-[140px]">
+                                <select
+                                    value={selectedFundPeriod}
+                                    onChange={(e) => setSelectedFundPeriod(e.target.value)}
+                                    className="w-full appearance-none bg-amber-50 border border-amber-200 text-amber-700 py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-100 text-sm font-bold shadow-sm cursor-pointer"
+                                >
+                                    <option value="all">Tất cả Kỳ Quỹ</option>
+                                    {fundPeriods.filter(p => !p.is_completed).map(period => (
+                                        <option key={period.id} value={period.id}>
+                                            {period.name} {period.end_date ? '✓' : '(đang mở)'}
+                                        </option>
+                                    ))}
+                                </select>
+                                <Lock size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-400 pointer-events-none" />
+                            </div>
+                        )}
+
+                        {/* Complete Fund Button - Only show when a specific period is selected */}
+                        {(isAdmin || isMod) && selectedFundPeriod !== 'all' && (
+                            <button
+                                onClick={() => handleCompleteFund(selectedFundPeriod)}
+                                className="px-3 py-2.5 bg-green-50 text-green-600 border border-green-200 rounded-xl text-sm font-bold hover:bg-green-100 transition-all whitespace-nowrap flex items-center gap-1 shadow-sm"
+                                title="Hoàn thành và lưu quỹ vào lịch sử"
+                            >
+                                <CheckCircle2 size={16} /> Hoàn thành
+                            </button>
+                        )}
+
+                        {/* Close Fund Button */}
+                        {(isAdmin || isMod) && (
+                            <button
+                                onClick={() => {
+                                    // Auto-fill form with suggested values
+                                    const now = new Date();
+                                    const month = now.getMonth() + 1;
+                                    const year = now.getFullYear();
+                                    const suggestedName = `Quỹ T${month}/${year}`;
+
+                                    // Find last period end date to auto-fill start date
+                                    const lastPeriod = fundPeriods.find(p => p.end_date && !p.is_completed);
+                                    const nextStartDate = lastPeriod?.end_date
+                                        ? new Date(new Date(lastPeriod.end_date).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                                        : todayStr;
+
+                                    setCloseFundForm({
+                                        name: suggestedName,
+                                        startDate: nextStartDate,
+                                        endDate: ''
+                                    });
+                                    setShowCloseFundModal(true);
+                                }}
+                                className="px-4 py-2.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-xl text-sm font-bold hover:bg-amber-100 transition-all whitespace-nowrap flex items-center gap-2 shadow-sm"
+                            >
+                                <Lock size={16} /> Đóng Quỹ
+                            </button>
+                        )}
 
                         <div className="flex gap-2 ml-auto sm:ml-0 w-full sm:w-auto xl:w-auto">
                             {(isAdmin || isMod) && (
@@ -1422,99 +1900,237 @@ const Finance: React.FC = () => {
             </div>
 
             {/* ... (Keep existing modals unchanged) ... */}
-            {showDepositModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Nộp quỹ / Doanh thu</h3><button onClick={() => setShowDepositModal(false)}><X size={24} className="text-gray-400" /></button></div>
-                {effectiveQrUrl ? (
-                    <div className="flex flex-col items-center mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">
-                        <img src={effectiveQrUrl} alt="QR Code" className="w-48 h-48 object-contain mb-2 mix-blend-multiply" />
-                        <p className="text-xs text-gray-500 text-center">Quét mã để chuyển khoản cho Team Lead.</p>
-                    </div>
-                ) : (
-                    <div className="mb-6 p-4 bg-yellow-50 text-yellow-700 text-sm text-center rounded-xl border border-yellow-200">
-                        Chưa có QR Code. Vui lòng liên hệ Team Lead để cấu hình.
-                    </div>
-                )}
-                <div className="space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Chọn Khách hàng (Đã chốt)</label><select className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.customerId} onChange={e => setDepositForm({ ...depositForm, customerId: e.target.value })}><option value="">-- Chọn khách hàng --</option>{availableCustomersForDeposit.map(c => <option key={c.id} value={c.id}>{c.name} - {c.phone}</option>)}</select>{availableCustomersForDeposit.length === 0 && <p className="text-xs text-red-500 mt-1">Không có khách hàng khả dụng</p>}</div><div><label className="block text-sm font-bold text-gray-700 mb-1">Số tiền</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900 font-bold" value={depositForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDepositForm({ ...depositForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} /></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Nội dung</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.reason} onChange={e => setDepositForm({ ...depositForm, reason: e.target.value })} /></div><button onClick={handleSubmitDeposit} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận đã nộp</button></div></div></div>)}
+            {
+                showDepositModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Nộp quỹ / Doanh thu</h3><button onClick={() => setShowDepositModal(false)}><X size={24} className="text-gray-400" /></button></div>
+                    {effectiveQrUrl ? (
+                        <div className="flex flex-col items-center mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">
+                            <img src={effectiveQrUrl} alt="QR Code" className="w-48 h-48 object-contain mb-2 mix-blend-multiply" />
+                            <p className="text-xs text-gray-500 text-center">Quét mã để chuyển khoản cho Team Lead.</p>
+                        </div>
+                    ) : (
+                        <div className="mb-6 p-4 bg-yellow-50 text-yellow-700 text-sm text-center rounded-xl border border-yellow-200">
+                            Chưa có QR Code. Vui lòng liên hệ Team Lead để cấu hình.
+                        </div>
+                    )}
+                    <div className="space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Chọn Khách hàng (Đã chốt)</label><select className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.customerId} onChange={e => setDepositForm({ ...depositForm, customerId: e.target.value })}><option value="">-- Chọn khách hàng --</option>{availableCustomersForDeposit.map(c => <option key={c.id} value={c.id}>{c.name} - {c.phone}</option>)}</select>{availableCustomersForDeposit.length === 0 && <p className="text-xs text-red-500 mt-1">Không có khách hàng khả dụng</p>}</div><div><label className="block text-sm font-bold text-gray-700 mb-1">Số tiền</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900 font-bold" value={depositForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDepositForm({ ...depositForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} /></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Nội dung</label><input type="text" className="w-full border border-gray-300 p-2 rounded-xl outline-none bg-white text-gray-900" value={depositForm.reason} onChange={e => setDepositForm({ ...depositForm, reason: e.target.value })} /></div><button onClick={handleSubmitDeposit} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận đã nộp</button></div></div></div>)
+            }
             {showAdjustmentModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Điều chỉnh Quỹ (Admin)</h3><button onClick={() => setShowAdjustmentModal(false)}><X size={24} className="text-gray-400" /></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền (+/-)</label><input type="text" value={adjustmentForm.amount} onChange={e => setAdjustmentForm({ ...adjustmentForm, amount: e.target.value })} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" placeholder="-500000 hoặc 1000000" /></div><div><label className="text-sm font-bold text-gray-600">Lý do</label><input type="text" value={adjustmentForm.reason} onChange={e => setAdjustmentForm({ ...adjustmentForm, reason: e.target.value })} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" /></div><button onClick={handleSubmitAdjustment} className="w-full py-3 bg-gray-800 text-white font-bold rounded-xl hover:bg-gray-900">Xác nhận điều chỉnh</button></div></div></div>)}
 
             {showAdvanceModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-red-700">Tạm Ứng (Cần hoàn lại)</h3><button onClick={() => setShowAdvanceModal(false)}><X size={24} className="text-gray-400" /></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền cần ứng</label><input type="text" value={advanceForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setAdvanceForm({ ...advanceForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do ứng</label><input type="text" value={advanceForm.reason} onChange={e => setAdvanceForm({ ...advanceForm, reason: e.target.value })} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder="VD: Đi tiếp khách..." /></div><div className="text-xs text-gray-500 italic bg-gray-50 p-2 rounded">Khoản này sẽ tạo thành <strong>Nợ tạm ứng</strong> cần phải hoàn trả sau này.</div><button onClick={handleSubmitAdvance} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Gửi yêu cầu Ứng</button></div></div></div>)}
 
-            {/* NEW EXPENSE MODAL */}
-            {showExpenseModal && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-red-700">Chi Tiền (Trừ thẳng quỹ)</h3><button onClick={() => setShowExpenseModal(false)}><X size={24} className="text-gray-400" /></button></div><div className="space-y-4"><div><label className="text-sm font-bold text-gray-600">Số tiền chi</label><input type="text" value={expenseForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({ ...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold" /></div><div><label className="text-sm font-bold text-gray-600">Lý do chi</label><input type="text" value={expenseForm.reason} onChange={e => setExpenseForm({ ...expenseForm, reason: e.target.value })} className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900" placeholder="VD: Mua nước, liên hoan..." /></div><div className="text-xs text-gray-500 italic bg-gray-50 p-2 rounded">Lưu ý: Khoản này là <strong>Chi phí</strong> chung, sẽ trừ thẳng vào quỹ và KHÔNG tạo nợ cá nhân.</div><button onClick={handleSubmitExpense} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Gửi yêu cầu Chi</button></div></div></div>)}
-
-            {showConfigModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6">
-                        <h3 className="text-lg font-bold text-gray-900 mb-4">Cấu hình QR Code (Team)</h3>
-
-                        <div className="mb-4">
-                            <label className="block text-sm font-bold text-gray-700 mb-2">Tải ảnh QR lên</label>
-                            <input
-                                type="file"
-                                accept="image/*"
-                                onChange={(e) => {
-                                    if (e.target.files && e.target.files[0]) {
-                                        setQrFile(e.target.files[0]);
-                                        setQrPreview(URL.createObjectURL(e.target.files[0]));
-                                    }
-                                }}
-                                className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                            />
-                        </div>
-
-                        {qrPreview && (
-                            <div className="mb-4 p-2 bg-gray-50 border rounded-xl flex justify-center relative group">
-                                <img src={qrPreview} alt="Preview" className="h-40 object-contain" />
-                                {qrFile && <div className="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><span className="bg-black/70 text-white text-xs px-2 py-1 rounded">Mới</span></div>}
+            {/* CLOSE FUND MODAL */}
+            {
+                showCloseFundModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-md p-6">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-lg font-bold text-amber-700 flex items-center gap-2">
+                                    <Lock size={20} /> Tạo / Đóng Kỳ Quỹ
+                                </h3>
+                                <button onClick={() => setShowCloseFundModal(false)}>
+                                    <X size={24} className="text-gray-400 hover:text-gray-600" />
+                                </button>
                             </div>
-                        )}
 
-                        <div className="flex justify-end gap-2">
-                            <button onClick={() => setShowConfigModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg font-bold">Hủy</button>
-                            <button onClick={handleSaveQr} disabled={isSavingQr} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold flex items-center gap-2">
-                                {isSavingQr && <Loader2 className="animate-spin" size={16} />} Lưu
-                            </button>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Tên Kỳ Quỹ *</label>
+                                    <input
+                                        type="text"
+                                        value={closeFundForm.name}
+                                        onChange={e => setCloseFundForm({ ...closeFundForm, name: e.target.value })}
+                                        className="w-full border border-gray-300 p-3 rounded-xl outline-none bg-white text-gray-900 font-bold focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                                        placeholder="VD: Quỹ T1/2026"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">Ngày bắt đầu *</label>
+                                        <input
+                                            type="date"
+                                            value={closeFundForm.startDate}
+                                            onChange={e => setCloseFundForm({ ...closeFundForm, startDate: e.target.value })}
+                                            className="w-full border border-gray-300 p-3 rounded-xl outline-none bg-white text-gray-900 focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">Ngày kết thúc</label>
+                                        <input
+                                            type="date"
+                                            value={closeFundForm.endDate}
+                                            onChange={e => setCloseFundForm({ ...closeFundForm, endDate: e.target.value })}
+                                            className="w-full border border-gray-300 p-3 rounded-xl outline-none bg-white text-gray-900 focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="text-xs text-gray-500 bg-amber-50 p-3 rounded-xl border border-amber-100">
+                                    <p className="font-semibold text-amber-700 mb-1">💡 Hướng dẫn:</p>
+                                    <ul className="list-disc list-inside space-y-1">
+                                        <li>Để trống ngày kết thúc = Kỳ quỹ đang mở (chưa đóng)</li>
+                                        <li>Nhập ngày kết thúc = Đóng kỳ quỹ ngay</li>
+                                        <li>Khách hàng được phân theo ngày <strong>tạo khách</strong></li>
+                                    </ul>
+                                </div>
+
+                                <button
+                                    onClick={handleCloseFund}
+                                    disabled={isClosingFund}
+                                    className="w-full py-3 bg-amber-600 text-white font-bold rounded-xl hover:bg-amber-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    {isClosingFund ? (
+                                        <><Loader2 size={18} className="animate-spin" /> Đang xử lý...</>
+                                    ) : (
+                                        <><Lock size={18} /> Tạo Kỳ Quỹ</>
+                                    )}
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
+            {/* NEW EXPENSE MODAL */}
+            {
+                showExpenseModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-red-700">Chi Tiền (Trừ thẳng quỹ)</h3>
+                                <button onClick={() => setShowExpenseModal(false)}>
+                                    <X size={24} className="text-gray-400" />
+                                </button>
+                            </div>
+                            <div className="space-y-4">
+                                {/* NEW: Fund Period Selector */}
+                                {fundPeriods.filter(p => !p.is_completed).length > 0 && (
+                                    <div>
+                                        <label className="text-sm font-bold text-gray-600">Chọn gói quỹ</label>
+                                        <select
+                                            value={expenseForm.fundPeriodId}
+                                            onChange={e => setExpenseForm({ ...expenseForm, fundPeriodId: e.target.value })}
+                                            className="w-full border border-amber-300 p-2 rounded-lg outline-none bg-amber-50 text-gray-900 font-bold"
+                                        >
+                                            <option value="">-- Quỹ hiện tại --</option>
+                                            {fundPeriods.filter(p => !p.is_completed).map(period => (
+                                                <option key={period.id} value={period.id}>
+                                                    {period.name} {period.end_date ? '(đã đóng)' : '(đang mở)'}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                                <div>
+                                    <label className="text-sm font-bold text-gray-600">Số tiền chi</label>
+                                    <input
+                                        type="text"
+                                        value={expenseForm.amount}
+                                        onChange={e => { const v = e.target.value.replace(/\D/g, ''); setExpenseForm({ ...expenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }}
+                                        className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900 font-bold"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-sm font-bold text-gray-600">Lý do chi</label>
+                                    <input
+                                        type="text"
+                                        value={expenseForm.reason}
+                                        onChange={e => setExpenseForm({ ...expenseForm, reason: e.target.value })}
+                                        className="w-full border border-gray-300 p-2 rounded-lg outline-none bg-white text-gray-900"
+                                        placeholder="VD: Mua nước, liên hoan..."
+                                    />
+                                </div>
+                                <div className="text-xs text-gray-500 italic bg-gray-50 p-2 rounded">
+                                    Lưu ý: Khoản này là <strong>Chi phí</strong> chung, sẽ trừ thẳng vào quỹ và KHÔNG tạo nợ cá nhân.
+                                </div>
+                                <button onClick={handleSubmitExpense} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">
+                                    Gửi yêu cầu Chi
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {
+                showConfigModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+                            <h3 className="text-lg font-bold text-gray-900 mb-4">Cấu hình QR Code (Team)</h3>
+
+                            <div className="mb-4">
+                                <label className="block text-sm font-bold text-gray-700 mb-2">Tải ảnh QR lên</label>
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                        if (e.target.files && e.target.files[0]) {
+                                            setQrFile(e.target.files[0]);
+                                            setQrPreview(URL.createObjectURL(e.target.files[0]));
+                                        }
+                                    }}
+                                    className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                                />
+                            </div>
+
+                            {qrPreview && (
+                                <div className="mb-4 p-2 bg-gray-50 border rounded-xl flex justify-center relative group">
+                                    <img src={qrPreview} alt="Preview" className="h-40 object-contain" />
+                                    {qrFile && <div className="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><span className="bg-black/70 text-white text-xs px-2 py-1 rounded">Mới</span></div>}
+                                </div>
+                            )}
+
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => setShowConfigModal(false)} className="px-4 py-2 bg-gray-100 rounded-lg font-bold">Hủy</button>
+                                <button onClick={handleSaveQr} disabled={isSavingQr} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold flex items-center gap-2">
+                                    {isSavingQr && <Loader2 className="animate-spin" size={16} />} Lưu
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
             {showExclusionModal && targetUserForExclusion && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[80vh] flex flex-col"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Loại trừ khách hàng</h3><button onClick={() => setShowExclusionModal(false)}><X size={24} className="text-gray-400" /></button></div><div className="bg-yellow-50 p-3 rounded-xl mb-4 border border-yellow-100"><p className="text-sm text-yellow-800">Đang chọn loại trừ cho: <strong>{targetUserForExclusion.full_name}</strong></p><p className="text-xs text-yellow-700 mt-1">Danh sách hiển thị: Khách <strong>MKT Group</strong>, Đã chốt, Chưa hoàn tiền (Thuộc Team đang chọn).</p></div><div className="overflow-y-auto flex-1 space-y-2 border-t border-gray-100 pt-2">{exclusionCandidates.length === 0 ? <p className="text-center text-gray-400 py-4">Không có khách hàng MKT nào phù hợp.</p> : exclusionCandidates.map(c => { const isExcluded = profitExclusions.some(ex => ex.user_id === targetUserForExclusion.id && ex.customer_id === c.id); return (<div key={c.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 cursor-pointer" onClick={() => handleToggleExclusion(c.id)}><div><p className="font-bold text-sm text-gray-900">{c.name} <span className="font-normal text-gray-500">({c.sales_rep})</span></p><p className="text-xs text-gray-500">{formatCurrency(c.deal_details?.revenue || 0)} VNĐ • {c.source}</p></div><div className={`w-5 h-5 rounded border flex items-center justify-center ${isExcluded ? 'bg-red-500 border-red-500 text-white' : 'border-gray-300'}`}>{isExcluded && <Check size={14} />}</div></div>); })}</div><div className="mt-4 pt-2 border-t flex justify-end"><button onClick={() => setShowExclusionModal(false)} className="px-4 py-2 bg-gray-100 font-bold rounded-xl text-gray-700 hover:bg-gray-200">Đóng</button></div></div></div>)}
             {transactionToDelete && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-red-100"><div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-600"><Trash2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận xóa giao dịch?</h3><p className="text-sm text-gray-500 mb-4">Bạn có chắc chắn muốn xóa giao dịch này khỏi hệ thống?</p><div className="flex gap-3 w-full"><button onClick={() => setTransactionToDelete(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={confirmDeleteTransaction} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Xóa ngay</button></div></div></div></div>)}
             {advanceToRepay && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-purple-100"><div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4 text-purple-600"><Undo2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận Hoàn ứng?</h3><div className="bg-purple-50 p-4 rounded-xl text-left w-full mb-4 border border-purple-100 space-y-2"><div><p className="text-xs text-gray-500">Nội dung ứng</p><p className="font-bold text-gray-900">{advanceToRepay.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền hoàn trả</p><p className="font-bold text-purple-600 text-lg">{formatCurrency(advanceToRepay.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ gửi yêu cầu hoàn trả. Vui lòng chờ Admin/Mod duyệt để cập nhật quỹ.</p><div className="flex gap-3 w-full"><button onClick={() => setAdvanceToRepay(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={handleManualRepay} className="flex-1 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors">Xác nhận Thu</button></div></div></div></div>)}
             {showResetConfirm && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70  animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl border-2 border-red-200"><div className="flex flex-col items-center text-center"><div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-600 animate-pulse"><AlertTriangle size={40} /></div><h3 className="text-2xl font-bold text-gray-900 mb-2">CẢNH BÁO NGUY HIỂM!</h3><div className="bg-red-50 p-4 rounded-xl text-left w-full mb-6 border border-red-100"><p className="text-red-800 font-bold text-sm mb-2">Hành động này sẽ XÓA SẠCH:</p><ul className="list-disc list-inside text-red-700 text-sm space-y-1"><li>Toàn bộ lịch sử Thu/Chi/Nộp tiền.</li><li>Toàn bộ Tiền phạt và Quỹ nhóm.</li><li>Reset "Doanh thu thực tế" của tất cả khách hàng về 0.</li></ul><p className="text-red-600 text-xs italic mt-3 font-semibold text-center">Dữ liệu sẽ KHÔNG THỂ khôi phục được.</p></div><div className="flex gap-3 w-full"><button onClick={() => setShowResetConfirm(false)} className="flex-1 py-3.5 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition-colors">Hủy bỏ</button><button onClick={executeResetFinance} disabled={isResetting} className="flex-1 py-3.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors flex items-center justify-center gap-2">{isResetting && <Loader2 className="animate-spin" size={20} />} Xác nhận RESET</button></div></div></div></div>)}
 
-            {dealerDebtToConfirm && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-green-100">
-                        <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600"><CheckCircle2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Đại lý đã trả nợ?</h3><div className="bg-green-50 p-4 rounded-xl text-left w-full mb-4 border border-green-100 space-y-2"><div><p className="text-xs text-gray-500">Khoản nợ</p><p className="font-bold text-gray-900">{dealerDebtToConfirm.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền</p><p className="font-bold text-green-600 text-lg">{formatCurrency(dealerDebtToConfirm.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ ghi nhận <strong>Doanh thu/Nộp tiền</strong> vào hệ thống.</p><div className="flex gap-3 w-full"><button onClick={() => setDealerDebtToConfirm(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDealerDebtPaid} className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">Xác nhận</button></div></div>
+            {
+                dealerDebtToConfirm && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-green-100">
+                            <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600"><CheckCircle2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Đại lý đã trả nợ?</h3><div className="bg-green-50 p-4 rounded-xl text-left w-full mb-4 border border-green-100 space-y-2"><div><p className="text-xs text-gray-500">Khoản nợ</p><p className="font-bold text-gray-900">{dealerDebtToConfirm.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền</p><p className="font-bold text-green-600 text-lg">{formatCurrency(dealerDebtToConfirm.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ ghi nhận <strong>Doanh thu/Nộp tiền</strong> vào hệ thống.</p><div className="flex gap-3 w-full"><button onClick={() => setDealerDebtToConfirm(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDealerDebtPaid} className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">Xác nhận</button></div></div>
+                        </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {showDealerDebtModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Đại lý Nợ</h3>
-                            <button onClick={() => setShowDealerDebtModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={dealerDebtForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealerDebtForm({ ...dealerDebtForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+            {
+                showDealerDebtModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900">Đại lý Nợ</h3>
+                                <button onClick={() => setShowDealerDebtModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Hạn thanh toán</label>
-                                <input type="date" min={todayStr} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.targetDate} onChange={e => setDealerDebtForm({ ...dealerDebtForm, targetDate: e.target.value })} />
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={dealerDebtForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealerDebtForm({ ...dealerDebtForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Hạn thanh toán</label>
+                                    <input type="date" min={todayStr} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.targetDate} onChange={e => setDealerDebtForm({ ...dealerDebtForm, targetDate: e.target.value })} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.reason} onChange={e => setDealerDebtForm({ ...dealerDebtForm, reason: e.target.value })} />
+                                </div>
+                                <button onClick={handleSubmitDealerDebt} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận</button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú</label>
-                                <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.reason} onChange={e => setDealerDebtForm({ ...dealerDebtForm, reason: e.target.value })} />
-                            </div>
-                            <button onClick={handleSubmitDealerDebt} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận</button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* NEW: Finance Page Borrow Modal */}
             {
@@ -1612,7 +2228,86 @@ const Finance: React.FC = () => {
                 )
             }
 
-        </div>
+            {/* FUND COMPLETION WARNING MODAL */}
+            {fundWarning.visible && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-2xl p-6 max-h-[90vh] flex flex-col shadow-2xl">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold text-red-600 flex items-center gap-2">
+                                <AlertTriangle /> Cảnh báo chưa hoàn tất
+                            </h3>
+                            <button onClick={() => setFundWarning(prev => ({ ...prev, visible: false }))}>
+                                <X size={24} className="text-gray-400 hover:text-gray-600" />
+                            </button>
+                        </div>
+
+                        {fundWarning.loading ? (
+                            <div className="flex flex-col items-center justify-center py-12">
+                                <Loader2 className="animate-spin text-amber-500 mb-2" size={32} />
+                                <p className="text-gray-500 font-bold">Đang kiểm tra dữ liệu khách hàng...</p>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="mb-4 p-4 bg-red-50 border border-red-100 rounded-xl text-red-800 text-sm">
+                                    <p className="font-bold text-base mb-1">Không thể đóng quỹ ngay!</p>
+                                    Có <strong>{fundWarning.issues.length}</strong> khách hàng chưa hoàn tất thủ tục công nợ hoặc tiền về.
+                                    <br />Việc hoàn thành quỹ lúc này có thể gây sai lệch số liệu lịch sử.
+                                </div>
+                                <div className="flex-1 overflow-y-auto min-h-0 border border-gray-200 rounded-xl mb-6 custom-scrollbar">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-gray-50 font-bold text-gray-700 sticky top-0">
+                                            <tr>
+                                                <th className="p-3 border-b">Khách hàng</th>
+                                                <th className="p-3 border-b">Sales</th>
+                                                <th className="p-3 border-b">Vấn đề</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {fundWarning.issues.map((issue) => (
+                                                <tr key={issue.id} className="hover:bg-red-50/30">
+                                                    <td
+                                                        className="p-3 font-bold text-blue-600 align-top cursor-pointer hover:underline"
+                                                        onClick={() => {
+                                                            navigate(`/customers/${issue.id}`);
+                                                            setFundWarning(prev => ({ ...prev, visible: false }));
+                                                        }}
+                                                    >
+                                                        {issue.name} <ExternalLink size={12} className="inline ml-1" />
+                                                    </td>
+                                                    <td className="p-3 text-gray-600 align-top">{issue.sales}</td>
+                                                    <td className="p-3 align-top">
+                                                        <ul className="list-disc list-inside text-red-600 space-y-1">
+                                                            {issue.reasons.map((r, idx) => (
+                                                                <li key={idx}>{r}</li>
+                                                            ))}
+                                                        </ul>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                                    <button
+                                        onClick={() => setFundWarning(prev => ({ ...prev, visible: false }))}
+                                        className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors"
+                                    >
+                                        Quay lại kiểm tra
+                                    </button>
+                                    <button
+                                        onClick={() => handleCompleteFund(fundWarning.periodId, true)}
+                                        className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl flex items-center gap-2 shadow-lg shadow-red-200 transition-colors"
+                                    >
+                                        <AlertTriangle size={18} /> Vẫn hoàn thành (Reset)
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
+        </div >
     );
 };
 

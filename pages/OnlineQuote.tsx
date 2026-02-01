@@ -1261,7 +1261,7 @@ const OnlineQuote: React.FC = () => {
                             </div>
 
                             {/* PREMIUM COLOR CHECKBOX */}
-                            {selectedVersion && selectedVersion.premium_color_amount && selectedVersion.premium_color_amount > 0 && (
+                            {selectedVersion && selectedVersion.premium_color_amount != null && selectedVersion.premium_color_amount > 0 && (
                                 <div className="pt-3 border-t border-gray-100 mt-3">
                                     <label className="flex items-center justify-between cursor-pointer p-3 border border-orange-200 bg-orange-50 rounded-xl hover:bg-orange-100 transition-colors">
                                         <div className="flex items-center gap-2">

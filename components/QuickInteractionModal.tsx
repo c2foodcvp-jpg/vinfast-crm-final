@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Customer, Interaction, UserProfile, CustomerClassification } from '../types';
+import { Customer, Interaction, UserProfile, CustomerClassification, CustomerStatus } from '../types';
 import { supabase } from '../supabaseClient';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { X, Phone, MessageCircle, Calendar, Save, CheckCircle2, MapPin, Loader2, ExternalLink, History, CalendarDays, Flame, ListTodo, BellRing, Lock, Calculator, Ban, AlertTriangle, Mic, MicOff } from 'lucide-react';
+import { X, Phone, MessageCircle, Calendar, Save, CheckCircle2, MapPin, Loader2, ExternalLink, History, CalendarDays, Flame, ListTodo, BellRing, Lock, Calculator, Ban, AlertTriangle, Mic } from 'lucide-react';
 import { MembershipTier } from '../types';
 import VoiceRecordingModal from './VoiceRecordingModal';
 import ShareCustomerModal from './ShareCustomerModal';
@@ -63,6 +63,9 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
     const [newInterest, setNewInterest] = useState('');
     const [isEditingInterest, setIsEditingInterest] = useState(false);
     const [carList, setCarList] = useState<string[]>([]);
+
+    // UI Refs
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         // Fetch Car Models once
@@ -186,7 +189,7 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
         try {
             const { error } = await supabase
                 .from('customers')
-                .update({ status: 'LOST', stop_reason: stopReason.trim() })
+                .update({ status: CustomerStatus.LOST, stop_reason: stopReason.trim() })
                 .eq('id', customer.id);
             if (error) throw error;
             setShowStopModal(false);
@@ -202,6 +205,17 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
     };
 
     const handleSubmit = async () => {
+        // Validation for Date Restriction
+        if (updateRecare && newRecareDate && !isLongTerm) {
+            const maxDateObj = new Date();
+            maxDateObj.setDate(maxDateObj.getDate() + 4);
+            const maxDateStr = new Date(maxDateObj.getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+            if (newRecareDate > maxDateStr) {
+                alert("Nếu không chọn CS Dài hạn, ngày CS tiếp theo chỉ được chọn tối đa 4 ngày tới!");
+                return;
+            }
+        }
         // Special logic for Task
         if (activeTab === 'task') {
             if (!taskForm.title.trim()) {
@@ -362,6 +376,11 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
     ];
 
     const todayStr = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // Calculate max date for non-long-term care (Today + 4 days)
+    const maxDateObj = new Date();
+    maxDateObj.setDate(maxDateObj.getDate() + 4);
+    const maxDateStr = new Date(maxDateObj.getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
 
     const isTaskTab = activeTab === 'task';
     const userTier = userProfile?.member_tier;
@@ -612,6 +631,7 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                                                         type="date"
                                                         value={newRecareDate}
                                                         min={todayStr}
+                                                        max={!isLongTerm ? maxDateStr : undefined}
                                                         onChange={(e) => setNewRecareDate(e.target.value)}
                                                         className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 shadow-sm font-bold text-gray-800"
                                                     />
@@ -644,17 +664,49 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                         </div>
 
                         {/* Footer */}
-                        <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center gap-3 shrink-0">
-                            <div className="flex items-center gap-2">
+                        <div className="p-3 md:p-4 border-t border-gray-100 bg-gray-50 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 shrink-0">
+
+                            {/* Actions Group - horizontal scroll with mouse wheel support */}
+                            <div
+                                ref={scrollContainerRef}
+                                onWheel={(e) => {
+                                    if (scrollContainerRef.current) {
+                                        // Prevent vertical scroll only if content overflows horizontally
+                                        if (scrollContainerRef.current.scrollWidth > scrollContainerRef.current.clientWidth) {
+                                            // e.preventDefault(); // Optional: prevent page scroll while scrolling this area
+                                            scrollContainerRef.current.scrollLeft += e.deltaY;
+                                        }
+                                    }
+                                }}
+                                className="flex-1 flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 custom-scrollbar mask-image-linear scroll-smooth"
+                            >
+                                {/* Quick Call & Zalo */}
+                                <a
+                                    href={`tel:${customer.phone}`}
+                                    className="flex items-center gap-2 px-3 py-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-emerald-100 whitespace-nowrap"
+                                    title="Gọi điện ngay"
+                                >
+                                    <Phone size={14} /> Gọi
+                                </a>
+                                <button
+                                    onClick={() => window.open(`https://zalo.me/${customer.phone}`, '_blank')}
+                                    className="flex items-center gap-2 px-3 py-2 text-sky-600 hover:bg-sky-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-sky-100 whitespace-nowrap"
+                                    title="Chat Zalo"
+                                >
+                                    <MessageCircle size={14} /> Zalo
+                                </button>
+
+                                <div className="w-[1px] h-4 bg-gray-300 mx-1 shrink-0"></div>
+
                                 <button
                                     onClick={() => { onClose(); navigate(`/customers/${customer.id}`, { state: { from: location.pathname } }); }}
-                                    className="flex items-center gap-2 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-blue-100"
+                                    className="flex items-center gap-2 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-blue-100 whitespace-nowrap"
                                 >
                                     <ExternalLink size={14} /> Chi tiết
                                 </button>
                                 <button
                                     onClick={() => setShowStopModal(true)}
-                                    className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-red-100"
+                                    className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-red-100 whitespace-nowrap"
                                     title="Ngưng chăm sóc khách hàng này"
                                 >
                                     <Ban size={14} /> Ngưng CS
@@ -662,7 +714,7 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                                 {canQuote ? (
                                     <button
                                         onClick={() => { onClose(); navigate(`/quote?fromCustomer=${customer.id}`); }}
-                                        className="flex items-center gap-2 px-3 py-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-purple-100"
+                                        className="flex items-center gap-2 px-3 py-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-purple-100 whitespace-nowrap"
                                         title="Tạo báo giá cho khách hàng"
                                     >
                                         <Calculator size={14} /> Báo giá
@@ -670,7 +722,7 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                                 ) : (
                                     <button
                                         disabled
-                                        className="flex items-center gap-2 px-3 py-2 text-gray-400 bg-gray-50 rounded-lg text-xs font-bold cursor-not-allowed border border-gray-100"
+                                        className="flex items-center gap-2 px-3 py-2 text-gray-400 bg-gray-50 rounded-lg text-xs font-bold cursor-not-allowed border border-gray-100 whitespace-nowrap"
                                         title="Chỉ thành viên Platinum trở lên mới dùng được"
                                     >
                                         <Lock size={14} /> Báo giá
@@ -680,25 +732,30 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                                 {/* New Share & Change Sales Buttons */}
                                 <button
                                     onClick={() => setShowShareModal(true)}
-                                    className="flex items-center gap-2 px-3 py-2 text-teal-600 hover:bg-teal-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-teal-100"
+                                    className="flex items-center gap-2 px-3 py-2 text-teal-600 hover:bg-teal-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-teal-100 whitespace-nowrap"
                                     title="Chia sẻ khách hàng"
                                 >
                                     <Share2 size={14} /> Chia sẻ
                                 </button>
                                 <button
                                     onClick={() => setShowChangeSalesModal(true)}
-                                    className="flex items-center gap-2 px-3 py-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-orange-100"
+                                    className="flex items-center gap-2 px-3 py-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors text-xs font-bold border border-transparent hover:border-orange-100 whitespace-nowrap"
                                     title="Chuyển quyền chăm sóc"
                                 >
                                     <ArrowRightLeft size={14} /> Đổi Sales
                                 </button>
                             </div>
-                            <div className="flex gap-2">
-                                <button onClick={onClose} className="px-4 py-2 text-gray-600 font-bold text-sm hover:bg-gray-200 rounded-xl transition-colors">Hủy</button>
+                            <div className="flex gap-2 shrink-0 md:border-l md:border-gray-200 md:pl-3 pt-2 md:pt-0 border-t border-gray-100 md:border-t-0 justify-end">
+                                <button
+                                    onClick={onClose}
+                                    className="px-4 py-2 text-gray-600 font-bold text-sm hover:bg-gray-200 rounded-xl transition-colors whitespace-nowrap"
+                                >
+                                    Hủy
+                                </button>
                                 <button
                                     onClick={handleSubmit}
                                     disabled={loading}
-                                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                                 >
                                     {loading ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                                     Lưu

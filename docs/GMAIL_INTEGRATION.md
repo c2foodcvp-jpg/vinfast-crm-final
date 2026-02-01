@@ -65,7 +65,7 @@ function processIncomingLeads() {
       source: 'MKT Group',
       status: 'new',
       created_at: new Date().toISOString(),
-      recare_date: new Date().toISOString().split('T')[0], // Ngày Chăm Sóc Tiếp Theo = Hôm nay
+      recare_date: Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd"), // Ngày Chăm Sóc Tiếp Theo = Hôm nay (Theo giờ VN)
       sales_rep: null
     };
     
@@ -328,9 +328,8 @@ function checkDuplicatePhone(phone) {
 
 // 4. Cập nhật Ngày Chăm Sóc Tiếp Theo cho khách hàng
 function updateCustomerRecareDate(customerId) {
-  // Lấy ngày hôm nay theo định dạng YYYY-MM-DD
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
+  // Lấy ngày hôm nay theo định dạng YYYY-MM-DD (Theo giờ VN)
+  const todayStr = Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd");
   
   const url = `${CONFIG.SUPABASE_URL}/rest/v1/customers?id=eq.${customerId}`;
   const options = {

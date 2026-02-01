@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { UserProfile, Customer, UserRole } from '../types';
+import { UserProfile, Customer } from '../types';
 import { X, ArrowRightLeft, Loader2, Search } from 'lucide-react';
 
 interface ChangeSalesModalProps {
@@ -92,13 +92,7 @@ const ChangeSalesModal: React.FC<ChangeSalesModalProps> = ({ isOpen, onClose, cu
                 // Direct Update
                 const { error } = await supabase.from('customers').update({
                     sales_rep: confirmData.rep.full_name,
-                    // If we tracked sales_rep_id, we'd update it here too. 
-                    // Currently system seems to rely on name or maybe unshown ID column. 
-                    // To be safe we just update what we see in other files.
-                    // Recalling `AddCustomerModal`: update sales_rep (name).
-                    // Recalling `LeadsFromForm`: update sales_rep (name) and creator_id (sometimes).
-                    // We shouldn't change creator_id usually.
-                    // But we might want to update a `sales_rep_id` if it existed.
+                    creator_id: confirmData.rep.id // Update ownership ID
                 }).eq('id', customer.id);
                 if (error) throw error;
 
