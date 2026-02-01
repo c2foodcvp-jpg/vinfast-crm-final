@@ -6,7 +6,7 @@ import { supabase } from '../supabaseClient';
 import {
     LayoutDashboard, Users, LogOut, Menu, X, UserCircle, Briefcase,
     FileCheck2, UserPlus, Gift, BadgeDollarSign, ChevronRight, ChevronDown, PiggyBank, CarFront, Landmark, Box, Settings, User, FileInput, BarChart2, Calendar, Calculator,
-    FolderOpen, Mail, Moon, Sun, Sparkles
+    FolderOpen, Mail, Moon, Sun, Sparkles, MessageCircle
 } from 'lucide-react';
 
 // ... (existing imports)
@@ -49,6 +49,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const MENU_DEFINITIONS: NavItemDef[] = useMemo(() => [
         { key: 'dashboard', icon: LayoutDashboard, label: 'Tổng quan', path: '/' },
         { key: 'calendar', icon: Calendar, label: 'Lịch làm việc', path: '/calendar' },
+        { key: 'community', icon: MessageCircle, label: 'Cộng đồng', path: '/community' },
         { key: 'quote', icon: Calculator, label: 'Báo giá Online', path: '/quote' },
         { key: 'analytics', icon: BarChart2, label: 'Phân tích (BI)', path: '/analytics', roleReq: [UserRole.ADMIN, UserRole.MOD] },
         { key: 'customers', icon: Users, label: 'Khách hàng', path: '/customers' },

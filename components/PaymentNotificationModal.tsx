@@ -142,14 +142,15 @@ const PaymentNotificationModal: React.FC<Props> = ({ visible, customer, onClose,
                     .eq('id', customer.id);
             }
 
-            // Get email script URL
-            const { data: settingData } = await supabase
+            // Get settings
+            const { data: settingsData } = await supabase
                 .from('app_settings')
-                .select('value')
-                .eq('key', 'email_script_url')
-                .maybeSingle();
+                .select('key, value')
+                .in('key', ['email_script_url', 'system_email_logo']);
 
-            const scriptUrl = settingData?.value;
+            const scriptUrl = settingsData?.find(s => s.key === 'email_script_url')?.value;
+            const emailLogo = settingsData?.find(s => s.key === 'system_email_logo')?.value;
+
             if (!scriptUrl) {
                 alert('Chưa cấu hình Email Script URL');
                 setSending(false);
@@ -161,6 +162,12 @@ const PaymentNotificationModal: React.FC<Props> = ({ visible, customer, onClose,
                 weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
             });
 
+            // Logo HTML
+            const logoHtml = emailLogo
+                ? `<img src="${emailLogo}" alt="Logo" style="height: 70px; width: auto; max-width: 250px; object-fit: contain;" />`
+                : `<div style="width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 50%; text-align: center; line-height: 40px; color: white; font-weight: bold; font-family: 'Segoe UI', sans-serif;">V</div>`;
+
+            // Basic Content
             const basicContent = `
                 <tr>
                     <td style="padding: 20px; background: #f8fafc; border-radius: 12px; margin-bottom: 16px;">
@@ -230,7 +237,7 @@ const PaymentNotificationModal: React.FC<Props> = ({ visible, customer, onClose,
                                         <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0; font-size: 10px; letter-spacing: 2px; font-weight: 600; font-family: 'Segoe UI', sans-serif;">DRIVING THE FUTURE</p>
                                     </td>
                                     <td align="right">
-                                        <div style="width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 50%; text-align: center; line-height: 40px; color: white; font-weight: bold; font-family: 'Segoe UI', sans-serif;">V</div>
+                                        ${logoHtml}
                                     </td>
                                 </tr>
                             </table>

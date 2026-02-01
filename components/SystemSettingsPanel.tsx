@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { Upload, Save, Loader2, Image as ImageIcon, AlertCircle, CheckCircle2, LayoutTemplate, LogIn, RefreshCw, Bell, User } from 'lucide-react';
 
-type LogoType = 'favicon' | 'login' | 'menu' | 'customer_avatar';
+type LogoType = 'favicon' | 'login' | 'menu' | 'customer_avatar' | 'email_logo';
 
 const SystemSettingsPanel: React.FC = () => {
     const [settings, setSettings] = useState<{
@@ -10,11 +10,13 @@ const SystemSettingsPanel: React.FC = () => {
         loginLogo: string | null;
         menuLogo: string | null;
         defaultCustomerAvatar: string | null;
+        emailLogo: string | null;
     }>({
         favicon: null,
         loginLogo: null,
         menuLogo: null,
         defaultCustomerAvatar: null,
+        emailLogo: null,
     });
 
     const [uploading, setUploading] = useState<Record<string, boolean>>({});
@@ -29,7 +31,7 @@ const SystemSettingsPanel: React.FC = () => {
 
     const fetchSettings = async () => {
         try {
-            const { data } = await supabase.from('app_settings').select('key, value').in('key', ['system_favicon', 'system_logo_login', 'system_logo_menu', 'force_update', 'default_customer_avatar']);
+            const { data } = await supabase.from('app_settings').select('key, value').in('key', ['system_favicon', 'system_logo_login', 'system_logo_menu', 'force_update', 'default_customer_avatar', 'system_email_logo']);
 
             const newSettings = { ...settings };
             data?.forEach(item => {
@@ -37,6 +39,7 @@ const SystemSettingsPanel: React.FC = () => {
                 if (item.key === 'system_logo_login') newSettings.loginLogo = item.value;
                 if (item.key === 'system_logo_menu') newSettings.menuLogo = item.value;
                 if (item.key === 'default_customer_avatar') newSettings.defaultCustomerAvatar = item.value;
+                if (item.key === 'system_email_logo') newSettings.emailLogo = item.value;
                 if (item.key === 'force_update') setForceUpdate(item.value === 'true' || item.value === true);
             });
             setSettings(newSettings);
@@ -76,8 +79,8 @@ const SystemSettingsPanel: React.FC = () => {
 
             setSettings(prev => ({
                 ...prev,
-                ...prev,
-                [type === 'favicon' ? 'favicon' : type === 'login' ? 'loginLogo' : type === 'menu' ? 'menuLogo' : 'defaultCustomerAvatar']: publicUrl
+                ...prev, // double spread was in original code, keeping it or fixing it is fine. I'll clean it up a bit.
+                [type === 'favicon' ? 'favicon' : type === 'login' ? 'loginLogo' : type === 'menu' ? 'menuLogo' : type === 'customer_avatar' ? 'defaultCustomerAvatar' : 'emailLogo']: publicUrl
             }));
 
             // Auto-save logic can be here, or user clicks Save. To keep it simple, let user click Save.
@@ -103,6 +106,7 @@ const SystemSettingsPanel: React.FC = () => {
                 { key: 'system_logo_login', value: settings.loginLogo },
                 { key: 'system_logo_menu', value: settings.menuLogo },
                 { key: 'default_customer_avatar', value: settings.defaultCustomerAvatar },
+                { key: 'system_email_logo', value: settings.emailLogo },
             ].filter(i => i.value !== null); // Only save what we have
 
             const { error } = await supabase.from('app_settings').upsert(updates, { onConflict: 'key' });
@@ -193,7 +197,9 @@ with check ( bucket_id = 'system-assets' );
 
             {/* Customer Avatar Config */}
             <div className="mb-8 border-t border-gray-100 pt-6">
-                <h4 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2"><User size={16} className="text-blue-600" /> Avatar Khách hàng Mặc định</h4>
+                <h4 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <User size={16} className="text-blue-600" /> Cấu hình Khác
+                </h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <ImageUploader
                         type="customer_avatar"
@@ -202,12 +208,19 @@ with check ( bucket_id = 'system-assets' );
                         value={settings.defaultCustomerAvatar}
                         desc="Thay thế avatar chữ cái mặc định. Nên dùng ảnh vuông, trong suốt."
                     />
-                    <div className="col-span-2 bg-gray-50 rounded-xl p-4 border border-gray-100 text-sm text-gray-600">
+                    <ImageUploader
+                        type="email_logo"
+                        label="Logo Email / In ấn"
+                        icon={ImageIcon}
+                        value={settings.emailLogo}
+                        desc="Hiển thị góc phải header email và phiếu in. Nên dùng logo VinFast trắng/trong suốt."
+                    />
+                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 text-sm text-gray-600">
                         <p className="font-bold mb-2">Thông tin:</p>
                         <ul className="list-disc list-inside space-y-1">
-                            <li>Ảnh này sẽ hiển thị cho tất cả khách hàng thay vì chữ cái đầu tiên của tên.</li>
+                            <li><strong>Avatar:</strong> Hiển thị cho tất cả khách hàng thay vì chữ cái đầu tiên.</li>
+                            <li><strong>Logo Email:</strong> Thay thế chữ V mặc định ở góc phải header các mẫu email/in ấn.</li>
                             <li>Kích thước tối đa: <strong>1MB</strong>.</li>
-                            <li>Định dạng khuyên dùng: <strong>PNG, JPG (Vuông 128x128px)</strong>.</li>
                         </ul>
                     </div>
                 </div>

@@ -196,6 +196,7 @@ export interface UserProfile {
   created_at?: string;
   last_login_at?: string; // Track last login time
   discord_config?: any;
+  team_expiration_date?: string | null; // Expiration date for Team (MOD only)
 }
 
 

@@ -142,19 +142,19 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
 
         setSendingEmail(true);
         try {
-            // Get email script URL from settings
-            const { data: settingData } = await supabase
+            // Get email script URL and Logo from settings
+            const { data: settingsData } = await supabase
                 .from('app_settings')
-                .select('value')
-                .eq('key', 'email_script_url')
-                .maybeSingle();
+                .select('key, value')
+                .in('key', ['email_script_url', 'system_email_logo']);
 
-            const scriptUrl = settingData?.value;
+            const scriptUrl = settingsData?.find(s => s.key === 'email_script_url')?.value;
+            const emailLogo = settingsData?.find(s => s.key === 'system_email_logo')?.value;
+
             if (!scriptUrl) {
                 console.warn('Email script URL not configured');
                 return;
             }
-
 
             // Prepare PREMIUM email HTML template - Luxury Automotive Style
             const currentDate = new Date().toLocaleDateString('vi-VN', {
@@ -163,6 +163,11 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
                 month: 'long',
                 day: 'numeric'
             });
+
+            // Logo HTML
+            const logoHtml = emailLogo
+                ? `<img src="${emailLogo}" alt="Logo" style="height: 70px; width: auto; max-width: 250px; object-fit: contain;" />`
+                : `<div style="width: 56px; height: 56px; background: rgba(255,255,255,0.15); border-radius: 50%; display: inline-block; text-align: center; line-height: 56px;"><span style="font-size: 24px; color: #ffffff;">V</span></div>`;
 
             const emailPayload = {
                 type: 'send_email',
@@ -191,9 +196,7 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
                                         <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px; font-weight: 500; letter-spacing: 2px; text-transform: uppercase;">DRIVING THE FUTURE</p>
                                     </td>
                                     <td align="right" style="vertical-align: middle;">
-                                        <div style="width: 56px; height: 56px; background: rgba(255,255,255,0.15); border-radius: 50%; display: inline-block; text-align: center; line-height: 56px;">
-                                            <span style="font-size: 24px; color: #ffffff;">V</span>
-                                        </div>
+                                        ${logoHtml}
                                     </td>
                                 </tr>
                             </table>

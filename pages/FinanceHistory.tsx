@@ -129,7 +129,7 @@ const FinanceHistory: React.FC = () => {
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <button
-                            onClick={() => navigate('/fund')}
+                            onClick={() => navigate('/finance')}
                             className="p-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all"
                         >
                             <ArrowLeft size={20} className="text-gray-600" />
@@ -194,7 +194,7 @@ const FinanceHistory: React.FC = () => {
                         <h3 className="text-lg font-bold text-gray-500">Chưa có quỹ nào được hoàn thành</h3>
                         <p className="text-gray-400 mt-2">Khi bạn đánh dấu Hoàn thành một quỹ, nó sẽ xuất hiện ở đây.</p>
                         <button
-                            onClick={() => navigate('/fund')}
+                            onClick={() => navigate('/finance')}
                             className="mt-4 px-6 py-2 bg-amber-600 text-white rounded-xl font-bold hover:bg-amber-700 transition-all"
                         >
                             Quay lại Quỹ & Thu Chi

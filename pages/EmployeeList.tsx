@@ -14,11 +14,15 @@ const EmployeeList: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'all' | 'pending'>('pending');
 
-    // Edit Role State
-    const [editingId, setEditingId] = useState<string | null>(null);
-    const [tempRole, setTempRole] = useState<UserRole>(UserRole.EMPLOYEE);
-    const [tempManagerId, setTempManagerId] = useState<string>('');
-    const [tempIsPartTime, setTempIsPartTime] = useState(false);
+    // Edit Modal State
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+    const [editForm, setEditForm] = useState({
+        role: UserRole.EMPLOYEE,
+        managerId: '',
+        isPartTime: false,
+        teamExpiration: ''
+    });
 
     // Approval Modal State
     const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
@@ -49,6 +53,14 @@ const EmployeeList: React.FC = () => {
     // RLS Instruction Modal State
     const [showRLSModal, setShowRLSModal] = useState(false);
     const [showDelegateSql, setShowDelegateSql] = useState(false);
+
+    // Password Reset Modal State
+    const [showPasswordModal, setShowPasswordModal] = useState(false);
+    const [passwordTargetUser, setPasswordTargetUser] = useState<UserProfile | null>(null);
+    const [newPassword, setNewPassword] = useState('');
+    const [generatedPassword, setGeneratedPassword] = useState<string | null>(null);
+    const [showPasswordSql, setShowPasswordSql] = useState(false);
+
 
     const isAdmin = userProfile?.role === UserRole.ADMIN;
     const isMod = userProfile?.role === UserRole.MOD;
@@ -368,27 +380,42 @@ const EmployeeList: React.FC = () => {
         }
     };
 
-    const startEditRole = (employee: UserProfile) => {
-        setEditingId(employee.id);
-        setTempRole(employee.role);
-        setTempManagerId(employee.manager_id || '');
-        setTempIsPartTime(employee.is_part_time || false);
+    const openEditModal = (employee: UserProfile) => {
+        setEditingUser(employee);
+        setEditForm({
+            role: employee.role,
+            managerId: employee.manager_id || '',
+            isPartTime: employee.is_part_time || false,
+            teamExpiration: employee.team_expiration_date ? new Date(employee.team_expiration_date).toISOString().split('T')[0] : ''
+        });
+        setIsEditModalOpen(true);
     };
 
-    const saveRole = async (id: string) => {
-        const originalEmployees = [...employees];
-        const updates: any = { role: tempRole };
-        if (tempRole === UserRole.EMPLOYEE) {
-            updates.manager_id = tempManagerId || null;
-            updates.is_part_time = tempIsPartTime;
+    const handleSaveEdit = async () => {
+        if (!editingUser) return;
+
+        const updates: any = { role: editForm.role };
+
+        if (editForm.role === UserRole.EMPLOYEE) {
+            updates.manager_id = editForm.managerId || null;
+            updates.is_part_time = editForm.isPartTime;
+            updates.team_expiration_date = null;
+        } else if (editForm.role === UserRole.MOD) {
+            updates.manager_id = null;
+            updates.is_part_time = false;
+            updates.team_expiration_date = editForm.teamExpiration ? new Date(editForm.teamExpiration).toISOString() : null;
         } else {
             updates.manager_id = null;
             updates.is_part_time = false;
+            updates.team_expiration_date = null;
         }
-        setEmployees(employees.map(e => e.id === id ? { ...e, ...updates } : e));
-        setEditingId(null);
+
+        const originalEmployees = [...employees];
+        setEmployees(employees.map(e => e.id === editingUser.id ? { ...e, ...updates } : e));
+        setIsEditModalOpen(false);
+
         try {
-            const { data, error } = await supabase.from('profiles').update(updates).eq('id', id).select();
+            const { data, error } = await supabase.from('profiles').update(updates).eq('id', editingUser.id).select();
             if (error) throw error;
             if (!data || data.length === 0) throw new Error("RLS_BLOCK");
         } catch (err: any) {
@@ -397,6 +424,7 @@ const EmployeeList: React.FC = () => {
             if (msg === "RLS_BLOCK" || msg.includes("policy")) { setShowRLSModal(true); } else { alert("Lỗi: " + msg); }
         }
     };
+
 
     const filteredEmployees = employees.filter(e => {
         if (activeTab === 'pending') return e.status === 'pending';
@@ -415,6 +443,80 @@ create table if not exists public.access_delegations (
 alter table public.access_delegations enable row level security;
 create policy "Allow all authenticated" on public.access_delegations for all using (true);
 `;
+
+    const passwordResetSql = `
+-- CẦN CHẠY LỆNH NÀY TRONG SUPABASE SQL EDITOR ĐỂ KÍCH HOẠT TÍNH NĂNG
+create extension if not exists pgcrypto;
+
+create or replace function admin_reset_password(target_user_id uuid, new_password text)
+returns void
+language plpgsql
+security definer
+set search_path = public, auth, extensions
+as $$
+declare
+  is_admin boolean;
+begin
+  -- Check if executing user is admin in public.profiles
+  select (role = 'admin') into is_admin
+  from public.profiles
+  where id = auth.uid();
+
+  if is_admin is not true then
+    raise exception 'Không đủ quyền hạn (Admin Only)';
+  end if;
+
+  -- Update auth.users
+  update auth.users
+  set encrypted_password = crypt(new_password, gen_salt('bf')),
+      updated_at = now()
+  where id = target_user_id;
+end;
+$$;
+`;
+
+    const openPasswordModal = (user: UserProfile) => {
+        setPasswordTargetUser(user);
+        setNewPassword('');
+        setGeneratedPassword(null);
+        setShowPasswordSql(false);
+        setShowPasswordModal(true);
+    };
+
+    const handleGeneratePassword = () => {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$';
+        let pass = '';
+        for (let i = 0; i < 10; i++) {
+            pass += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        setNewPassword(pass);
+    };
+
+    const handleResetPassword = async () => {
+        if (!passwordTargetUser || !newPassword) return;
+
+        try {
+            const { error } = await supabase.rpc('admin_reset_password', {
+                target_user_id: passwordTargetUser.id,
+                new_password: newPassword
+            });
+
+            if (error) {
+                if (error.message?.includes('function admin_reset_password') || error.code === '42883') {
+                    setShowPasswordSql(true);
+                    return;
+                }
+                throw error;
+            }
+
+            setGeneratedPassword(newPassword); // Show success state
+            alert("Đã cập nhật mật khẩu thành công!");
+        } catch (e: any) {
+            console.error(e);
+            alert("Lỗi: " + e.message);
+        }
+    };
+
 
     if (loading) return <div className="p-8 text-center text-gray-500">Đang tải danh sách nhân sự...</div>;
 
@@ -508,15 +610,32 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
                                                 })()}
                                             </td>
                                             <td className="px-6 py-4">
-                                                {isAdmin && editingId === emp.id ? (
-                                                    <div className="flex flex-col gap-2 bg-white border border-primary-300 rounded-lg p-2 shadow-sm min-w-[200px]">
-                                                        <div className="flex items-center gap-2"><select value={tempRole} onChange={(e) => setTempRole(e.target.value as UserRole)} className="text-sm border rounded px-1 py-1 w-full bg-white outline-none focus:ring-1 focus:ring-primary-500"><option value={UserRole.EMPLOYEE}>Nhân viên</option><option value={UserRole.MOD}>Quản lý (MOD)</option><option value={UserRole.ADMIN}>Admin</option></select></div>
-                                                        {tempRole === UserRole.EMPLOYEE && (<><select value={tempManagerId} onChange={(e) => setTempManagerId(e.target.value)} className="text-xs border rounded px-1 py-1 w-full bg-white outline-none text-gray-700"><option value="">-- Chọn quản lý --</option>{employees.filter(m => (m.role === 'admin' || m.role === 'mod') && m.id !== emp.id).map(m => (<option key={m.id} value={m.id}>{m.full_name}</option>))}</select><div className="flex items-center gap-2 mt-1"><input type="checkbox" id={`parttime-${emp.id}`} checked={tempIsPartTime} onChange={e => setTempIsPartTime(e.target.checked)} className="rounded text-orange-600 focus:ring-orange-500" /><label htmlFor={`parttime-${emp.id}`} className="text-xs font-bold text-orange-700">Part-time</label></div></>)}
-                                                        <div className="flex justify-end gap-2 mt-1"><button onClick={() => saveRole(emp.id)} className="text-green-600 hover:bg-green-50 p-1 rounded-md transition-colors bg-green-50"><Save size={16} /></button><button onClick={() => setEditingId(null)} className="text-gray-400 hover:bg-gray-100 p-1 rounded-md transition-colors bg-gray-50"><X size={16} /></button></div>
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`inline-flex items-center gap-1.5 text-sm font-medium px-2.5 py-1 rounded-md border ${emp.role === UserRole.ADMIN ? 'bg-red-50 text-red-700 border-red-100' : emp.role === UserRole.MOD ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-gray-50 text-gray-700 border-gray-200'}`}>
+                                                            {emp.role === UserRole.ADMIN && <Shield size={12} />}
+                                                            {emp.role === UserRole.MOD ? 'Quản lý' : emp.role === UserRole.ADMIN ? 'Admin' : 'Sales'}
+                                                        </span>
+                                                        {isAdmin && emp.status === 'active' && (
+                                                            <button onClick={(e) => { e.stopPropagation(); openEditModal(emp); }} className="text-gray-400 hover:text-primary-600 p-1.5 rounded-full hover:bg-white shadow-sm hover:shadow transition-all group-hover:visible" title="Chỉnh sửa thông tin">
+                                                                <Edit2 size={14} />
+                                                            </button>
+                                                        )}
                                                     </div>
-                                                ) : (
-                                                    <div className="space-y-1"><div className="flex items-center gap-2"><span className={`inline-flex items-center gap-1.5 text-sm font-medium px-2.5 py-1 rounded-md border ${emp.role === UserRole.ADMIN ? 'bg-red-50 text-red-700 border-red-100' : emp.role === UserRole.MOD ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-gray-50 text-gray-700 border-gray-200'}`}>{emp.role === UserRole.ADMIN && <Shield size={12} />}{emp.role === UserRole.MOD ? 'Quản lý' : emp.role === UserRole.ADMIN ? 'Admin' : 'Sales'}</span>{isAdmin && emp.status === 'active' && (<button onClick={() => startEditRole(emp)} className="text-gray-400 hover:text-primary-600 p-1 rounded hover:bg-gray-100 transition-colors"><Edit2 size={14} /></button>)}</div>{emp.manager_id && emp.role === UserRole.EMPLOYEE && (<div className="flex items-center gap-1 text-xs text-gray-500"><Users size={12} className="text-gray-400" /> Quản lý bởi: <span className="font-semibold text-gray-700">{getManagerName(emp.manager_id)}</span></div>)}</div>
-                                                )}
+
+                                                    {emp.role === UserRole.MOD && emp.team_expiration_date && (
+                                                        <div className="flex items-center gap-1.5 text-xs text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-100 w-fit">
+                                                            <Clock size={10} />
+                                                            <span className="font-bold">Hết hạn: {new Date(emp.team_expiration_date).toLocaleDateString('vi-VN')}</span>
+                                                        </div>
+                                                    )}
+
+                                                    {emp.manager_id && emp.role === UserRole.EMPLOYEE && (
+                                                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                                                            <Users size={12} className="text-gray-400" /> Quản lý bởi: <span className="font-semibold text-gray-700">{getManagerName(emp.manager_id)}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                                                 {emp.status === 'pending' && (isAdmin || isMod) ? (<div className="flex justify-end gap-2"><button onClick={() => openApprovalModal(emp)} className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 shadow-md shadow-green-200 transition-all active:scale-95"><CheckCircle size={14} /> Duyệt</button><button onClick={() => handleReject(emp.id)} className="flex items-center gap-1 px-3 py-1.5 bg-white text-red-600 border border-red-200 rounded-lg text-xs font-bold hover:bg-red-50 transition-all active:scale-95"><XCircle size={14} /> Từ chối</button></div>) :
@@ -524,7 +643,12 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
                                                         <div className="flex justify-end gap-2">
                                                             {(isAdmin || emp.role !== UserRole.ADMIN) && (
                                                                 <>
-                                                                    <button onClick={() => openPermissionModal(emp)} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Cấu hình Quyền hạn (Khóa/Mở)"><Key size={18} /></button>
+                                                                    {isAdmin && (
+                                                                        <button onClick={() => openPasswordModal(emp)} className="p-2 text-gray-500 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors" title="Lấy mật khẩu truy cập (Reset)">
+                                                                            <Key size={18} />
+                                                                        </button>
+                                                                    )}
+                                                                    <button onClick={() => openPermissionModal(emp)} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Cấu hình Quyền hạn (Khóa/Mở)"><Lock size={18} /></button>
                                                                     <button onClick={() => handleTerminateContract(emp)} className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Chấm dứt Hợp đồng"><UserMinus size={18} /></button>
                                                                 </>
                                                             )}
@@ -618,6 +742,116 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
                         <div className="flex gap-3">
                             <button onClick={() => setShowPermissionModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Hủy</button>
                             <button onClick={handleSavePermission} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200">Lưu</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+
+            {/* --- EDIT EMPLOYEE MODAL --- */}
+            {isEditModalOpen && editingUser && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                            <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                <Edit2 className="text-primary-600" size={20} /> Chỉnh sửa Nhân sự
+                            </h3>
+                            <button onClick={() => setIsEditModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+
+                        <div className="p-6 space-y-6 overflow-y-auto">
+                            {/* User Info Header */}
+                            <div className="flex items-center gap-4">
+                                <div className="h-14 w-14 rounded-full bg-gray-100 border-2 border-white shadow-sm flex items-center justify-center text-gray-500 font-bold text-xl overflow-hidden">
+                                    {editingUser.avatar_url ? <img src={editingUser.avatar_url} className="w-full h-full object-cover" /> : editingUser.full_name?.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                    <h4 className="text-lg font-bold text-gray-900">{editingUser.full_name}</h4>
+                                    <p className="text-sm text-gray-500">{editingUser.email}</p>
+                                    <div className="flex gap-2 mt-1">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${editingUser.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{editingUser.status}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr className="border-gray-100" />
+
+                            {/* Role Selection */}
+                            <div className="space-y-3">
+                                <label className="block text-sm font-bold text-gray-700">Vai trò hệ thống</label>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    {[UserRole.EMPLOYEE, UserRole.MOD, UserRole.ADMIN].map((role) => (
+                                        <div
+                                            key={role}
+                                            onClick={() => setEditForm({ ...editForm, role })}
+                                            className={`cursor-pointer rounded-xl border p-3 transition-all ${editForm.role === role ? 'bg-primary-50 border-primary-500 ring-1 ring-primary-500' : 'bg-white border-gray-200 hover:border-gray-300'}`}
+                                        >
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className={`text-sm font-bold ${editForm.role === role ? 'text-primary-900' : 'text-gray-700'}`}>
+                                                    {role === 'employee' ? 'Sales' : role === 'mod' ? 'Quản lý' : 'Admin'}
+                                                </span>
+                                                {editForm.role === role && <CheckCircle size={16} className="text-primary-600" />}
+                                            </div>
+                                            <p className="text-xs text-gray-500 leading-tight">
+                                                {role === 'employee' ? 'Quyền cơ bản, bán hàng.' : role === 'mod' ? 'Quản lý team, duyệt đơn.' : 'Toàn quyền hệ thống.'}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Conditional Fields based on Role */}
+                            <div className="bg-gray-50 rounded-xl p-4 space-y-4 border border-gray-100">
+                                {editForm.role === UserRole.EMPLOYEE ? (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2">Người Quản lý trực tiếp</label>
+                                            <select
+                                                value={editForm.managerId}
+                                                onChange={(e) => setEditForm({ ...editForm, managerId: e.target.value })}
+                                                className="w-full rounded-lg border border-gray-300 p-2.5 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+                                            >
+                                                <option value="">-- Không có quản lý --</option>
+                                                {employees.filter(m => (m.role === 'admin' || m.role === 'mod') && m.id !== editingUser.id).map(m => (
+                                                    <option key={m.id} value={m.id}>{m.full_name} ({m.role})</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <input
+                                                type="checkbox"
+                                                id="pt-check"
+                                                checked={editForm.isPartTime}
+                                                onChange={(e) => setEditForm({ ...editForm, isPartTime: e.target.checked })}
+                                                className="w-5 h-5 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
+                                            />
+                                            <label htmlFor="pt-check" className="text-sm font-medium text-gray-700">Là nhân viên Part-time (CTV)</label>
+                                        </div>
+                                    </>
+                                ) : editForm.role === UserRole.MOD ? (
+                                    <div>
+                                        <label className="block text-sm font-bold text-purple-800 mb-2 flex items-center gap-2">
+                                            <Clock size={16} /> Thời hạn hoạt động của Team
+                                        </label>
+                                        <p className="text-xs text-gray-500 mb-2">Nếu đặt ngày, toàn bộ Team (Mod + Sales) sẽ không thể đăng nhập sau ngày này.</p>
+                                        <input
+                                            type="date"
+                                            value={editForm.teamExpiration}
+                                            onChange={(e) => setEditForm({ ...editForm, teamExpiration: e.target.value })}
+                                            className="w-full rounded-lg border border-purple-200 bg-white p-2.5 text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 font-medium text-gray-900"
+                                        />
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-gray-500 italic text-center">Admin có toàn quyền và không bị giới hạn thời gian.</p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+                            <button onClick={() => setIsEditModalOpen(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition-colors">Hủy bỏ</button>
+                            <button onClick={handleSaveEdit} className="px-6 py-2 text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 rounded-xl shadow-lg shadow-primary-200 transition-all active:scale-95 flex items-center gap-2">
+                                <Save size={18} /> Lưu thay đổi
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -727,6 +961,109 @@ create policy "Allow all authenticated" on public.access_delegations for all usi
                     </div>
                 </div>
             )}
+
+            {/* --- PASSWORD RESET MODAL --- */}
+            {showPasswordModal && passwordTargetUser && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="flex justify-between items-center mb-4 border-b border-gray-100 pb-4">
+                            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                                <Key className="text-yellow-600" /> Cấp lại Mật khẩu
+                            </h3>
+                            <button onClick={() => setShowPasswordModal(false)}><X className="text-gray-400 hover:text-gray-600" /></button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="p-4 bg-yellow-50 border border-yellow-100 rounded-xl flex items-start gap-3">
+                                <AlertTriangle className="text-yellow-600 shrink-0 mt-1" size={20} />
+                                <div>
+                                    <p className="font-bold text-yellow-800 text-sm">Lưu ý bảo mật</p>
+                                    <p className="text-yellow-700 text-xs mt-1">
+                                        Admin chỉ có thể <strong>đặt mật khẩu mới</strong>, không thể xem mật khẩu cũ (đã được mã hóa).<br />
+                                        Hãy đặt mật khẩu mới và gửi cho nhân viên.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-4 py-2">
+                                <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center font-bold text-gray-500">
+                                    {passwordTargetUser.full_name?.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                    <p className="font-bold text-gray-900">{passwordTargetUser.full_name}</p>
+                                    <p className="text-sm text-gray-500">{passwordTargetUser.email}</p>
+                                </div>
+                            </div>
+
+                            {showPasswordSql ? (
+                                <div className="animate-fade-in">
+                                    <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm mb-2 font-bold">
+                                        ⚠️ Hệ thống chưa có hàm Reset Password!
+                                    </div>
+                                    <p className="text-xs text-gray-600 mb-2">Vui lòng copy đoạn code SQL dưới đây và chạy trong <strong>Supabase SQL Editor</strong>:</p>
+                                    <div className="bg-slate-900 text-green-400 p-3 rounded-lg font-mono text-xs overflow-x-auto relative min-h-[150px]">
+                                        <button onClick={() => { navigator.clipboard.writeText(passwordResetSql); alert("Đã copy SQL!"); }} className="absolute top-2 right-2 p-1.5 bg-white/10 hover:bg-white/20 rounded text-white transition-colors">
+                                            <Copy size={16} />
+                                        </button>
+                                        <pre>{passwordResetSql}</pre>
+                                    </div>
+                                    <button onClick={() => setShowPasswordSql(false)} className="mt-4 w-full py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-bold text-gray-700">Đã chạy xong, thử lại</button>
+                                </div>
+                            ) : (
+                                <>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">Mật khẩu mới</label>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={newPassword}
+                                                onChange={(e) => setNewPassword(e.target.value)}
+                                                className="flex-1 rounded-xl border border-gray-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-primary-100 focus:border-primary-500 font-mono text-lg"
+                                                placeholder="Nhập hoặc tạo tự động..."
+                                            />
+                                            <button
+                                                onClick={handleGeneratePassword}
+                                                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-sm transition-colors whitespace-nowrap"
+                                            >
+                                                Tạo ngẫu nhiên
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {generatedPassword && (
+                                        <div className="p-4 bg-green-50 border border-green-100 rounded-xl animate-fade-in">
+                                            <p className="text-center text-green-800 font-bold mb-2">✅ Đã đổi mật khẩu thành công!</p>
+                                            <div className="bg-white border border-green-200 p-3 rounded-lg flex items-center justify-between">
+                                                <code className="text-lg font-bold text-green-700">{generatedPassword}</code>
+                                                <button
+                                                    onClick={() => { navigator.clipboard.writeText(generatedPassword); alert("Đã copy password!"); }}
+                                                    className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                                    title="Copy Password"
+                                                >
+                                                    <Copy size={20} />
+                                                </button>
+                                            </div>
+                                            <p className="text-center text-xs text-green-600 mt-2">Hãy copy và gửi cho nhân viên ngay.</p>
+                                        </div>
+                                    )}
+
+                                    {!generatedPassword && (
+                                        <button
+                                            onClick={handleResetPassword}
+                                            disabled={!newPassword}
+                                            className="w-full py-3 bg-yellow-500 hover:bg-yellow-600 text-white font-bold rounded-xl shadow-lg shadow-yellow-200 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                                        >
+                                            Xác nhận Đổi mật khẩu
+                                        </button>
+                                    )}
+                                </>
+                            )}
+
+                        </div>
+                    </div>
+                </div>
+            )}
+
 
             {showRLSModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70  animate-fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"><div className="p-6 bg-red-50 border-b border-red-100 flex gap-4 items-start"><div className="p-3 bg-red-100 text-red-600 rounded-xl shrink-0"><AlertTriangle size={24} /></div><div><h3 className="text-xl font-bold text-gray-900">Cập nhật Database</h3><p className="text-sm text-gray-600 mt-1">Database của bạn đang thiếu các cột phân quyền hoặc chính sách bảo mật (RLS). Vui lòng chạy lệnh SQL sau:</p></div><button onClick={() => setShowRLSModal(false)} className="ml-auto text-gray-400 hover:text-gray-600"><X size={24} /></button></div><div className="p-6 overflow-y-auto space-y-4"><div className="relative bg-gray-900 rounded-xl p-4 font-mono text-sm text-green-400 overflow-x-auto border border-gray-700 shadow-inner"><pre>{`-- 1. Bổ sung cột phân quyền hạn chế (Fix lỗi 400 Bad Request)
 alter table profiles add column if not exists is_locked_add boolean default false;

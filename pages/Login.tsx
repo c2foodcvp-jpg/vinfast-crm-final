@@ -61,13 +61,14 @@ const Login: React.FC = () => {
             if (authData.session) {
                 const { data: profile } = await supabase
                     .from('profiles')
-                    .select('status, role, full_name')
+                    .select('status, role, full_name, team_expiration_date, manager_id')
                     .eq('id', authData.user.id)
                     .single();
 
                 const isSuperAdmin = authData.user.email === 'cskh.vinfasthcm@gmail.com';
 
                 if (!isSuperAdmin && profile) {
+                    // 1. Check Account Status
                     if (profile.status === 'pending') {
                         await supabase.auth.signOut();
                         setError(`Tài khoản "${profile.full_name}" đang chờ duyệt. Vui lòng liên hệ Admin.`);
@@ -77,6 +78,36 @@ const Login: React.FC = () => {
                     if (profile.status === 'blocked') {
                         await supabase.auth.signOut();
                         setError('Tài khoản của bạn đã bị khóa.');
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    // 2. Check Team Expiration (New Feature)
+                    const now = new Date();
+                    let isExpired = false;
+
+                    // a) For MOD: Check own expiration
+                    if (profile.role === 'mod' && profile.team_expiration_date) {
+                        const expDate = new Date(profile.team_expiration_date);
+                        if (now > expDate) isExpired = true;
+                    }
+                    // b) For Employee: Check Manager's expiration
+                    else if (profile.role === 'employee' && profile.manager_id) {
+                        const { data: manager } = await supabase
+                            .from('profiles')
+                            .select('team_expiration_date')
+                            .eq('id', profile.manager_id)
+                            .maybeSingle();
+
+                        if (manager?.team_expiration_date) {
+                            const expDate = new Date(manager.team_expiration_date);
+                            if (now > expDate) isExpired = true;
+                        }
+                    }
+
+                    if (isExpired) {
+                        await supabase.auth.signOut();
+                        setError('Tài khoản của bạn đã hết hạn vui lòng liên hệ Admin để gia hạn !');
                         setIsLoading(false);
                         return;
                     }

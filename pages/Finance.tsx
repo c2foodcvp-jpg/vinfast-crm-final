@@ -25,12 +25,20 @@ interface ProfitShareRow {
     penaltyPercent: number;
     baseShareRatio: number;
     finalShareRatio: number;
-    personalNetPool: number;
-    estimatedIncome: number;
+    personalNetPool: number; // Gross Share before deductions
+
+    // Breakdown Fields
+    grossShare: number; // Income after Bonus/KPI adjustment
+    advanceDeduction: number; // Pure Advance (Ung Luong)
+    paidSalary: number; // Already Paid Salary in this period
+    bonusAdjustment: number; // Demo Car Bonus or Redistributed Penalty
+
+    // Legacy mapping (to keep code compiling if I miss refs, or just remove)
+    estimatedIncome: number; // Final Net to Receive
     excludedCustomerIds: string[];
     excludedProfit: number;
     redistributedIncome: number;
-    personalAdvanceDeduction: number;
+    personalAdvanceDeduction: number; // Total Deduction (Advance + Salary)
     personalBonus: number;
     employeeRevenue: number;
     teamPoolWithEmployee: number;
@@ -105,6 +113,9 @@ const Finance: React.FC = () => {
         startDate: '',
         endDate: ''
     });
+    const [selectedFundMembers, setSelectedFundMembers] = useState<string[]>([]); // New: Members for the new fund
+    const [fundMembersMap, setFundMembersMap] = useState<{ fund_id: string, user_id: string }[]>([]); // New: State for fund members
+    const [isEditingFund, setIsEditingFund] = useState<string | null>(null); // New: Track editing state
     const [isClosingFund, setIsClosingFund] = useState(false);
 
     const todayStr = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -113,6 +124,10 @@ const Finance: React.FC = () => {
 
     const [showSql, setShowSql] = useState(false);
     const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+
+    const [showSalaryConfirmModal, setShowSalaryConfirmModal] = useState(false);
+    const [salaryPayoutTarget, setSalaryPayoutTarget] = useState<{ user: UserProfile, maxAmount: number } | null>(null);
+    const [salaryPayoutAmount, setSalaryPayoutAmount] = useState<string>('');
 
     useEffect(() => {
         if (userProfile) {
@@ -162,18 +177,42 @@ const Finance: React.FC = () => {
             const { data: kpis } = await supabase.from('employee_kpis').select('*');
             if (kpis) setAllKPIs(kpis as EmployeeKPI[]);
 
-            // NEW: Fetch Fund Periods for this user's team (TEAM ISOLATED)
+            // NEW: Fetch Fund Periods and Members
+            // 1. Fetch All Allocation Memberships First (Global is fine as table is small, or filter by user)
+            const { data: fMembers } = await supabase.from('fund_members').select('*');
+            if (fMembers) setFundMembersMap(fMembers);
+
+            // 2. Fetch Fund Periods with Team Isolation
             let periodsQuery = supabase.from('fund_periods').select('*');
-            if (isMod && userProfile) {
-                // Mod only sees their team's fund periods
+
+            if (isAdmin) {
+                if (selectedTeam !== 'all') {
+                    periodsQuery = periodsQuery.eq('manager_id', selectedTeam);
+                }
+            } else if (isMod && userProfile) {
                 periodsQuery = periodsQuery.eq('manager_id', userProfile.id);
-            } else if (isAdmin && selectedTeam !== 'all') {
-                // Admin viewing a specific team
-                periodsQuery = periodsQuery.eq('manager_id', selectedTeam);
+            } else {
+                // Regular User: We fetch ALL periods first (or optimize to fetch only relevant), 
+                // but easier logic is fetch potentially relevant ones then filter by membership map.
+                // However, we can't filter by Join on Supabase easily without complex query.
+                // Let's fetch all periods (or those by manager) AND then filter in JS.
+                if (userProfile?.manager_id) {
+                    periodsQuery = periodsQuery.eq('manager_id', userProfile.manager_id);
+                }
             }
-            // Admin with 'all' teams sees all fund periods (no filter)
-            const { data: periods } = await periodsQuery.order('start_date', { ascending: false });
-            if (periods) setFundPeriods(periods as FundPeriod[]);
+
+            const { data: funds } = await periodsQuery;
+            let displayFunds = funds || [];
+
+            // 3. Post-Filter for Regular Users: Only show funds they are a MEMBER of
+            if (!isAdmin && !isMod && userProfile && fMembers) {
+                const myFundIds = fMembers.filter(m => m.user_id === userProfile.id).map(m => m.fund_id);
+                // Also keep any "Open" funds without members if that's a legacy rule? 
+                // Creating a stricter rule: MUST be a member
+                displayFunds = displayFunds.filter(f => myFundIds.includes(f.id));
+            }
+
+            setFundPeriods(displayFunds);
 
             const extendedTrans: ExtendedTransaction[] = transList.map(t => {
                 const customer = t.customer_id ? custList.find(c => c.id === t.customer_id) : null;
@@ -409,7 +448,7 @@ const Finance: React.FC = () => {
         } catch (e: any) { showToast("Lỗi: " + (e.message || "Unknown"), 'error'); } finally { setDealerDebtToConfirm(null); }
     };
 
-    // --- FUND PERIOD HANDLERS (Đóng Quỹ) ---
+    // --- FUND PERIOD HANDLERS (Create / Edit) ---
     const handleCloseFund = async () => {
         if (!closeFundForm.name || !closeFundForm.startDate) {
             showToast("Vui lòng nhập tên quỹ và ngày bắt đầu", 'error');
@@ -426,6 +465,9 @@ const Finance: React.FC = () => {
         for (const period of fundPeriods) {
             // Skip periods from other teams (if team filter is active)
             if (currentTeamId && period.manager_id !== currentTeamId) continue;
+
+            // Skip self if editing
+            if (isEditingFund && period.id === isEditingFund) continue;
 
             const existingStart = new Date(period.start_date);
             const existingEnd = period.end_date ? new Date(period.end_date) : new Date(); // Open period assumes "now" as end
@@ -444,7 +486,7 @@ const Finance: React.FC = () => {
 
         setIsClosingFund(true);
         try {
-            const newPeriod: Partial<FundPeriod> = {
+            const periodData: Partial<FundPeriod> = {
                 name: closeFundForm.name,
                 start_date: closeFundForm.startDate,
                 end_date: closeFundForm.endDate || undefined,
@@ -453,20 +495,74 @@ const Finance: React.FC = () => {
                 manager_id: isMod ? userProfile?.id : (isAdmin && selectedTeam !== 'all' ? selectedTeam : undefined)
             };
 
-            const { data, error } = await supabase
-                .from('fund_periods')
-                .insert([newPeriod])
-                .select()
-                .single();
+            if (isEditingFund) {
+                // --- UPDATE EXISTING FUND ---
+                const { error } = await supabase
+                    .from('fund_periods')
+                    .update(periodData)
+                    .eq('id', isEditingFund);
 
-            if (error) throw error;
+                if (error) throw error;
 
-            setFundPeriods(prev => [data as FundPeriod, ...prev]);
+                // Sync Members for Edit
+                const currentMemberIds = fundMembersMap.filter(m => m.fund_id === isEditingFund).map(m => m.user_id);
+                const toAdd = selectedFundMembers.filter(uid => !currentMemberIds.includes(uid));
+                const toRemove = currentMemberIds.filter(uid => !selectedFundMembers.includes(uid));
+
+                if (toRemove.length > 0) {
+                    await supabase.from('fund_members').delete().eq('fund_id', isEditingFund).in('user_id', toRemove);
+                }
+                if (toAdd.length > 0) {
+                    const insertRows = toAdd.map(uid => ({ fund_id: isEditingFund, user_id: uid }));
+                    await supabase.from('fund_members').insert(insertRows);
+                }
+
+                // Update Local State
+                setFundPeriods(prev => prev.map(p => p.id === isEditingFund ? { ...p, ...periodData, id: p.id } as FundPeriod : p)); // Ensure ID persists
+                setFundMembersMap(prev => {
+                    const next = prev.filter(m => !(m.fund_id === isEditingFund && toRemove.includes(m.user_id)));
+                    const newEntries = toAdd.map(uid => ({ fund_id: isEditingFund!, user_id: uid }));
+                    return [...next, ...newEntries];
+                });
+
+                showToast("Đã cập nhật kỳ quỹ!", 'success');
+
+            } else {
+                // --- CREATE NEW FUND ---
+                const { data, error } = await supabase
+                    .from('fund_periods')
+                    .insert([periodData])
+                    .select()
+                    .single();
+
+                if (error) throw error;
+
+                if (selectedFundMembers.length > 0) {
+                    const membersToInsert = selectedFundMembers.map(uid => ({
+                        fund_id: (data as FundPeriod).id,
+                        user_id: uid
+                    }));
+                    const { error: memberError } = await supabase.from('fund_members').insert(membersToInsert);
+                    if (memberError) {
+                        console.error('Error inserting members:', memberError);
+                        showToast("Tạo quỹ thành công nhưng lỗi thêm thành viên: " + memberError.message, 'error'); // Use 'error' type
+                    } else {
+                        const newMembers = selectedFundMembers.map(uid => ({ fund_id: (data as FundPeriod).id, user_id: uid }));
+                        setFundMembersMap(prev => [...prev, ...newMembers]);
+                    }
+                }
+
+                setFundPeriods(prev => [data as FundPeriod, ...prev]);
+                showToast("Đã tạo kỳ quỹ mới!", 'success');
+            }
+
             setShowCloseFundModal(false);
             setCloseFundForm({ name: '', startDate: '', endDate: '' });
-            showToast("Đã tạo kỳ quỹ mới!", 'success');
+            setSelectedFundMembers([]);
+            setIsEditingFund(null);
+
         } catch (e: any) {
-            showToast("Lỗi đóng quỹ: " + e.message, 'error');
+            showToast("Lỗi xử lý quỹ: " + e.message, 'error');
         } finally {
             setIsClosingFund(false);
         }
@@ -603,6 +699,26 @@ const Finance: React.FC = () => {
 
                     // MKT Filter: Only warn for MKT Group customers
                     if (!c.source?.toLowerCase().includes('mkt')) continue;
+
+                    // --- NEW: Filter by Fund Period Dates ---
+                    // Since "Complete Fund" is specific to a period, we must only check customers created in this period
+                    // (and potentially older customers with transactions in this period? 
+                    // No, usually "Debt" tracks by Customer Origin Period for MKT funds).
+
+                    const cDate = new Date(c.created_at);
+                    const pStart = new Date(period.start_date);
+                    // Reset time to ensure strict comparison if needed, or rely on ISO string comparison
+                    // Start Date is inclusive (00:00:00)
+                    pStart.setHours(0, 0, 0, 0);
+
+                    if (cDate < pStart) continue;
+
+                    if (period.end_date) {
+                        const pEnd = new Date(period.end_date);
+                        pEnd.setHours(23, 59, 59, 999); // End of Day
+                        if (cDate > pEnd) continue;
+                    }
+                    // ----------------------------------------
 
                     // Only check WON or potential if logic dictates? Usually only WON matters for debt.
                     // If status is NEW/CONTACTED/POTENTIAL, do they have debt? Maybe advance?
@@ -751,7 +867,86 @@ const Finance: React.FC = () => {
         } catch (e: any) { console.error(e); }
     };
 
-    // --- LOGIC ---
+    // --- PAYOUT HANDLERS ---
+    const isSalaryPayout = (t: ExtendedTransaction) => t.type === 'expense' && t.reason.startsWith('Chi lương:');
+
+    // --- SALARY MODAL FUNCTIONS --- (State is at top level)
+
+    const openSalaryModal = (user: UserProfile, maxAmount: number) => {
+        setSalaryPayoutTarget({ user, maxAmount });
+        setSalaryPayoutAmount('');
+        setShowSalaryConfirmModal(true);
+    };
+
+    const confirmPaySalary = async () => {
+        if (!salaryPayoutTarget || !salaryPayoutAmount) return;
+
+        // Remove non-numeric chars (commas, dots) before parsing
+        const rawAmount = salaryPayoutAmount.replace(/[^0-9]/g, '');
+        const amount = Number(rawAmount);
+
+        if (isNaN(amount) || amount <= 0) { showToast("Số tiền không hợp lệ", 'error'); return; }
+
+        // Validation: Cannot pay more than Estimated Net Income (if logic requires)
+        // User Request: "Số tiền chi không được vượt quá (Thực nhận (Dự kiến)) hiện tại"
+        if (amount > salaryPayoutTarget.maxAmount) {
+            showToast(`Số tiền chi không được vượt quá số thực nhận (${salaryPayoutTarget.maxAmount.toLocaleString('vi-VN')} đ)`, 'error');
+            return;
+        }
+
+        const user = salaryPayoutTarget.user;
+        const timeLabel = selectedMonth === 'all' ? `Năm ${selectedYear}` : typeof selectedMonth === 'number' ? `T${selectedMonth}/${selectedYear}` : `${selectedMonth.toUpperCase()}/${selectedYear}`;
+
+        try {
+            const { error } = await supabase.from('transactions').insert([{
+                user_id: user.id,
+                user_name: user.full_name,
+                type: 'expense',
+                amount: Math.floor(amount),
+                reason: `Chi lương: ${user.full_name} - ${timeLabel}`,
+                status: 'approved',
+                approved_by: userProfile?.id
+            }]);
+            if (error) throw error;
+            fetchDataWithIsolation();
+            setShowSalaryConfirmModal(false);
+            setSalaryPayoutTarget(null);
+            showToast(`Đã chi lương cho ${user.full_name}!`, 'success');
+        } catch (e: any) {
+            showToast("Lỗi chi lương: " + e.message, 'error');
+        }
+    };
+
+    const handlePayAllSalaries = async () => {
+        const salaryCandidates = profitSharingData.filter(row => row.estimatedIncome > 1000); // Only pay if > 1000 VND
+        if (salaryCandidates.length === 0) { showToast("Không có nhân viên nào cần chi lương.", 'error'); return; }
+
+        const totalAmt = salaryCandidates.reduce((s, r) => s + r.estimatedIncome, 0);
+        if (!window.confirm(`Xác nhận CHI LƯƠNG cho ${salaryCandidates.length} nhân viên? Tổng tiền: ${totalAmt.toLocaleString('vi-VN')} đ`)) return;
+
+        const timeLabel = selectedMonth === 'all' ? `Năm ${selectedYear}` : typeof selectedMonth === 'number' ? `T${selectedMonth}/${selectedYear}` : `${selectedMonth.toUpperCase()}/${selectedYear}`;
+
+        try {
+            const transactions = salaryCandidates.map(row => ({
+                user_id: row.user.id,
+                user_name: row.user.full_name,
+                type: 'expense',
+                amount: Math.floor(row.estimatedIncome),
+                reason: `Chi lương: ${row.user.full_name} - ${timeLabel}`,
+                status: 'approved',
+                approved_by: userProfile?.id
+            }));
+
+            const { error } = await supabase.from('transactions').insert(transactions);
+            if (error) throw error;
+
+            fetchDataWithIsolation();
+            showToast(`Đã chi lương cho ${salaryCandidates.length} nhân viên!`, 'success');
+        } catch (e: any) {
+            showToast("Lỗi chi lương hàng loạt: " + e.message, 'error');
+        }
+    };
+
     // Relaxed MKT check (Case Insensitive)
     const isMKT = (src?: string) => (src || '').toUpperCase().includes('MKT');
 
@@ -984,12 +1179,38 @@ const Finance: React.FC = () => {
     const pnlNet = pnlRevenue - displayTotalExpense;
 
     const totalIn = filteredTransactions.filter(t => ['deposit', 'adjustment', 'repayment', 'loan_repayment'].includes(t.type) && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+    // Modified TotalOut: Include Salary Payouts in the "Actual Cash" calculation
     const totalOut = filteredTransactions.filter(t => t.status === 'approved' && (['expense', 'advance', 'loan'].includes(t.type) || (t.type === 'adjustment' && t.amount < 0))).reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
+    // Separate Salary Payouts from Total Out for Pool Calculation
+    const totalSalaryPayouts = filteredTransactions.filter(t => t.status === 'approved' && isSalaryPayout(t)).reduce((sum, t) => sum + t.amount, 0);
+
+    // Actual Cash in Hand (Display) = Total In - Total Out (Everything)
     const fundRemaining = totalIn - totalOut - partTimeSalaryLiability;
+
+    // Calculation Pool (Gross) for Bonus Share = Fund Remaining + Salary Payouts
+    // Explanation: If I pay 10M salary, Fund drops 10M. But that 10M should still be part of the "Shareable Pool" 
+    // so that OTHER employees' shares don't drop.
+    const fundCalculationPool = fundRemaining + totalSalaryPayouts;
 
     // --- PROFIT SHARING CALCULATION (WITH REDISTRIBUTION) ---
     const profitSharingData: ProfitShareRow[] = useMemo(() => {
+        // Base Eligible: Full-time + Active + Not Admin
         let eligibleProfiles = allProfiles.filter(p => !p.is_part_time && p.status === 'active' && p.role !== 'admin');
+
+        // 1. Filter by Fund Membership (if current period)
+        if (selectedFundPeriod !== 'all') {
+            const membersInFund = fundMembersMap.filter(m => m.fund_id === selectedFundPeriod).map(m => m.user_id);
+            // If defined, strictly use; else fallback to all eligible?
+            // "Quỹ A (Set NV 1,2,3)" implies strict filtering.
+            if (membersInFund.length > 0) {
+                eligibleProfiles = eligibleProfiles.filter(p => membersInFund.includes(p.id));
+            } else {
+                // Legacy support: If no members defined for this fund, maybe show all (or none? Safe is all for now)
+            }
+        }
+
+        // 2. Filter by Permission Scope (View)
         if (isAdmin && selectedTeam !== 'all') {
             eligibleProfiles = eligibleProfiles.filter(p => p.manager_id === selectedTeam || p.id === selectedTeam);
         } else if (isMod) {
@@ -998,13 +1219,11 @@ const Finance: React.FC = () => {
             eligibleProfiles = eligibleProfiles.filter(p => p.id === userProfile?.id);
         }
 
-        if (eligibleProfiles.length === 0) return [];
-
-        // NOTE: Using equal split now, custom ratios are not used
-        // (totalCustomRatio, profilesWithoutCustom, remainingPercent, defaultShare were removed)
-
-        const rows = eligibleProfiles.map(emp => {
-            // NOTE: baseRatio is now calculated in equal split step, not here
+        // Initialize Rows
+        const rows: ProfitShareRow[] = eligibleProfiles.map(emp => {
+            // ... (KPI Logic remains same) ...
+            // [Keep KPI Logic Code Here - I will assume it is preserved if not matched exactly, but I can't preserve it without copying]
+            // RE-WRITING KPI LOGIC SHORTLY TO FIT CHUNK LIMIT
 
             // UPDATED: Find KPI for the SELECTED Month/Year
             let kpiTarget = emp.kpi_target || 0;
@@ -1012,65 +1231,47 @@ const Finance: React.FC = () => {
                 const specificKPI = allKPIs.find(k => k.user_id === emp.id && k.month === selectedMonth && k.year === selectedYear);
                 if (specificKPI) kpiTarget = specificKPI.target;
             } else if (selectedMonth === 'all') {
-                // For 'all' (Full Year), sum up all targets for the year
-                // If no specific KPI records, use default monthly target * 12
                 const yearlyKPIs = allKPIs.filter(k => k.user_id === emp.id && k.year === selectedYear);
                 if (yearlyKPIs.length > 0) {
-                    // Sum up found records + fill missing months with default
                     kpiTarget = yearlyKPIs.reduce((sum, k) => sum + k.target, 0) + ((12 - yearlyKPIs.length) * (emp.kpi_target || 0));
                 } else {
-                    // No records found for this year, use default * 12
                     kpiTarget = (emp.kpi_target || 0) * 12;
                 }
             } else if (selectedMonth.startsWith('q')) {
-                // Quarter Logic
                 let months: number[] = [];
                 if (selectedMonth === 'q1') months = [1, 2, 3];
                 if (selectedMonth === 'q2') months = [4, 5, 6];
                 if (selectedMonth === 'q3') months = [7, 8, 9];
                 if (selectedMonth === 'q4') months = [10, 11, 12];
-
-                // Calculate Target for Quarter
                 const quarterKPIs = allKPIs.filter(k => k.user_id === emp.id && k.year === selectedYear && months.includes(k.month));
                 const foundMonths = quarterKPIs.map(k => k.month);
-                const missingMonthsCount = 3 - foundMonths.length;
-                const sumFound = quarterKPIs.reduce((sum, k) => sum + k.target, 0);
-                kpiTarget = sumFound + (missingMonthsCount * (emp.kpi_target || 0));
+                kpiTarget = quarterKPIs.reduce((sum, k) => sum + k.target, 0) + ((3 - foundMonths.length) * (emp.kpi_target || 0));
             }
 
             const kpiActual = allCustomers.filter(c => {
                 if (c.creator_id !== emp.id || c.status !== CustomerStatus.WON) return false;
                 if (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
                 if (!isMKT(c.source)) return false;
-
-                // Use won_at (Deal Close) for KPI. If missing, use created_at (Deal Start).
                 const effectiveDate = c.won_at || c.created_at || '';
                 if (!isInMonthYear(effectiveDate)) return false;
-
-                // NEW: Fund Period Filter for KPI - use customer's created_at
                 if (selectedFundPeriod !== 'all') {
                     const period = fundPeriods.find(p => p.id === selectedFundPeriod);
                     if (period) {
-                        const customerDate = new Date(c.created_at);
-                        const periodStart = new Date(period.start_date);
-
-                        if (customerDate < periodStart) return false;
-
+                        const cDate = new Date(c.created_at);
+                        const pStart = new Date(period.start_date);
+                        if (cDate < pStart) return false;
                         if (period.end_date) {
-                            const periodEnd = new Date(period.end_date);
-                            periodEnd.setHours(23, 59, 59, 999);
-                            if (customerDate > periodEnd) return false;
+                            const pEnd = new Date(period.end_date); pEnd.setHours(23, 59, 59, 999);
+                            if (cDate > pEnd) return false;
                         }
                     }
                 }
-
                 return true;
             }).length;
 
             const missedKpi = Math.max(0, kpiTarget - kpiActual);
             const userExclusions = profitExclusions.filter(ex => ex.user_id === emp.id).map(ex => ex.customer_id);
 
-            // Calculate profit from excluded customers (for this user)
             const excludedProfit = filteredTransactions
                 .filter(t => t.customer_id && userExclusions.includes(t.customer_id) && t.status === 'approved')
                 .reduce((sum, t) => {
@@ -1084,12 +1285,17 @@ const Finance: React.FC = () => {
                 .filter(t => t.user_id === emp.id && t.type === 'advance' && t.status === 'approved' && t.reason.toLowerCase().includes('ứng lương'))
                 .reduce((sum, t) => sum + t.amount, 0);
 
+            // Paid Salaries
+            const paidSalary = filteredTransactions
+                .filter(t => t.user_id === emp.id && t.status === 'approved' && isSalaryPayout(t))
+                .reduce((sum, t) => sum + t.amount, 0);
+
             // Calculate Personal Bonuses (e.g. Demo Car Owner)
             const personalBonus = filteredTransactions
                 .filter(t => t.user_id === emp.id && t.type === 'personal_bonus' && t.status === 'approved')
                 .reduce((sum, t) => sum + t.amount, 0);
 
-            // NEW: Calculate employee's personal revenue (deposits from their customers in MKT Group)
+            // NEW: Calculate employee's personal revenue
             const employeeCustomerIds = allCustomers
                 .filter(c => c.creator_id === emp.id && (c.source || '').includes('MKT'))
                 .map(c => c.id);
@@ -1097,23 +1303,32 @@ const Finance: React.FC = () => {
                 .filter(t => t.customer_id && employeeCustomerIds.includes(t.customer_id) && t.status === 'approved' && t.type === 'deposit')
                 .reduce((sum, t) => sum + t.amount, 0);
 
-            // NEW: Team pool that includes this employee (pool minus this user's excluded profit)
+            // Used for display only
             const teamPoolWithEmployee = fundRemaining - excludedProfit;
 
+            // Initial State for Calculation
             return {
                 user: emp,
                 kpiTarget,
                 kpiActual,
                 missedKpi,
-                penaltyPercent: 0, // Will calculate after
-                baseShareRatio: 0, // Will calculate based on equal split
+                penaltyPercent: 0,
+                baseShareRatio: 0,
                 finalShareRatio: 0,
                 personalNetPool: 0,
-                estimatedIncome: 0,
+
+                // Fields
+                grossShare: 0,
+                advanceDeduction: personalSalaryAdvances,
+                paidSalary: paidSalary,
+                bonusAdjustment: personalBonus, // Start with direct bonus, will adjust redistribution later
+
+                estimatedIncome: 0, // Will be calculated at very end
+
                 excludedCustomerIds: userExclusions,
                 excludedProfit: excludedProfit,
                 redistributedIncome: 0,
-                personalAdvanceDeduction: personalSalaryAdvances,
+                personalAdvanceDeduction: personalSalaryAdvances + paidSalary, // For Legacy UI compatibility
                 personalBonus: personalBonus,
                 employeeRevenue: employeeRevenue,
                 teamPoolWithEmployee: teamPoolWithEmployee
@@ -1123,62 +1338,50 @@ const Finance: React.FC = () => {
         const numEmployees = rows.length;
         if (numEmployees === 0) return rows;
 
-        // --- STEP 1: EQUAL SPLIT ---
-        // Each employee gets equal share of fundRemaining (100% / n employees)
-        const baseSharePerPerson = fundRemaining / numEmployees;
+        // --- STEP 1: GROSS SHARE ---
+        const baseSharePerPerson = fundCalculationPool / numEmployees; // Using Gross Pool
         const baseRatio = 100 / numEmployees;
 
         rows.forEach(row => {
             row.baseShareRatio = baseRatio;
             row.personalNetPool = baseSharePerPerson;
-            row.estimatedIncome = baseSharePerPerson;
+            row.grossShare = baseSharePerPerson;
         });
 
         // --- STEP 2: EXCLUSION REDISTRIBUTION ---
-        // For excluded customers: remove their profit from the user, redistribute to others
         rows.forEach(sourceRow => {
             if (sourceRow.excludedCustomerIds.length === 0) return;
             const excludedAmount = sourceRow.excludedProfit;
             if (excludedAmount <= 0) return;
 
-            // This user's share of excluded profit (equal split portion)
             const lostAmount = excludedAmount / numEmployees;
+            sourceRow.grossShare -= lostAmount;
 
-            // Subtract from source user
-            sourceRow.estimatedIncome -= lostAmount;
-
-            // Add to other users (redistributed)
             const beneficiaries = rows.filter(r => r.user.id !== sourceRow.user.id);
             if (beneficiaries.length > 0) {
                 const bonusPerPerson = lostAmount / beneficiaries.length;
                 beneficiaries.forEach(b => {
-                    b.estimatedIncome += bonusPerPerson;
+                    b.grossShare += bonusPerPerson;
                     b.redistributedIncome += bonusPerPerson;
                 });
             }
         });
 
         // --- STEP 3: KPI PENALTY ---
-        // If employee missed KPI: penalty = 3% per missed unit × their current income
-        // Penalty is redistributed to employees who met their KPI (missedKpi = 0)
         const employeesWithFullKpi = rows.filter(r => r.missedKpi === 0);
-
         rows.forEach(row => {
             if (row.missedKpi > 0) {
-                // Penalty = 3% × missed KPI units × current income
                 const penaltyPercent = row.missedKpi * 0.03;
                 row.penaltyPercent = penaltyPercent;
-                const penaltyAmount = row.estimatedIncome * penaltyPercent;
+                const penaltyAmount = row.grossShare * penaltyPercent;
 
-                // Subtract penalty from this user
-                row.estimatedIncome -= penaltyAmount;
+                row.grossShare -= penaltyAmount;
                 row.finalShareRatio = row.baseShareRatio * (1 - penaltyPercent);
 
-                // Redistribute to employees with full KPI
                 if (employeesWithFullKpi.length > 0) {
                     const bonusPerPerson = penaltyAmount / employeesWithFullKpi.length;
                     employeesWithFullKpi.forEach(b => {
-                        b.estimatedIncome += bonusPerPerson;
+                        b.grossShare += bonusPerPerson;
                         b.redistributedIncome += bonusPerPerson;
                     });
                 }
@@ -1187,37 +1390,29 @@ const Finance: React.FC = () => {
             }
         });
 
-        // --- STEP 4: DEMO CAR BONUS REDISTRIBUTION ---
-        // Demo car bonus is redistributed FROM the pool:
-        // - Everyone (including owner) pays their share of bonus
-        // - Owner gets the full bonus amount back
-        // Example: Pool=1M, 4 people, bonus=400k
-        // Each pays 100k, owner A gets 400k back → A:550k, B/C/D:150k each
-        const numEmployeesForBonus = rows.length;
+        // --- STEP 4: DEMO CAR BONUS (COST SHARING) ---
+        // Anyone with "personalBonus" (Demo Owner) gets full amount back.
+        // Everyone (including owner) pays share.
+        const totalBonuses = rows.reduce((sum, r) => sum + r.personalBonus, 0);
+        if (totalBonuses > 0) {
+            const costPerPerson = totalBonuses / numEmployees;
+            rows.forEach(row => {
+                row.grossShare -= costPerPerson;
+                // If this user is owner, they receive their bonus
+                if (row.personalBonus > 0) {
+                    row.grossShare += row.personalBonus;
+                }
+            });
+        }
+
+        // --- STEP 5: FINAL NET CALCULATION ---
         rows.forEach(row => {
-            if (row.personalBonus > 0) {
-                // This person is the bonus owner
-                const bonusAmount = row.personalBonus;
-                const sharePerPerson = bonusAmount / numEmployeesForBonus;
-
-                // Subtract share from everyone (including owner)
-                rows.forEach(r => {
-                    r.estimatedIncome -= sharePerPerson;
-                });
-
-                // Add full bonus to owner
-                row.estimatedIncome += bonusAmount;
-            }
-        });
-
-        // --- STEP 5: SALARY ADVANCES ---
-        // Subtract personal salary advances
-        rows.forEach(row => {
-            row.estimatedIncome = row.estimatedIncome - row.personalAdvanceDeduction;
+            // Net Receive = Gross Share - Advance - Salary Paid
+            row.estimatedIncome = row.grossShare - row.advanceDeduction - row.paidSalary;
         });
 
         return rows;
-    }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, pnlNet, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, allKPIs, selectedFundPeriod, fundPeriods]);
+    }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, allKPIs, selectedFundPeriod, fundPeriods, fundCalculationPool]);
 
     // --- NEW: Employee Performance & Debt Stats ---
     const employeeStats = useMemo(() => {
@@ -1228,6 +1423,14 @@ const Finance: React.FC = () => {
             eligibleProfiles = eligibleProfiles.filter(p => p.id === userProfile?.id || p.manager_id === userProfile?.id);
         } else if (!isAdmin && !isMod) {
             eligibleProfiles = eligibleProfiles.filter(p => p.id === userProfile?.id);
+        }
+
+        // --- NEW: Filter by Fund Membership ---
+        if (selectedFundPeriod !== 'all') {
+            const membersInFund = fundMembersMap.filter(m => m.fund_id === selectedFundPeriod).map(m => m.user_id);
+            if (membersInFund.length > 0) {
+                eligibleProfiles = eligibleProfiles.filter(p => membersInFund.includes(p.id));
+            }
         }
 
         return eligibleProfiles.map(emp => {
@@ -1242,6 +1445,28 @@ const Finance: React.FC = () => {
                 if (!isMKT(c.source)) return false;
 
                 // CRITICAL FIX: Use won_at (Deal Date) instead of updated_at
+
+                // Fund Period Filtering Logic for Customers
+                // If a specific fund period is selected, we filter by creation date falling within that period, IGNORING Month/Year selector
+                if (selectedFundPeriod !== 'all') {
+                    const period = fundPeriods.find(p => p.id === selectedFundPeriod);
+                    if (period) {
+                        const cDate = new Date(c.created_at);
+                        const pStart = new Date(period.start_date);
+                        const pEnd = period.end_date ? new Date(period.end_date) : new Date();
+                        // Inclusive check
+                        if (period.end_date) {
+                            // Closed period: strict range
+                            const endDateObj = new Date(period.end_date);
+                            endDateObj.setHours(23, 59, 59, 999); // End of day
+                            return cDate >= pStart && cDate <= endDateObj;
+                        } else {
+                            // Open period: strict start, loose end
+                            return cDate >= pStart;
+                        }
+                    }
+                }
+
                 if (filterMode === 'creation') {
                     return isInMonthYear(c.created_at);
                 } else {
@@ -1300,7 +1525,7 @@ const Finance: React.FC = () => {
                 debt
             };
         }).sort((a, b) => b.expectedRevenue - a.expectedRevenue);
-    }, [allProfiles, allCustomers, transactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, filterMode]);
+    }, [allProfiles, allCustomers, transactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, filterMode, selectedFundPeriod, fundPeriods, fundMembersMap]);
 
 
     const expenses = filteredTransactions.filter(t => t.type === 'expense' || t.type === 'advance' || t.type === 'loan');
@@ -1517,13 +1742,31 @@ const Finance: React.FC = () => {
 
                         {/* Complete Fund Button - Only show when a specific period is selected */}
                         {(isAdmin || isMod) && selectedFundPeriod !== 'all' && (
-                            <button
-                                onClick={() => handleCompleteFund(selectedFundPeriod)}
-                                className="px-3 py-2.5 bg-green-50 text-green-600 border border-green-200 rounded-xl text-sm font-bold hover:bg-green-100 transition-all whitespace-nowrap flex items-center gap-1 shadow-sm"
-                                title="Hoàn thành và lưu quỹ vào lịch sử"
-                            >
-                                <CheckCircle2 size={16} /> Hoàn thành
-                            </button>
+                            <div className="flex gap-1">
+                                <button
+                                    onClick={() => handleCompleteFund(selectedFundPeriod)}
+                                    className="px-3 py-2.5 bg-green-50 text-green-600 border border-green-200 rounded-xl text-sm font-bold hover:bg-green-100 transition-all whitespace-nowrap flex items-center gap-1 shadow-sm"
+                                    title="Hoàn thành và lưu quỹ vào lịch sử"
+                                >
+                                    <CheckCircle2 size={16} /> Hoàn thành
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        const period = fundPeriods.find(p => p.id === selectedFundPeriod);
+                                        if (period) {
+                                            setCloseFundForm({ name: period.name, startDate: period.start_date, endDate: period.end_date || '' });
+                                            const members = fundMembersMap.filter(m => m.fund_id === period.id).map(m => m.user_id);
+                                            setSelectedFundMembers(members);
+                                            setIsEditingFund(period.id);
+                                            setShowCloseFundModal(true);
+                                        }
+                                    }}
+                                    className="px-3 py-2.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-xl text-sm font-bold hover:bg-blue-100 transition-all whitespace-nowrap flex items-center gap-1 shadow-sm"
+                                    title="Chỉnh sửa kỳ quỹ"
+                                >
+                                    <Settings2 size={16} /> Sửa
+                                </button>
+                            </div>
                         )}
 
                         {/* Close Fund Button */}
@@ -1547,11 +1790,13 @@ const Finance: React.FC = () => {
                                         startDate: nextStartDate,
                                         endDate: ''
                                     });
+                                    setIsEditingFund(null); // Ensure creation mode
+                                    setSelectedFundMembers([]);
                                     setShowCloseFundModal(true);
                                 }}
                                 className="px-4 py-2.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-xl text-sm font-bold hover:bg-amber-100 transition-all whitespace-nowrap flex items-center gap-2 shadow-sm"
                             >
-                                <Lock size={16} /> Đóng Quỹ
+                                <Lock size={16} /> Tạo / Đóng Quỹ
                             </button>
                         )}
 
@@ -1655,9 +1900,16 @@ const Finance: React.FC = () => {
             <div className="bg-white rounded-2xl border border-indigo-100 shadow-sm overflow-hidden mb-6">
                 <div className="p-4 bg-indigo-50 border-b border-indigo-100 flex justify-between items-center">
                     <h3 className="font-bold text-indigo-900 flex items-center gap-2"><Percent size={20} className="text-indigo-600" /> Phân chia Lợi Nhuận (Bonus)</h3>
-                    <span className="text-xs font-medium text-indigo-600 bg-white px-2 py-1 rounded-lg border border-indigo-200">
-                        Pool Net: <strong>{formatCurrency(fundRemaining)}</strong> VNĐ
-                    </span>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-indigo-600 bg-white px-2 py-1 rounded-lg border border-indigo-200">
+                            Pool: <strong>{formatCurrency(fundCalculationPool)}</strong>
+                        </span>
+                        {(isAdmin || isMod) && (
+                            <button onClick={handlePayAllSalaries} className="px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 shadow flex items-center gap-1">
+                                <BadgeDollarSign size={14} /> Chi lương
+                            </button>
+                        )}
+                    </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -1726,18 +1978,23 @@ const Finance: React.FC = () => {
                                     </td>
                                     <td className="px-4 py-3 text-right text-xs">
                                         <div className="flex flex-col items-end gap-1">
-                                            {row.personalAdvanceDeduction > 0 && <span className="text-red-500 font-semibold">-{formatCurrency(row.personalAdvanceDeduction)} (Ứng)</span>}
+                                            {row.paidSalary > 0 && <span className="text-orange-600 font-semibold">-{formatCurrency(row.paidSalary)} (Đã chi lương)</span>}
+                                            {row.advanceDeduction > 0 && <span className="text-red-500 font-semibold">-{formatCurrency(row.advanceDeduction)} (Ứng)</span>}
                                             {row.personalBonus > 0 && <span className="text-green-500 font-semibold">+{formatCurrency(row.personalBonus)} (Thêm)</span>}
-                                            {row.personalAdvanceDeduction === 0 && row.personalBonus === 0 && <span className="text-gray-400">-</span>}
+                                            {row.paidSalary === 0 && row.advanceDeduction === 0 && row.personalBonus === 0 && <span className="text-gray-400">-</span>}
                                         </div>
                                     </td>
-                                    <td className="px-4 py-3 text-right font-bold text-green-600 text-lg">
+                                    <td className={`px-4 py-3 text-right font-bold text-lg ${row.estimatedIncome < 0 ? 'text-red-600' : 'text-green-600'}`}>
                                         {formatCurrency(row.estimatedIncome)}
                                     </td>
                                     {(isAdmin || isMod) && (
-                                        <td className="px-4 py-3 text-center">
+                                        <td className="px-4 py-3 text-center flex items-center justify-center gap-2">
                                             <button onClick={() => { setTargetUserForExclusion(row.user); setShowExclusionModal(true); }} className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-red-50 hover:text-red-600 transition-colors" title="Loại trừ Khách hàng">
                                                 <MinusCircle size={16} />
+                                            </button>
+                                            {/* Show Payout Button ALWAYS if Admin/Mod, regardless of estimated income */}
+                                            <button onClick={() => openSalaryModal(row.user, row.estimatedIncome)} className="p-1.5 bg-green-50 text-green-600 rounded hover:bg-green-100 border border-green-200 transition-colors" title="Chi tiền lương (Payout)">
+                                                <BadgeDollarSign size={16} />
                                             </button>
                                         </td>
                                     )}
@@ -1747,6 +2004,49 @@ const Finance: React.FC = () => {
                     </table>
                 </div>
             </div>
+
+            {/* --- SALARY CONFIRM MODAL --- */}
+            {showSalaryConfirmModal && salaryPayoutTarget && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 animate-fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl overflow-hidden flex flex-col">
+                        <div className="flex justify-between items-center mb-4 border-b border-gray-100 pb-4">
+                            <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                <BadgeDollarSign className="text-green-600" /> Xác nhận Chi lương
+                            </h3>
+                            <button onClick={() => setShowSalaryConfirmModal(false)}><X className="text-gray-400 hover:text-gray-600" /></button>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="text-center">
+                                <p className="text-sm text-gray-500">Chi lương cho nhân viên</p>
+                                <p className="text-xl font-bold text-gray-900">{salaryPayoutTarget.user.full_name}</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">Số tiền chi lương (Nhập tay)</label>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        value={salaryPayoutAmount}
+                                        onChange={(e) => {
+                                            const raw = e.target.value.replace(/\D/g, '');
+                                            setSalaryPayoutAmount(raw ? Number(raw).toLocaleString('vi-VN') : '');
+                                        }}
+                                        className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-green-100 focus:border-green-500 font-bold text-lg text-green-700 placeholder:font-normal"
+                                        placeholder="Ví dụ: 5.000.000"
+                                        autoFocus
+                                    />
+                                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">VNĐ</span>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-gray-50 rounded-xl text-xs text-gray-500 border border-gray-100 italic">
+                                Lưu ý: Số tiền này sẽ được ghi nhận là "Chi quỹ" (Expense) và khấu trừ vào khoản "Thực nhận" của nhân viên trong bảng lương.
+                            </div>
+                            <button onClick={confirmPaySalary} className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg shadow-green-200 transition-all active:scale-95">
+                                Xác nhận Chi ngay (Approved)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* DASHBOARD HISTORY TABLES */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
@@ -1850,6 +2150,7 @@ const Finance: React.FC = () => {
                 </div>
             </div>
 
+
             {/* --- NEW: EMPLOYEE PERFORMANCE & DEBT TABLE --- */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-6">
                 <div className="p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
@@ -1925,7 +2226,7 @@ const Finance: React.FC = () => {
                         <div className="bg-white rounded-2xl w-full max-w-md p-6">
                             <div className="flex justify-between items-center mb-6">
                                 <h3 className="text-lg font-bold text-amber-700 flex items-center gap-2">
-                                    <Lock size={20} /> Tạo / Đóng Kỳ Quỹ
+                                    <Lock size={20} /> {isEditingFund ? 'Cập nhật Kỳ Quỹ' : 'Tạo / Đóng Kỳ Quỹ'}
                                 </h3>
                                 <button onClick={() => setShowCloseFundModal(false)}>
                                     <X size={24} className="text-gray-400 hover:text-gray-600" />
@@ -1965,6 +2266,56 @@ const Finance: React.FC = () => {
                                     </div>
                                 </div>
 
+                                {/* NEW: Member Selection */}
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Thành viên tham gia quỹ (Tùy chọn)</label>
+                                    <div className="border border-gray-200 rounded-xl p-3 max-h-40 overflow-y-auto bg-gray-50/50">
+                                        <p className="text-xs text-gray-500 mb-2 italic">Chọn nhân viên thuộc quỹ này (để chia lợi nhuận). Nếu không chọn, mặc định áp dụng tất cả.</p>
+                                        <div className="space-y-2">
+                                            {allProfiles
+                                                .filter(p => {
+                                                    // Basic check: Active and Not Admin
+                                                    const isEligible = p.status === 'active' && p.role !== 'admin';
+                                                    if (!isEligible) return false;
+
+                                                    // Scope check:
+                                                    if (isAdmin) {
+                                                        // Admin viewing a specific team -> Filter ONLY that team's members
+                                                        if (selectedTeam !== 'all') {
+                                                            return p.manager_id === selectedTeam || p.id === selectedTeam;
+                                                        }
+                                                        // Admin viewing 'all' -> Show all eligible members
+                                                        return true;
+                                                    }
+
+                                                    if (isMod) {
+                                                        // Mod -> Show ONLY members managed by this Mod
+                                                        return p.manager_id === userProfile?.id || p.id === userProfile?.id;
+                                                    }
+
+                                                    return false; // Regular users shouldn't see this anyway
+                                                })
+                                                .map(p => (
+                                                    <label key={p.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1 rounded">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedFundMembers.includes(p.id)}
+                                                            onChange={(e) => {
+                                                                if (e.target.checked) {
+                                                                    setSelectedFundMembers(prev => [...prev, p.id]);
+                                                                } else {
+                                                                    setSelectedFundMembers(prev => prev.filter(id => id !== p.id));
+                                                                }
+                                                            }}
+                                                            className="rounded text-amber-600 focus:ring-amber-500"
+                                                        />
+                                                        <span className="text-sm text-gray-700 font-medium">{p.full_name}</span>
+                                                    </label>
+                                                ))}
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div className="text-xs text-gray-500 bg-amber-50 p-3 rounded-xl border border-amber-100">
                                     <p className="font-semibold text-amber-700 mb-1">💡 Hướng dẫn:</p>
                                     <ul className="list-disc list-inside space-y-1">
@@ -1977,13 +2328,10 @@ const Finance: React.FC = () => {
                                 <button
                                     onClick={handleCloseFund}
                                     disabled={isClosingFund}
-                                    className="w-full py-3 bg-amber-600 text-white font-bold rounded-xl hover:bg-amber-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                    className="w-full py-3 bg-amber-600 text-white font-bold rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-200 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
                                 >
-                                    {isClosingFund ? (
-                                        <><Loader2 size={18} className="animate-spin" /> Đang xử lý...</>
-                                    ) : (
-                                        <><Lock size={18} /> Tạo Kỳ Quỹ</>
-                                    )}
+                                    {isClosingFund ? <Loader2 className="animate-spin" size={20} /> : <Lock size={20} />}
+                                    {isEditingFund ? 'Lưu thay đổi' : 'Tạo / Đóng Quỹ'}
                                 </button>
                             </div>
                         </div>

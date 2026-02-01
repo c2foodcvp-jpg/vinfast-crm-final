@@ -128,13 +128,18 @@ const Proposals: React.FC = () => {
         } catch (e) { console.error(e); } finally { setLoading(false); }
     };
 
+    // Date Selection
+    const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
+    const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+
     // --- CALCULATE ESTIMATED INCOME (UPDATED LOGIC TO MATCH FINANCE.tsx) ---
     const myEstimatedIncome = useMemo(() => {
         if (!userProfile || !allProfiles.length) return 0;
 
-        const currentMonth = new Date().getMonth() + 1;
-        const currentYear = new Date().getFullYear();
-        const isMKT = (src?: string) => src === 'MKT Group' || (src || '').includes('MKT');
+        const currentMonth = selectedMonth;
+        const currentYear = selectedYear;
+        // Fix: Case-insensitive MKT check
+        const isMKT = (src?: string) => (src || '').toUpperCase().includes('MKT');
 
         // 1. Identify Team Members
         let teamIds: string[] = [];
@@ -256,7 +261,7 @@ const Proposals: React.FC = () => {
         const myRow = rows.find(r => r.user.id === userProfile.id);
         return myRow ? myRow.estimatedIncome : 0;
 
-    }, [allTransactions, allCustomers, allProfiles, userProfile, profitExclusions]);
+    }, [allTransactions, allCustomers, allProfiles, userProfile, profitExclusions, selectedMonth, selectedYear]);
 
     // --- SUBMIT HANDLERS ---
     const handleSubmitDemo = async () => {
@@ -461,6 +466,30 @@ const Proposals: React.FC = () => {
 
             {activeTab === 'salary' && (
                 <div className="space-y-6">
+                    {/* Month/Year Selector */}
+                    <div className="flex justify-end items-center gap-3">
+                        <label className="text-sm font-medium text-gray-500">Kỳ tính lương:</label>
+                        <select
+                            value={selectedMonth}
+                            onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                            className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-bold shadow-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                        >
+                            {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                <option key={m} value={m}>Tháng {m}</option>
+                            ))}
+                        </select>
+                        <select
+                            value={selectedYear}
+                            onChange={(e) => setSelectedYear(Number(e.target.value))}
+                            className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-bold shadow-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                        >
+                            <option value={2024}>2024</option>
+                            <option value={2025}>2025</option>
+                            <option value={2026}>2026</option>
+                            <option value={2027}>2027</option>
+                        </select>
+                    </div>
+
                     {userProfile?.is_locked_advance ? (
                         <div className="bg-red-50 p-6 rounded-2xl border-2 border-red-200 flex flex-col items-center gap-4 text-center">
                             <Lock size={48} className="text-red-500" />
@@ -474,7 +503,7 @@ const Proposals: React.FC = () => {
                                 <p className="text-green-700 text-sm mt-1">Hạn mức tối đa: <strong>30%</strong> thu nhập dự kiến hiện tại.</p>
                             </div>
                             <div className="text-right">
-                                <p className="text-xs text-green-600 font-bold uppercase">Thu nhập Dự kiến (Finance)</p>
+                                <p className="text-xs text-green-600 font-bold uppercase">Thu nhập Dự kiến (T{selectedMonth}/{selectedYear})</p>
                                 <p className="text-lg font-bold text-gray-800">{myEstimatedIncome.toLocaleString('vi-VN')} VNĐ</p>
                                 <p className="text-xs text-green-600 font-bold uppercase mt-2">Khả dụng ứng (Max 30%)</p>
                                 <p className="text-2xl font-bold text-green-700">{(myEstimatedIncome * 0.3).toLocaleString('vi-VN')} VNĐ</p>

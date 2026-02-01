@@ -110,6 +110,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Update Last Login
         await supabase.from('profiles').update({ last_login_at: now.toISOString() }).eq('id', userId);
 
+        // --- NEW: Team Expiration Check ---
+        let isExpired = false;
+        if (data.role === UserRole.MOD && data.team_expiration_date) {
+          if (now > new Date(data.team_expiration_date)) isExpired = true;
+        } else if (data.role === UserRole.EMPLOYEE && data.manager_id) {
+          const { data: manager } = await supabase.from('profiles').select('team_expiration_date').eq('id', data.manager_id).maybeSingle();
+          if (manager?.team_expiration_date && now > new Date(manager.team_expiration_date)) isExpired = true;
+        }
+
+        if (isExpired) {
+          await signOut();
+          return; // Stop processing
+        }
+
         setUserProfile(data as UserProfile);
       }
     } catch (error) {
