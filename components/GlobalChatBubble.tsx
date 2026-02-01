@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useChat } from '../contexts/ChatContext';
 import { MessageCircle, X, ExternalLink, ChevronLeft } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import ChatSidebarContent from './community/ChatSidebar';
 import ChatWindow from './community/ChatWindow';
 
@@ -9,7 +9,12 @@ const GlobalChatBubble: React.FC = () => {
     const { unreadCount, activeChannel, setActiveChannel } = useChat();
     const [isOpen, setIsOpen] = useState(false);
     const navigate = useNavigate();
+    const location = useLocation();
     const [view, setView] = useState<'list' | 'chat'>('list');
+
+    // Config: Hide on these pages
+    const hiddenPaths = ['/login', '/register', '/update-password', '/intro'];
+    if (hiddenPaths.includes(location.pathname)) return null;
 
     // Sync view only if needed? 
     // If activeChannel changes externally, we might want to switch to chat view?
