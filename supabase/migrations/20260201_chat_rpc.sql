@@ -1,8 +1,11 @@
 -- Create RPC to fetch channels with metadata (sorting, unread count, DM info)
+-- Create RPC to fetch channels with metadata (sorting, unread count, DM info)
+DROP FUNCTION IF EXISTS get_channels_with_meta();
+
 CREATE OR REPLACE FUNCTION get_channels_with_meta()
 RETURNS TABLE (
   channel_id UUID,
-  channel_type chat_channel_type,
+  channel_type TEXT,
   channel_name TEXT,
   last_message_at TIMESTAMPTZ,
   last_message_preview TEXT,
@@ -89,7 +92,7 @@ BEGIN
   )
   SELECT 
       uc.channel_id,
-      uc.type,
+      uc.type::text, -- Cast enum to text
       uc.name,
       cm.last_msg_time,
       cm.last_msg_content,

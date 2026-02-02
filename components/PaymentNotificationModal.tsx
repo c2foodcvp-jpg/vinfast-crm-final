@@ -93,6 +93,18 @@ const PaymentNotificationModal: React.FC<Props> = ({ visible, customer, onClose,
     const formatCurrency = (amount: number) => amount.toLocaleString('vi-VN') + 'đ';
     const parseCurrency = (value: string) => parseInt(value.replace(/\D/g, '')) || 0;
 
+    // Handlers for Basic Tab Editing
+    const handleFinalPriceChange = (newPrice: number) => {
+        const newDiscount = listPrice - newPrice;
+        setTotalDiscount(newDiscount);
+    };
+
+    const handleRegistrationTotalChange = (newTotal: number) => {
+        const fixedFees = regTax + plateFee + roadFee + inspectionFee + civilInsurance + vehicleInsurance;
+        const newServiceFee = newTotal - fixedFees;
+        setRegistrationService(newServiceFee);
+    };
+
     // Editable number input component
     const EditableField = ({ label, value, onChange, fieldKey }: { label: string; value: number; onChange: (v: number) => void; fieldKey: string }) => (
         <div className="flex justify-between items-center">
@@ -118,6 +130,30 @@ const PaymentNotificationModal: React.FC<Props> = ({ visible, customer, onClose,
             )}
         </div>
     );
+
+    // Big Editable Field for Total Registration (Green Box)
+    const BigEditableField = ({ value, onChange, fieldKey }: { value: number; onChange: (v: number) => void; fieldKey: string }) => {
+        const isEditing = editingField === fieldKey;
+        return isEditing ? (
+            <input
+                type="text"
+                value={value.toLocaleString('vi-VN')}
+                onChange={e => onChange(parseCurrency(e.target.value))}
+                onBlur={() => setEditingField(null)}
+                onKeyDown={e => e.key === 'Enter' && setEditingField(null)}
+                autoFocus
+                className="w-full text-2xl font-bold text-green-600 bg-white border border-green-400 rounded px-2 py-1 focus:outline-none"
+            />
+        ) : (
+            <p
+                className="text-2xl font-bold text-green-600 cursor-pointer hover:bg-green-100/50 rounded px-2 -ml-2 py-1 transition-colors flex items-center gap-2 w-fit"
+                onClick={() => setEditingField(fieldKey)}
+            >
+                {formatCurrency(value)}
+                <Pencil size={20} className="text-green-400 opacity-60" />
+            </p>
+        );
+    };
 
     const handleAddAccountSuccess = (newAccount: PaymentAccount) => {
         setAccounts(prev => [...prev, newAccount]);
@@ -487,13 +523,17 @@ const PaymentNotificationModal: React.FC<Props> = ({ visible, customer, onClose,
                                                     <CreditCard size={16} /> Tiền xe
                                                 </div>
                                             </div>
-                                            <EditableField label="Giá cuối cùng" value={finalPrice} onChange={() => { }} fieldKey="finalPrice_basic" />
+                                            <EditableField label="Giá cuối cùng" value={finalPrice} onChange={handleFinalPriceChange} fieldKey="finalPrice_basic" />
                                         </div>
                                         <div className="p-4 bg-green-50 rounded-xl border border-green-100">
                                             <div className="flex items-center gap-2 text-green-700 text-sm font-bold mb-2">
                                                 <Receipt size={16} /> Tiền đăng ký xe
                                             </div>
-                                            <p className="text-2xl font-bold text-green-600">{formatCurrency(registrationTotal)}</p>
+                                            <BigEditableField
+                                                value={registrationTotal}
+                                                onChange={handleRegistrationTotalChange}
+                                                fieldKey="registrationTotal_basic"
+                                            />
                                         </div>
                                     </div>
                                 )}

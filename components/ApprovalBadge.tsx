@@ -18,34 +18,33 @@ const ApprovalBadge: React.FC<ApprovalBadgeProps> = ({ className, iconSize = 20 
         if (!isAdmin && !isMod) return;
 
         try {
-            // Count Customers
-            // Note: Parallel count is better
-            // 'status.eq.Chờ duyệt chốt,status.eq.Chờ duyệt hủy...'
-            const cQuery = supabase.from('customers').select('*', { count: 'exact', head: true })
-                .or('status.eq.Chờ duyệt chốt,status.eq.Chờ duyệt hủy,deal_status.eq.suspended_pending,deal_status.eq.refund_pending,pending_transfer_to.not.is.null');
+            // Determine Team Scope
+            let teamIds: string[] = [];
+            if (isMod && userProfile) {
+                // Mod sees Self + Subordinates
+                const { data } = await supabase.from('profiles').select('id')
+                    .or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
+                if (data) teamIds = data.map(p => p.id);
+            }
 
-            const tQuery = supabase.from('transactions').select('*', { count: 'exact', head: true })
+            // Count Customers
+            // 'status.eq.Chờ duyệt chốt,status.eq.Chờ duyệt hủy...'
+            let cQuery = supabase.from('customers').select('*', { count: 'exact', head: true })
+                .or('status.eq.Chờ duyệt chốt,status.eq.Chờ duyệt hủy,deal_status.eq.completed_pending,deal_status.eq.suspended_pending,deal_status.eq.refund_pending,pending_transfer_to.not.is.null');
+
+            // Count Transactions
+            let tQuery = supabase.from('transactions').select('*', { count: 'exact', head: true })
                 .eq('status', 'pending');
+
+            // APPLY TEAM FILTER (For Mods)
+            if (!isAdmin && isMod && teamIds.length > 0) {
+                cQuery = cQuery.in('creator_id', teamIds);
+                tQuery = tQuery.in('user_id', teamIds);
+            }
 
             const [cRes, tRes] = await Promise.all([cQuery, tQuery]);
 
-            // Logic for MOD (Team isolation count is hard via HEAD requests without filtering).
-            // For MVP Badge: Show GLOBAL count or just Red Dot is fine. 
-            // Better: If Mod, fetch data and count length locally if count is small.
-            // If Admin, use DB count.
-
             let total = (cRes.count || 0) + (tRes.count || 0);
-
-            // Refinement for Mod (if not Admin)
-            if (!isAdmin && isMod && total > 0) {
-                // For now, Badge shows global pending items or "Something is pending".
-                // We can refine this later to be team-specific if requested.
-                // Showing a badge even for other teams' items might be annoying but acceptable for MVP.
-                // Actually, let's keep it simple: Show Badge if ANY pending item exists, user clicks and sees empty list if not their team?
-                // No, that's bad UX.
-                // Let's rely on ApprovalModal to filter. The Badge might just show "!" without number if logic is complex.
-                // OR: Just fetch small limit to check team.
-            }
 
             setCount(total);
         } catch (e) {

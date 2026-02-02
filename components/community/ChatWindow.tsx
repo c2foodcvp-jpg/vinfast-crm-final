@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { Send, MoreVertical, Smile } from 'lucide-react';
+import { Send, MoreVertical, Smile, Trash2 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 
 interface ChatWindowProps {
@@ -22,6 +22,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
     const [showEmoji, setShowEmoji] = useState(false);
     const [showBanModal, setShowBanModal] = useState(false);
     const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+    const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
     // Ban Search States
     const [banSearchTerm, setBanSearchTerm] = useState('');
@@ -333,8 +334,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
                 </div>
             )}
 
+
+
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50" onClick={() => setOpenMenuId(null)}>
                 {messages.map((msg, index) => {
                     const isMe = msg.sender_id === userProfile?.id;
                     const showAvatar = index === 0 || messages[index - 1].sender_id !== msg.sender_id;
@@ -371,28 +374,32 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
                                     {/* Delete Button (Dropdown or Icon) */}
                                     {/* Delete Button (Dropdown or Icon) */}
                                     {(isMe || userProfile?.role === 'admin' || (userProfile?.role === 'mod' && activeChannel.type === 'team')) && (
-                                        <div className="relative group/menu">
+                                        <div className="relative">
                                             <button
-                                                className="p-1 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors"
+                                                className="p-1 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setOpenMenuId(openMenuId === msg.id ? null : msg.id);
+                                                }}
                                             >
                                                 <MoreVertical className="w-4 h-4" />
                                             </button>
 
-                                            {/* Hover Menu (Simple CSS based) */}
-                                            <div className="absolute bottom-full right-0 mb-1 hidden group-hover/menu:block bg-white shadow-lg border rounded-lg overflow-hidden py-1 min-w-[100px] z-10">
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        if (window.confirm('Bạn muốn xóa tin nhắn này?')) {
+                                            {openMenuId === msg.id && (
+                                                <div className="absolute bottom-full mb-1 right-0 bg-white shadow-lg border rounded-lg overflow-hidden z-20 min-w-[120px]">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
                                                             deleteMessage(msg.id);
-                                                        }
-                                                    }}
-                                                    className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                                >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                    Thu hồi
-                                                </button>
-                                            </div>
+                                                            setOpenMenuId(null);
+                                                        }}
+                                                        className="w-full text-left px-4 py-2 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                                    >
+                                                        <Trash2 className="w-3 h-3" />
+                                                        {isMe ? "Thu hồi" : "Xóa tin nhắn"}
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>

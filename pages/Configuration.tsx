@@ -613,6 +613,14 @@ using (
 );
 -- 9. Add Priority to Car Models for Drag & Drop Sorting
 alter table public.car_models add column if not exists priority int default 0;
+
+-- 10. Bổ sung thông tin hồ sơ (Cá nhân & Danh bạ)
+alter table public.profiles add column if not exists dealership_name text;
+alter table public.profiles add column if not exists introduction text;
+alter table public.profiles add column if not exists birthdate text; -- YYYY-MM-DD
+
+-- 11. Add Avatar to Chat Channels
+alter table public.chat_channels add column if not exists avatar_url text;
 `;
 
     return (

@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { X, CheckCircle2, XCircle, FileText, DollarSign, UserCheck, AlertTriangle, Loader2 } from 'lucide-react';
-import { Customer, Transaction, CustomerStatus, UserProfile } from '../types';
+import { Customer, Transaction, CustomerStatus, UserProfile, DeliveryProgress } from '../types';
+import { DELIVERY_STEPS } from './CustomerProgressModal';
 
 interface ApprovalModalProps {
     isOpen: boolean;
@@ -33,7 +34,7 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ isOpen, onClose }) => {
             // 1. Fetch Customers
             let custQuery = supabase.from('customers')
                 .select('*')
-                .or('status.eq.Chờ duyệt chốt,status.eq.Chờ duyệt hủy,deal_status.eq.suspended_pending,deal_status.eq.refund_pending,pending_transfer_to.not.is.null');
+                .or('status.eq.Chờ duyệt chốt,status.eq.Chờ duyệt hủy,deal_status.eq.completed_pending,deal_status.eq.suspended_pending,deal_status.eq.refund_pending,pending_transfer_to.not.is.null');
 
             // 2. Fetch Transactions
             let transQuery = supabase.from('transactions')
@@ -130,6 +131,23 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ isOpen, onClose }) => {
             } else if (c.deal_status === 'refund_pending') {
                 updates = { deal_status: 'refunded' };
                 note = 'Đã duyệt Hoàn tiền.';
+            } else if (c.deal_status === 'completed_pending') {
+                updates = { deal_status: 'completed' };
+                note = 'Đã duyệt Hoàn thành đơn.';
+
+                // Auto Complete Progress
+                const applicableSteps = DELIVERY_STEPS.filter(step => !step.condition || (c && step.condition(c)));
+                const fullProgress: DeliveryProgress = {};
+                const now = new Date().toISOString();
+
+                applicableSteps.forEach(step => {
+                    const existing = c.delivery_progress?.[step.key];
+                    fullProgress[step.key] = {
+                        completed: true,
+                        timestamp: existing?.completed ? existing.timestamp : now
+                    }
+                });
+                updates.delivery_progress = fullProgress;
             } else if (c.pending_transfer_to) {
                 // Fetch new rep Name
                 const { data: u } = await supabase.from('profiles').select('full_name').eq('id', c.pending_transfer_to).single();
@@ -173,6 +191,9 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ isOpen, onClose }) => {
             } else if (c.deal_status === 'refund_pending') {
                 updates = { deal_status: 'processing' }; // Back to processing
                 note = 'Từ chối hoàn tiền.';
+            } else if (c.deal_status === 'completed_pending') {
+                updates = { deal_status: 'processing' };
+                note = 'Từ chối hoàn thành đơn.';
             } else if (c.pending_transfer_to) {
                 updates = { pending_transfer_to: null };
                 note = 'Từ chối chuyển quyền.';
@@ -284,6 +305,7 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ isOpen, onClose }) => {
                                                         Yêu cầu: <span className="font-bold text-red-600">
                                                             {c.status === 'Chờ duyệt chốt' && 'Duyệt Chốt Đơn'}
                                                             {c.status === 'Chờ duyệt hủy' && 'Duyệt Hủy Đơn'}
+                                                            {c.deal_status === 'completed_pending' && 'Duyệt Hoàn Thành Đơn'}
                                                             {c.deal_status === 'suspended_pending' && 'Duyệt Treo Hồ Sơ'}
                                                             {c.deal_status === 'refund_pending' && 'Duyệt Hoàn Tiền'}
                                                             {c.pending_transfer_to && 'Duyệt Chuyển Quyền'}
@@ -322,9 +344,9 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({ isOpen, onClose }) => {
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2 mb-1">
                                                         <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase ${t.type === 'advance' ? 'bg-orange-100 text-orange-700' :
-                                                                t.type === 'expense' ? 'bg-red-100 text-red-700' :
-                                                                    t.type === 'deposit' ? 'bg-green-100 text-green-700' :
-                                                                        t.type === 'loan' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100'
+                                                            t.type === 'expense' ? 'bg-red-100 text-red-700' :
+                                                                t.type === 'deposit' ? 'bg-green-100 text-green-700' :
+                                                                    t.type === 'loan' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100'
                                                             }`}>
                                                             {t.type === 'advance' ? 'Ứng lương' : t.type === 'expense' ? 'Chi quỹ' : t.type === 'loan' ? 'Mượn tiền' : t.type}
                                                         </span>

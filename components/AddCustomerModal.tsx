@@ -28,14 +28,38 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, on
     const [isDuplicateWarningOpen, setIsDuplicateWarningOpen] = useState(false);
     const [duplicateData, setDuplicateData] = useState<{ id: string, name: string, sales_rep: string, phone: string } | null>(null);
 
+    // Team Scope State
+    const [teamIds, setTeamIds] = useState<string[]>([]);
+
     useEffect(() => {
         if (isOpen) {
             fetchCarModels();
+            fetchTeamIds();
             setFormData(initialFormState); // Reset form on open
             setIsDuplicateWarningOpen(false);
             setDuplicateData(null);
         }
     }, [isOpen]);
+
+    const fetchTeamIds = async () => {
+        if (!userProfile) return;
+        try {
+            // Determine "My Team":
+            // 1. If I have a manager, my team is Manager + Peers (same manager).
+            // 2. If I don't have a manager (I am Manager/Admin), my team is Me + Subordinates.
+            const mgrId = userProfile.manager_id || userProfile.id;
+
+            // Query: Get all users who have this manager_id OR are this manager_id
+            const { data } = await supabase.from('profiles').select('id')
+                .or(`manager_id.eq.${mgrId},id.eq.${mgrId}`);
+
+            if (data) {
+                setTeamIds(data.map(p => p.id));
+            }
+        } catch (err) {
+            console.error("Error fetching team IDs", err);
+        }
+    };
 
     const fetchCarModels = async () => {
         try {
@@ -113,8 +137,15 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, on
                     return;
                 }
 
-                // DUPLICATE CHECK
-                const { data: existing } = await supabase.from('customers').select('id, name, sales_rep').eq('phone', finalPhone).maybeSingle();
+                // DUPLICATE CHECK (Scoped to Team)
+                let query = supabase.from('customers').select('id, name, sales_rep').eq('phone', finalPhone);
+
+                // Only check within the team if teamIds matches found
+                if (teamIds.length > 0) {
+                    query = query.in('creator_id', teamIds);
+                }
+
+                const { data: existing } = await query.maybeSingle();
                 if (existing) {
                     setDuplicateData({ id: existing.id, name: existing.name, sales_rep: existing.sales_rep || "Chưa phân bổ", phone: finalPhone });
                     setIsDuplicateWarningOpen(true);

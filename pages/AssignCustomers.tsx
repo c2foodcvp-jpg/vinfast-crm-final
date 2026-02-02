@@ -121,7 +121,16 @@ const AssignCustomers: React.FC = () => {
         setPhoneCheckResult(null);
 
         try {
-            const { data } = await supabase.from('customers').select('name, sales_rep').eq('phone', finalPhone).maybeSingle();
+            // Team Scope Check
+            const teamIds = employees.map(e => e.id);
+
+            let query = supabase.from('customers').select('name, sales_rep').eq('phone', finalPhone);
+            if (teamIds.length > 0) {
+                query = query.in('creator_id', teamIds);
+            }
+
+            const { data } = await query.maybeSingle();
+
             if (data) {
                 setPhoneCheckResult({ exists: true, name: data.name, rep: data.sales_rep || 'Chưa phân bổ', phone: finalPhone });
             } else {
@@ -243,7 +252,17 @@ const AssignCustomers: React.FC = () => {
 
         try {
             if (!formData.isZaloOnly) {
-                const { data: existingCust } = await supabase.from('customers').select('id, name, sales_rep').eq('phone', finalPhone).maybeSingle();
+                // Team Scope Check
+                // Note: 'employees' state already contains only the allowed team members/self based on role.
+                const teamIds = employees.map(e => e.id);
+
+                let query = supabase.from('customers').select('id, name, sales_rep').eq('phone', finalPhone);
+                if (teamIds.length > 0) {
+                    query = query.in('creator_id', teamIds);
+                }
+
+                const { data: existingCust } = await query.maybeSingle();
+
                 if (existingCust) {
                     setDuplicateData({ id: existingCust.id, name: existingCust.name, sales_rep: existingCust.sales_rep || "Chưa phân bổ", phone: finalPhone });
                     setIsDuplicateWarningOpen(true);

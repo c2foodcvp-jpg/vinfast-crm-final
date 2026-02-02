@@ -197,6 +197,11 @@ export interface UserProfile {
   last_login_at?: string; // Track last login time
   discord_config?: any;
   team_expiration_date?: string | null; // Expiration date for Team (MOD only)
+
+  // New Profile Fields
+  dealership_name?: string;
+  introduction?: string;
+  birthdate?: string; // YYYY-MM-DD
 }
 
 

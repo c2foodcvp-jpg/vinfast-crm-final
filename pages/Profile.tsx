@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  User, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Globe, Layout, ArrowUp, ArrowDown, RotateCcw, Camera, Crown, CreditCard, Plus, Trash2, QrCode
+  User, Save, ShieldCheck, Loader2, AlertCircle, CheckCircle2, Globe, Layout, ArrowUp, ArrowDown, RotateCcw, Camera, Crown, CreditCard, Plus, Trash2, QrCode, Lock
 } from 'lucide-react';
 import { MembershipTier, PaymentAccount, TIER_ACCOUNT_LIMITS } from '../types';
 import AddPaymentAccountModal from '../components/AddPaymentAccountModal';
@@ -15,6 +15,9 @@ const Profile: React.FC = () => {
 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [dealershipName, setDealershipName] = useState('');
+  const [introduction, setIntroduction] = useState('');
+  const [birthdate, setBirthdate] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [uploading, setUploading] = useState(false); // New uploading state
 
@@ -60,13 +63,43 @@ const Profile: React.FC = () => {
     if (userProfile) {
       setFullName(userProfile.full_name || '');
       setPhone(userProfile.phone || '');
+      setDealershipName(userProfile.dealership_name || '');
+      setIntroduction(userProfile.introduction || '');
+      setBirthdate(userProfile.birthdate || '');
       setAvatarUrl(userProfile.avatar_url || '');
       fetchPaymentAccounts();
+
+      // NEW: Auto-sync Dealership for Employees
+      if (userProfile.manager_id && !userProfile.dealership_name) {
+        syncDealershipFromManager(userProfile.manager_id);
+      } else if (userProfile.manager_id) {
+        // Even if they have one, double check/override to ensure sync?
+        // For now, let's just ensure it loads correctly.
+        // The syncDealershipFromManager can also be used to force update
+        syncDealershipFromManager(userProfile.manager_id);
+      }
     }
     if (isAdmin) {
       fetchAppConfig();
     }
   }, [userProfile, isAdmin]);
+
+  const syncDealershipFromManager = async (managerId: string) => {
+    try {
+      const { data, error } = await supabase.from('profiles').select('dealership_name').eq('id', managerId).single();
+      if (data && data.dealership_name) {
+        setDealershipName(data.dealership_name);
+
+        // Optionally: Auto-save to DB if current profile is empty/different
+        if (userProfile?.dealership_name !== data.dealership_name) {
+          await supabase.from('profiles').update({ dealership_name: data.dealership_name }).eq('id', userProfile?.id);
+          console.log("Auto-synced dealership from manager");
+        }
+      }
+    } catch (e) {
+      console.error("Failed to sync manager dealership", e);
+    }
+  };
 
   // Fetch user's payment accounts
   const fetchPaymentAccounts = async () => {
@@ -174,7 +207,14 @@ const Profile: React.FC = () => {
     setMessage(null);
     try {
       // Removing updated_at to prevent errors if column missing
-      const updateData: any = { full_name: fullName, phone: phone, avatar_url: avatarUrl };
+      const updateData: any = {
+        full_name: fullName,
+        phone: phone,
+        avatar_url: avatarUrl,
+        dealership_name: dealershipName,
+        introduction: introduction,
+        birthdate: birthdate
+      };
 
       const { error } = await supabase.from('profiles').update(updateData).eq('id', userProfile?.id);
 
@@ -182,6 +222,20 @@ const Profile: React.FC = () => {
 
       // Update Auth Metadata as well
       await supabase.auth.updateUser({ data: { full_name: fullName, phone: phone } });
+
+      // --- SYNC DEALERSHIP NAME FOR TEAM MEMBERS (IF MOD) ---
+      if ((userProfile?.role === 'mod' || userProfile?.role === 'admin') && dealershipName) {
+        // Auto-update all employees under this manager
+        const { error: syncError } = await supabase
+          .from('profiles')
+          .update({ dealership_name: dealershipName })
+          .eq('manager_id', userProfile.id);
+
+        if (syncError) {
+          console.error("Failed to sync dealership name to team:", syncError);
+          // Optional: warn user, but don't block success
+        }
+      }
 
       setMessage({ type: 'success', content: 'Cập nhật thông tin thành công! Đang tải lại...' });
 
@@ -251,12 +305,37 @@ const Profile: React.FC = () => {
       const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
 
       if (data) {
-        setAvatarUrl(data.publicUrl);
-        setMessage({ type: 'success', content: 'Tải ảnh lên thành công! Bấm Lưu để cập nhật.' });
+        const newAvatarUrl = data.publicUrl;
+        setAvatarUrl(newAvatarUrl); // Update local state
+
+        // 5. AUTO-SAVE to DB
+        console.log("Attempting to save avatar to DB...", { id: userProfile?.id, url: newAvatarUrl });
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ avatar_url: newAvatarUrl })
+          .eq('id', userProfile?.id);
+
+        if (updateError) {
+          console.error("Profile Update Failed:", updateError);
+          throw updateError;
+        } else {
+          console.log("Profile Update Success!");
+        }
+
+        // Update Auth Metadata as well (best effort)
+        await supabase.auth.updateUser({ data: { avatar_url: newAvatarUrl } });
+
+        setMessage({ type: 'success', content: 'Đã cập nhật ảnh đại diện thành công!' });
+
+        // Reload page shortly to reflect changes everywhere if needed
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
       }
 
     } catch (error: any) {
-      setMessage({ type: 'error', content: error.message });
+      console.error("Avatar Upload Flow Error:", error);
+      setMessage({ type: 'error', content: error.message + (error.details ? ` (${error.details})` : '') });
     } finally {
       setUploading(false);
     }
@@ -345,7 +424,42 @@ const Profile: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label className="block text-sm font-bold text-gray-700 mb-2">Họ và tên</label><input type="text" required value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-gray-900 font-medium outline-none focus:border-primary-500" /></div><div><label className="block text-sm font-bold text-gray-700 mb-2">Số điện thoại</label><input type="text" required value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-gray-900 font-medium outline-none focus:border-primary-500" /></div></div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Họ và tên</label>
+                  <input type="text" required value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-gray-900 font-medium outline-none focus:border-primary-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Số điện thoại</label>
+                  <input type="text" required value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 py-2.5 text-gray-900 font-medium outline-none focus:border-primary-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                    Đại lý làm việc
+                    {userProfile?.manager_id && (
+                      <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded border border-gray-200 flex items-center gap-1">
+                        <Lock size={10} /> Theo quản lý
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    type="text"
+                    value={dealershipName}
+                    onChange={(e) => setDealershipName(e.target.value)}
+                    placeholder="Tên đại lý (Showroom)"
+                    disabled={!!userProfile?.manager_id} // Disable if managed
+                    className={`w-full rounded-xl border border-gray-200 px-4 py-2.5 text-gray-900 font-medium outline-none focus:border-primary-500 ${!!userProfile?.manager_id ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50'}`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Ngày sinh</label>
+                  <input type="date" value={birthdate} onChange={(e) => setBirthdate(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-gray-900 font-medium outline-none focus:border-primary-500" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Giới thiệu bản thân</label>
+                  <textarea rows={3} value={introduction} onChange={(e) => setIntroduction(e.target.value)} placeholder="Một vài lời giới thiệu về bạn..." className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-gray-900 font-medium outline-none focus:border-primary-500" />
+                </div>
+              </div>
             </div>
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end"><button type="submit" disabled={loading} className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-6 py-2.5 rounded-xl font-bold shadow-lg shadow-primary-200 transition-all disabled:opacity-70">{loading ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />} Lưu thay đổi</button></div>
           </form>

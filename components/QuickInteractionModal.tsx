@@ -578,7 +578,7 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                                             setIsSpecialCare(newVal);
                                             if (newVal) {
                                                 setIsLongTerm(false);
-                                                // setUpdateRecare(false); // REMOVED: Allow updating date even if Special Care
+                                                setUpdateRecare(false); // Hide and reset Date Picker
                                             }
                                         }}
                                         className={`flex-1 p-2 rounded-lg border cursor-pointer transition-all flex items-center justify-center gap-2 ${isSpecialCare ? 'bg-orange-50 border-orange-200' : 'bg-white border-gray-200 hover:bg-gray-100'}`}
@@ -605,61 +605,63 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
                                     </div>
                                 </div>
 
-                                {/* Date & Recare Logic - Always Visible */}
-                                <>
-                                    <label className="flex items-center justify-between cursor-pointer hover:bg-gray-50 p-2 -mx-2 rounded-lg transition-colors group">
-                                        <span className="text-sm font-bold text-gray-700 flex items-center gap-2 select-none">
-                                            <Calendar size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Cập nhật ngày CS?
-                                        </span>
-                                        <div className="relative inline-block w-8 align-middle select-none transition duration-200 ease-in">
-                                            <input
-                                                type="checkbox"
-                                                checked={updateRecare}
-                                                onChange={() => setUpdateRecare(!updateRecare)}
-                                                className="toggle-checkbox absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer checked:right-0 checked:border-green-400 right-4"
-                                            />
-                                            <div className={`toggle-label block overflow-hidden h-4 rounded-full cursor-pointer ${updateRecare ? 'bg-green-400' : 'bg-gray-300'}`}></div>
-                                        </div>
-                                    </label>
+                                {/* Date & Recare Logic - Hide if Special Care */}
+                                {!isSpecialCare && (
+                                    <>
+                                        <label className="flex items-center justify-between cursor-pointer hover:bg-gray-50 p-2 -mx-2 rounded-lg transition-colors group">
+                                            <span className="text-sm font-bold text-gray-700 flex items-center gap-2 select-none">
+                                                <Calendar size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Cập nhật ngày CS?
+                                            </span>
+                                            <div className="relative inline-block w-8 align-middle select-none transition duration-200 ease-in">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={updateRecare}
+                                                    onChange={() => setUpdateRecare(!updateRecare)}
+                                                    className="toggle-checkbox absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer checked:right-0 checked:border-green-400 right-4"
+                                                />
+                                                <div className={`toggle-label block overflow-hidden h-4 rounded-full cursor-pointer ${updateRecare ? 'bg-green-400' : 'bg-gray-300'}`}></div>
+                                            </div>
+                                        </label>
 
-                                    {updateRecare && (
-                                        <div className="animate-fade-in space-y-3 pt-2 border-t border-gray-200">
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Ngày CS tiếp theo</label>
-                                                    <input
-                                                        type="date"
-                                                        value={newRecareDate}
-                                                        min={todayStr}
-                                                        max={!isLongTerm ? maxDateStr : undefined}
-                                                        onChange={(e) => setNewRecareDate(e.target.value)}
-                                                        className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 shadow-sm font-bold text-gray-800"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Phân loại</label>
-                                                    {isLongTerm ? (
-                                                        <div className="w-full p-2 bg-sky-50 border border-sky-100 text-sky-700 rounded-lg text-sm font-medium flex items-center gap-2">
-                                                            <span className="w-2 h-2 rounded-full bg-sky-500"></span> Cool (Mặc định)
-                                                        </div>
-                                                    ) : (
-                                                        <select
-                                                            value={newClassification}
-                                                            onChange={(e) => setNewClassification(e.target.value as CustomerClassification)}
-                                                            className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 shadow-sm font-medium"
-                                                        >
-                                                            <option value="">Giữ nguyên</option>
-                                                            <option value="Cold">Cold</option>
-                                                            <option value="Warm">Warm</option>
-                                                            <option value="Hot">Hot</option>
-                                                            <option value="Cool">Cool</option>
-                                                        </select>
-                                                    )}
+                                        {updateRecare && (
+                                            <div className="animate-fade-in space-y-3 pt-2 border-t border-gray-200">
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Ngày CS tiếp theo</label>
+                                                        <input
+                                                            type="date"
+                                                            value={newRecareDate}
+                                                            min={todayStr}
+                                                            max={!isLongTerm ? maxDateStr : undefined}
+                                                            onChange={(e) => setNewRecareDate(e.target.value)}
+                                                            className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 shadow-sm font-bold text-gray-800"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Phân loại</label>
+                                                        {isLongTerm ? (
+                                                            <div className="w-full p-2 bg-sky-50 border border-sky-100 text-sky-700 rounded-lg text-sm font-medium flex items-center gap-2">
+                                                                <span className="w-2 h-2 rounded-full bg-sky-500"></span> Cool (Mặc định)
+                                                            </div>
+                                                        ) : (
+                                                            <select
+                                                                value={newClassification}
+                                                                onChange={(e) => setNewClassification(e.target.value as CustomerClassification)}
+                                                                className="w-full p-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 shadow-sm font-medium"
+                                                            >
+                                                                <option value="">Giữ nguyên</option>
+                                                                <option value="Cold">Cold</option>
+                                                                <option value="Warm">Warm</option>
+                                                                <option value="Hot">Hot</option>
+                                                                <option value="Cool">Cool</option>
+                                                            </select>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    )}
-                                </>
+                                        )}
+                                    </>
+                                )}
                             </div>
                         </div>
 

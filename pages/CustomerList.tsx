@@ -442,19 +442,46 @@ const CustomerList: React.FC = () => {
         setIsDuplicateModalOpen(true);
         setDuplicateGroups([]);
         try {
-            const { data, error } = await supabase.from('customers').select('id, name, phone, created_at, sales_rep, status');
+            let query = supabase.from('customers').select('id, name, phone, created_at, sales_rep, status, creator_id'); // Added creator_id
+
+            // SCOPE SCAN TO CURRENT VIEW / TEAM
+            let targetIds: string[] = [];
+
+            if (isAdmin && selectedTeam !== 'all') {
+                // Admin filtering by a specific team
+                targetIds = employees.filter(e => e.manager_id === selectedTeam || e.id === selectedTeam).map(e => e.id);
+            } else if (isMod) {
+                // Mod (already scoped in employees state, but let's be safe)
+                // employees in CustomerList for Mod is already team-only
+                targetIds = employees.map(e => e.id);
+            } else if (!isAdmin && !isMod) {
+                // Sales
+                targetIds = [userProfile?.id || ''];
+            }
+
+            // If targetIds has entries, filter. If empty (Admin All), scan all? 
+            // Better to match the "Phân Khách" logic: Team A shouldn't see Team B.
+            // If Admin views "All", they see everything.
+            if (targetIds.length > 0) {
+                query = query.in('creator_id', targetIds);
+            }
+
+            const { data, error } = await query;
             if (error) throw error;
             const allCust = data as Customer[];
             const groups: Record<string, Customer[]> = {};
             allCust.forEach(c => {
                 if (!c.phone) return;
                 const cleanPhone = c.phone.trim();
+                // NORMALIZATION: Handle leading 0 or +84 if needed? Currently exact match.
                 if (!groups[cleanPhone]) groups[cleanPhone] = [];
                 groups[cleanPhone].push(c);
             });
             const duplicates: DuplicateGroup[] = [];
             for (const [phone, list] of Object.entries(groups)) {
                 if (list.length > 1) {
+                    // OPTIONAL: Filter out valid cross-team duplicates if we are in "All" mode?
+                    // For now, simple collision detection within the SCOPED query.
                     duplicates.push({ phone, customers: list });
                 }
             }
@@ -593,16 +620,21 @@ const CustomerList: React.FC = () => {
         }
     }, [activeTab, baseFilteredCustomers, todayStr]);
 
-    // Counts Calculation for Badges
-    const counts = useMemo(() => ({
-        general: baseFilteredCustomers.filter(c => c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.LOST_PENDING && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.WON_PENDING).length,
-        special: baseFilteredCustomers.filter(c => c.is_special_care === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length,
-        due: baseFilteredCustomers.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date === todayStr; }).length,
-        overdue: baseFilteredCustomers.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date < todayStr; }).length,
-        longterm: baseFilteredCustomers.filter(c => c.is_long_term === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length,
-        won: baseFilteredCustomers.filter(c => c.status === CustomerStatus.WON || c.status === CustomerStatus.WON_PENDING).length,
-        stopped: baseFilteredCustomers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING).length
-    }), [baseFilteredCustomers, todayStr]);
+    // Counts Calculation for Badges (KPI - Only Count OWNED Customers)
+    const counts = useMemo(() => {
+        // Filter out shared/delegated customers for KPI counts
+        const myCustomers = baseFilteredCustomers.filter(c => !c._is_delegated && !c._shared_permission);
+
+        return {
+            general: myCustomers.filter(c => c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.LOST_PENDING && c.status !== CustomerStatus.WON && c.status !== CustomerStatus.WON_PENDING).length,
+            special: myCustomers.filter(c => c.is_special_care === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length,
+            due: myCustomers.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date === todayStr; }).length,
+            overdue: myCustomers.filter(c => { if (c.is_special_care || c.is_long_term) return false; if (!c.recare_date || c.status === CustomerStatus.LOST || c.status === CustomerStatus.WON) return false; return c.recare_date < todayStr; }).length,
+            longterm: myCustomers.filter(c => c.is_long_term === true && c.status !== CustomerStatus.LOST && c.status !== CustomerStatus.WON).length,
+            won: myCustomers.filter(c => c.status === CustomerStatus.WON || c.status === CustomerStatus.WON_PENDING).length,
+            stopped: myCustomers.filter(c => c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING).length
+        };
+    }, [baseFilteredCustomers, todayStr]);
 
     // PAGINATION LOGIC
     const totalPages = Math.ceil(filteredList.length / ITEMS_PER_PAGE);

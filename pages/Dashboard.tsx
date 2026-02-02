@@ -287,12 +287,19 @@ const Dashboard: React.FC = () => {
         let duplicateLeadsToday = 0;
         if (isAdmin || isMod) {
             // Query interactions có chứa "[LEAD MỚI TRÙNG]" và created_at bắt đầu bằng todayStr
-            const { count } = await supabase
+            // FIXED: Only count if the related customer belongs to the current Team Scope
+            let query = supabase
                 .from('interactions')
-                .select('*', { count: 'exact', head: true })
+                .select('*, customers!inner(creator_id)', { count: 'exact', head: true })
                 .ilike('content', '%[LEAD MỚI TRÙNG]%')
                 .gte('created_at', todayStr + 'T00:00:00')
                 .lt('created_at', todayStr + 'T23:59:59');
+
+            if (teamIds.length > 0) {
+                query = query.in('customers.creator_id', teamIds);
+            }
+
+            const { count } = await query;
             duplicateLeadsToday = count || 0;
         }
 

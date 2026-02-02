@@ -349,6 +349,7 @@ const OnlineQuote: React.FC = () => {
     const [customFees, setCustomFees] = useState<Record<string, number>>(() => getSavedState('customFees', {}));
     const [feeOptions, setFeeOptions] = useState<Record<string, number>>(() => getSavedState('feeOptions', {}));
     const [manualDiscount, setManualDiscount] = useState<string>(() => getSavedState('manualDiscount', ''));
+    const [manualDiscountType, setManualDiscountType] = useState<'invoice' | 'rolling'>(() => getSavedState('manualDiscountType', 'invoice'));
     const [manualServiceFee, setManualServiceFee] = useState<string>(() => getSavedState('manualServiceFee', '3.000.000'));
 
     // --- NEW: INSURANCE & REG FEE STATE ---
@@ -368,7 +369,7 @@ const OnlineQuote: React.FC = () => {
         const stateToSave = {
             selectedModelId, selectedVersionId, selectedBankId, selectedMembershipId,
             selectedPackageIndex, prepaidPercent, manualPrepaidAmount,
-            appliedPromos, customFees, feeOptions, manualDiscount, manualServiceFee,
+            appliedPromos, customFees, feeOptions, manualDiscount, manualDiscountType, manualServiceFee,
             includeInsurance, insuranceRate, isRegistrationFree, includePremiumColor
         };
         try {
@@ -377,7 +378,7 @@ const OnlineQuote: React.FC = () => {
     }, [
         selectedModelId, selectedVersionId, selectedBankId, selectedMembershipId,
         selectedPackageIndex, prepaidPercent, manualPrepaidAmount,
-        appliedPromos, customFees, feeOptions, manualDiscount, manualServiceFee,
+        appliedPromos, customFees, feeOptions, manualDiscount, manualDiscountType, manualServiceFee,
         includeInsurance, insuranceRate, isRegistrationFree, includePremiumColor
     ]);
 
@@ -608,8 +609,15 @@ const OnlineQuote: React.FC = () => {
             breakdown.push({ name: `Ưu đãi ${membershipCalculation.name} (-${membershipCalculation.percent}%)`, amount: membershipCalculation.discount });
         }
 
+        // C. Manual Discount (Target: Invoice)
+        const manualVal = Number(manualDiscount.replace(/\D/g, ''));
+        if (manualVal > 0 && manualDiscountType === 'invoice') {
+            currentPrice -= manualVal;
+            breakdown.push({ name: 'Giảm giá thêm (XHĐ)', amount: manualVal });
+        }
+
         return { finalPrice: Math.max(0, currentPrice), breakdown };
-    }, [listPrice, promotions, appliedPromos, selectedModelId, selectedVersionId, membershipCalculation]);
+    }, [listPrice, promotions, appliedPromos, selectedModelId, selectedVersionId, membershipCalculation, manualDiscount, manualDiscountType]);
 
     const finalInvoicePrice = invoicePromoCalculation.finalPrice;
 
@@ -690,13 +698,13 @@ const OnlineQuote: React.FC = () => {
         });
 
         const manualVal = Number(manualDiscount.replace(/\D/g, ''));
-        if (manualVal > 0) {
+        if (manualVal > 0 && manualDiscountType === 'rolling') {
             totalDiscount += manualVal;
-            breakdown.push({ name: 'Giảm giá thêm', amount: manualVal });
+            breakdown.push({ name: 'Giảm giá thêm (Lăn bánh)', amount: manualVal });
         }
 
         return { totalDiscount, breakdown };
-    }, [promotions, appliedPromos, selectedModelId, selectedVersionId, listPrice, manualDiscount]);
+    }, [promotions, appliedPromos, selectedModelId, selectedVersionId, listPrice, manualDiscount, manualDiscountType]);
 
     // Final Rolling Calculation
     const preRollingPrice = finalInvoicePrice + totalFees;
@@ -1456,7 +1464,29 @@ const OnlineQuote: React.FC = () => {
 
                         {/* MANUAL DISCOUNT FIELD */}
                         <div className="mt-4 pt-4 border-t border-gray-100">
-                            <label className="block text-sm font-bold text-gray-700 mb-1">Giảm giá thêm (VNĐ)</label>
+                            <label className="block text-sm font-bold text-gray-700 mb-2">Giảm giá thêm (VNĐ)</label>
+
+                            {/* Discount Type Selector */}
+                            <div className="flex gap-4 mb-2">
+                                <label className={`flex items-center gap-2 cursor-pointer px-3 py-1.5 rounded-lg border text-sm font-bold transition-all ${manualDiscountType === 'invoice' ? 'bg-red-50 border-red-200 text-red-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                                    <input
+                                        type="radio"
+                                        className="w-4 h-4 text-red-600 focus:ring-red-500"
+                                        checked={manualDiscountType === 'invoice'}
+                                        onChange={() => setManualDiscountType('invoice')}
+                                    />
+                                    <span>Trừ vào XHĐ</span>
+                                </label>
+                                <label className={`flex items-center gap-2 cursor-pointer px-3 py-1.5 rounded-lg border text-sm font-bold transition-all ${manualDiscountType === 'rolling' ? 'bg-orange-50 border-orange-200 text-orange-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                                    <input
+                                        type="radio"
+                                        className="w-4 h-4 text-orange-600 focus:ring-orange-500"
+                                        checked={manualDiscountType === 'rolling'}
+                                        onChange={() => setManualDiscountType('rolling')}
+                                    />
+                                    <span>Giá lăn bánh</span>
+                                </label>
+                            </div>
                             <input
                                 type="text"
                                 className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-emerald-500 font-bold text-red-600"

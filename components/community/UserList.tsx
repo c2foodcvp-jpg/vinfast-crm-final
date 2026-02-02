@@ -3,6 +3,7 @@ import { supabase } from '../../supabaseClient';
 import { useChat } from '../../contexts/ChatContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Search } from 'lucide-react';
+import UserInfoModal from './UserInfoModal';
 
 interface UserListProps {
     onSelectUser: (userId: string) => void;
@@ -57,6 +58,17 @@ const UserList: React.FC<UserListProps> = ({ onSelectUser }) => {
         }
     };
 
+    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+
+    const handleUserClick = (userId: string) => {
+        setSelectedUserId(userId);
+    };
+
+    const handleStartChat = (userId: string) => {
+        onSelectUser(userId);
+        setSelectedUserId(null);
+    };
+
     return (
         <div className="flex flex-col h-full">
             <div className="px-4 py-2">
@@ -83,7 +95,7 @@ const UserList: React.FC<UserListProps> = ({ onSelectUser }) => {
                         return (
                             <button
                                 key={user.id}
-                                onClick={() => onSelectUser(user.id)}
+                                onClick={() => handleUserClick(user.id)}
                                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
                             >
                                 <div className="relative">
@@ -109,6 +121,14 @@ const UserList: React.FC<UserListProps> = ({ onSelectUser }) => {
                     })
                 )}
             </div>
+
+            {selectedUserId && (
+                <UserInfoModal
+                    userId={selectedUserId}
+                    onClose={() => setSelectedUserId(null)}
+                    onMessage={handleStartChat}
+                />
+            )}
         </div>
     );
 };

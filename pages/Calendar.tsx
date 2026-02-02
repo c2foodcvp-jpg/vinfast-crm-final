@@ -8,9 +8,10 @@ import {
     Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2, Phone, User, Clock,
     Plus, CheckCircle2, Flame, AlertCircle, X,
     AlertTriangle, Timer, ListTodo, Flag, Activity, Calendar, Star, Bell, BellRing,
-    Users, UserCircle, Lock, LayoutList, CheckSquare, Banknote, PauseCircle, ExternalLink, Mic, Trash2, CalendarClock
+    Users, UserCircle, Lock, LayoutList, CheckSquare, Banknote, PauseCircle, ExternalLink, Mic, Trash2, CalendarClock, Search
 } from 'lucide-react';
 import QuickInteractionModal from '../components/QuickInteractionModal';
+import AddCustomerModal from '../components/AddCustomerModal';
 import CustomerProgressModal, { DELIVERY_STEPS } from '../components/CustomerProgressModal';
 import VoiceRecordingModal from '../components/VoiceRecordingModal';
 
@@ -41,12 +42,33 @@ const DEFAULT_TASK_FORM = {
     title: '',
     content: '',
     deadline: new Date().toISOString().split('T')[0],
-    deadlineTime: '', // HH:mm format
+    deadlineTime: '17:00', // HH:mm format
     priority: 'medium' as 'low' | 'medium' | 'high' | 'urgent',
     applyToCustomer: false,
     customer_id: '',
     reminderEnabled: false
 };
+
+function removeVietnameseTones(str: string): string {
+    str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+    str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+    str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+    str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+    str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+    str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+    str = str.replace(/đ/g, "d");
+    str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+    str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+    str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+    str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+    str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+    str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+    str = str.replace(/Đ/g, "D");
+    // Some system encode Vietnamese combining accent as individual utf-8 characters
+    // \u0300, \u0301, \u0303, \u0309, \u0323
+    str = str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return str;
+}
 
 const CalendarPage: React.FC = () => {
     const { userProfile, isAdmin, isMod, refreshProfile } = useAuth();
@@ -70,7 +92,11 @@ const CalendarPage: React.FC = () => {
     // Modal States
     const [showCalendarModal, setShowCalendarModal] = useState(false);
     const [showTaskModal, setShowTaskModal] = useState(false);
+    const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
     const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+
+    // Search State
+    const [searchTerm, setSearchTerm] = useState('');
 
     // Task Tab State
     const [activeTaskTab, setActiveTaskTab] = useState<'active' | 'history'>('active');
@@ -276,7 +302,7 @@ const CalendarPage: React.FC = () => {
             // to allow showing Deals/Orders that might be WON or missing recare date
             let query = supabase
                 .from('customers')
-                .select('id, name, phone, status, recare_date, interest, classification, sales_rep, creator_id, created_at, is_special_care, is_long_term, deal_status, deal_details, delivery_progress, won_at')
+                .select('id, name, phone, email, status, recare_date, interest, classification, sales_rep, creator_id, created_at, is_special_care, is_long_term, deal_status, deal_details, delivery_progress, won_at')
                 .neq('status', CustomerStatus.LOST);
 
             if (!isAdmin) {
@@ -355,44 +381,99 @@ const CalendarPage: React.FC = () => {
     const fetchDataWithMode = (mode: boolean) => fetchData(false, mode);
 
     // --- Computed Customer Lists ---
+    // Filtered Data based on Search
+    const filteredCustomers = useMemo(() => {
+        if (!searchTerm.trim()) return customers;
+
+        // Normalize Search Term
+        const term = removeVietnameseTones(searchTerm.toLowerCase().trim());
+        const termNoSpace = term.replace(/\s/g, ''); // For 'vf7' checking
+
+        return customers.filter(c => {
+            // Name
+            const name = removeVietnameseTones((c.name || '').toLowerCase());
+            if (name.includes(term)) return true;
+
+            // Phone (Keep original logic)
+            if (c.phone && c.phone.includes(searchTerm)) return true;
+
+            // Interest (Car Model) - Check standard and space-removed
+            if (c.interest) {
+                const interest = removeVietnameseTones(c.interest.toLowerCase());
+                if (interest.includes(term)) return true;
+
+                // Special check: vf7 matches vf 7
+                const interestNoSpace = interest.replace(/\s/g, '');
+                if (interestNoSpace.includes(termNoSpace)) return true;
+            }
+
+            return false;
+        });
+    }, [customers, searchTerm]);
+
+    const filteredUserTasks = useMemo(() => {
+        if (!searchTerm.trim()) return userTasks;
+        const term = removeVietnameseTones(searchTerm.toLowerCase().trim());
+
+        return userTasks.filter(t => {
+            // Title
+            const title = removeVietnameseTones((t.title || '').toLowerCase());
+            if (title.includes(term)) return true;
+
+            // Content
+            if (t.content) {
+                const content = removeVietnameseTones(t.content.toLowerCase());
+                if (content.includes(term)) return true;
+            }
+
+            // Customer Name
+            if (t.customer_name) {
+                const cName = removeVietnameseTones(t.customer_name.toLowerCase());
+                if (cName.includes(term)) return true;
+            }
+
+            return false;
+        });
+    }, [userTasks, searchTerm]);
+
     // CS Đặc biệt - khách có is_special_care = true
     const specialCare = useMemo(() =>
-        customers.filter(c =>
+        filteredCustomers.filter(c =>
             c.is_special_care === true &&
             c.status !== CustomerStatus.WON &&
             c.status !== CustomerStatus.LOST
-        ), [customers]);
+        ), [filteredCustomers]);
 
     // Cần CS hôm nay - chỉ khách có recare_date = hôm nay
     // Loại trừ: CS Dài hạn, CS Đặc biệt, Đã chốt, Đã hủy
     const dueToday = useMemo(() =>
-        customers.filter(c =>
+        filteredCustomers.filter(c =>
             c.recare_date === todayStr &&
             !c.is_long_term &&
             !c.is_special_care &&
             c.status !== CustomerStatus.WON &&
             c.status !== CustomerStatus.LOST
-        ), [customers, todayStr]);
+        ), [filteredCustomers, todayStr]);
 
     // Quá hạn CS - khách có recare_date < hôm nay
     // Loại trừ: CS Dài hạn, CS Đặc biệt, Đã chốt, Đã hủy
     const overdue = useMemo(() =>
-        customers.filter(c =>
+        filteredCustomers.filter(c =>
             c.recare_date &&
             c.recare_date < todayStr &&
             !c.is_long_term &&
             !c.is_special_care &&
             c.status !== CustomerStatus.WON &&
             c.status !== CustomerStatus.LOST
-        ), [customers, todayStr]);
+        ), [filteredCustomers, todayStr]);
 
     const longTermDueToday = useMemo(() =>
-        customers.filter(c =>
+        filteredCustomers.filter(c =>
             c.is_long_term === true &&
             c.recare_date === todayStr &&
             c.status !== CustomerStatus.WON &&
             c.status !== CustomerStatus.LOST
-        ), [customers, todayStr]);
+        ), [filteredCustomers, todayStr]);
 
     // --- ORDERS / DEALS LISTS ---
     // Helper to check date range
@@ -403,27 +484,27 @@ const CalendarPage: React.FC = () => {
         return d >= orderDateRange.start && d <= orderDateRange.end;
     };
 
-    const processingDeals = useMemo(() => customers.filter(c =>
+    const processingDeals = useMemo(() => filteredCustomers.filter(c =>
         c.status === CustomerStatus.WON &&
         (c.deal_status === 'processing' || c.deal_status === 'completed_pending') &&
         isInDateRange(c.won_at || c.created_at)
-    ), [customers, orderDateRange]);
+    ), [filteredCustomers, orderDateRange]);
 
-    const completedDeals = useMemo(() => customers.filter(c =>
+    const completedDeals = useMemo(() => filteredCustomers.filter(c =>
         c.status === CustomerStatus.WON &&
         c.deal_status === 'completed' &&
         isInDateRange(c.won_at || c.created_at)
-    ), [customers, orderDateRange]);
+    ), [filteredCustomers, orderDateRange]);
 
-    const refundedDeals = useMemo(() => customers.filter(c =>
+    const refundedDeals = useMemo(() => filteredCustomers.filter(c =>
         (c.deal_status === 'refunded' || c.deal_status === 'refund_pending') &&
         isInDateRange(c.won_at || c.created_at)
-    ), [customers, orderDateRange]);
+    ), [filteredCustomers, orderDateRange]);
 
-    const suspendedDeals = useMemo(() => customers.filter(c =>
+    const suspendedDeals = useMemo(() => filteredCustomers.filter(c =>
         (c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') &&
         isInDateRange(c.won_at || c.created_at)
-    ), [customers, orderDateRange]);
+    ), [filteredCustomers, orderDateRange]);
 
     // Helper to get active list
     const activeOrderList = useMemo(() => {
@@ -438,8 +519,8 @@ const CalendarPage: React.FC = () => {
 
 
     // Derive Lists
-    const activeTasks = useMemo(() => userTasks.filter(t => !t.is_completed), [userTasks]);
-    const completedTasks = useMemo(() => userTasks.filter(t => t.is_completed), [userTasks]);
+    const activeTasks = useMemo(() => filteredUserTasks.filter(t => !t.is_completed), [filteredUserTasks]);
+    const completedTasks = useMemo(() => filteredUserTasks.filter(t => t.is_completed), [filteredUserTasks]);
     const currentTabTasks = activeTaskTab === 'active' ? activeTasks : completedTasks;
 
     // Total Tasks Count (Includes Customer Tasks + Active User Notes Due Today/Overdue)
@@ -481,7 +562,7 @@ const CalendarPage: React.FC = () => {
         const map: Record<string, { customerTasks: Customer[], customTasks: UserTask[] }> = {};
 
         // Populate with customers
-        customers.forEach(c => {
+        filteredCustomers.forEach(c => {
             if (c.recare_date) {
                 if (!map[c.recare_date]) map[c.recare_date] = { customerTasks: [], customTasks: [] };
                 map[c.recare_date].customerTasks.push(c);
@@ -499,7 +580,7 @@ const CalendarPage: React.FC = () => {
         });
 
         return map;
-    }, [customers, activeTasks]);
+    }, [filteredCustomers, activeTasks]);
 
     const handleDayClick = (day: number) => {
         const month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
@@ -540,8 +621,8 @@ const CalendarPage: React.FC = () => {
         setSaving(true);
         try {
             const deadlineISO = taskForm.deadline && taskForm.deadlineTime
-                ? `${taskForm.deadline}T${taskForm.deadlineTime}:00`
-                : taskForm.deadline ? `${taskForm.deadline}T23:59:00` : null;
+                ? new Date(`${taskForm.deadline}T${taskForm.deadlineTime}:00`).toISOString()
+                : taskForm.deadline ? new Date(`${taskForm.deadline}T23:59:00`).toISOString() : null;
 
             const taskData = {
                 title: taskForm.title.trim(),
@@ -603,7 +684,11 @@ const CalendarPage: React.FC = () => {
         let deadlineTime = '';
         if (task.deadline) {
             const dateObj = new Date(task.deadline);
-            deadlineDate = task.deadline.split('T')[0];
+            // Get local date YYYY-MM-DD
+            const year = dateObj.getFullYear();
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(dateObj.getDate()).padStart(2, '0');
+            deadlineDate = `${year}-${month}-${day}`;
             // Format HH:mm
             deadlineTime = dateObj.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
             // If time is 23:59 and originally set as no time? Hard to tell, but keeping time is safer.
@@ -984,13 +1069,54 @@ const CalendarPage: React.FC = () => {
                         Hôm nay bạn có <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold text-sm mx-1">{totalTasks}</span> công việc cần xử lý
                     </p>
                 </div>
-                <button
-                    onClick={() => setShowCalendarModal(true)}
-                    className="group flex items-center gap-2 bg-gray-50 hover:bg-white text-gray-700 hover:text-primary-600 border border-gray-200 hover:border-primary-100 px-5 py-2.5 rounded-xl font-bold transition-all shadow-sm hover:shadow-md"
-                >
-                    <CalendarIcon size={18} className="text-gray-500 group-hover:text-primary-600 transition-colors" />
-                    Xem lịch tháng
-                </button>
+                <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
+                    {/* Search Input */}
+                    <div className="relative group w-full md:w-64">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search size={16} className="text-gray-400 group-focus-within:text-primary-500 transition-colors" />
+                        </div>
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Tìm kiếm khách/công việc..."
+                            className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-xl focus:ring-primary-500 focus:border-primary-500 block w-full pl-10 p-2.5 transition-all outline-none group-focus-within:bg-white group-focus-within:shadow-sm group-focus-within:ring-2 ring-primary-100"
+                        />
+                        {searchTerm && (
+                            <button
+                                onClick={() => setSearchTerm('')}
+                                className="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer text-gray-400 hover:text-gray-600"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+
+                    <button
+                        onClick={() => setShowCalendarModal(true)}
+                        className="group flex-1 md:flex-none flex items-center justify-center gap-2 bg-white text-gray-700 hover:text-primary-600 border border-gray-200 hover:border-primary-100 px-4 py-2.5 rounded-xl font-bold transition-all shadow-sm hover:shadow-md whitespace-nowrap"
+                    >
+                        <CalendarIcon size={18} className="text-gray-500 group-hover:text-primary-600 transition-colors" />
+                        <span className="hidden lg:inline">Xem lịch tháng</span>
+                        <span className="lg:hidden">Lịch</span>
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            if (userProfile?.is_locked_add) {
+                                alert("Bạn đã bị khóa quyền thêm khách mới.");
+                            } else {
+                                setShowAddCustomerModal(true);
+                            }
+                        }}
+                        className={`flex-1 md:flex-none flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-lg transition-all transform active:scale-95 whitespace-nowrap
+                            ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}
+                    >
+                        <Plus size={18} />
+                        <span className="hidden lg:inline">Thêm khách</span>
+                        <span className="lg:hidden">Thêm</span>
+                    </button>
+                </div>
             </div>
 
             {/* NEW SPLIT LAYOUT */}
@@ -1594,6 +1720,14 @@ const CalendarPage: React.FC = () => {
                 onSuccess={() => {
                     setShowQuickModal(false);
                     fetchData(true); // Call fetchData with silent=true
+                }}
+            />
+
+            <AddCustomerModal
+                isOpen={showAddCustomerModal}
+                onClose={() => setShowAddCustomerModal(false)}
+                onSuccess={() => {
+                    fetchData();
                 }}
             />
 

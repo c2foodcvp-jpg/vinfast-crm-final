@@ -1,13 +1,54 @@
 import React, { useState } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, Hash } from 'lucide-react';
+import { Users, Hash, Camera } from 'lucide-react';
+import { supabase } from '../../supabaseClient';
 import UserList from './UserList';
 
 const ChatSidebar: React.FC<{ onMobileClose?: () => void }> = ({ onMobileClose }) => {
-    const { channels, activeChannel, setActiveChannel, globalChannelId, teamChannelId, createDM, onlineUsers } = useChat();
-    // const { userProfile } = useAuth(); // Unused
+    const { channels, activeChannel, setActiveChannel, globalChannelId, teamChannelId, createDM, onlineUsers, refreshChannels } = useChat();
+    const { userProfile, isAdmin, isMod } = useAuth();
     const [activeTab, setActiveTab] = useState<'messages' | 'contacts'>('messages');
+    const [uploadingChannel, setUploadingChannel] = useState<string | null>(null);
+
+    const handleChannelAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>, channelId: string) => {
+        if (!e.target.files || e.target.files.length === 0) return;
+        const file = e.target.files[0];
+
+        try {
+            setUploadingChannel(channelId);
+            const fileExt = file.name.split('.').pop();
+            const fileName = `ch-${channelId}-${Date.now()}.${fileExt}`;
+            const filePath = `${fileName}`;
+
+            // Upload
+            const { error: uploadError } = await supabase.storage
+                .from('avatars')
+                .upload(filePath, file);
+
+            if (uploadError) throw uploadError;
+
+            // Get URL
+            const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
+
+            // Update Channel
+            const { error: updateError } = await supabase
+                .from('chat_channels')
+                .update({ avatar_url: data.publicUrl })
+                .eq('id', channelId);
+
+            if (updateError) throw updateError;
+
+            // Refresh
+            await refreshChannels();
+
+        } catch (error) {
+            console.error("Upload failed", error);
+            alert("Lỗi tải ảnh");
+        } finally {
+            setUploadingChannel(null);
+        }
+    };
 
     const globalChannel = channels.find(c => c.id === globalChannelId);
     const teamChannel = teamChannelId ? channels.find(c => c.id === teamChannelId) : null;
@@ -21,11 +62,68 @@ const ChatSidebar: React.FC<{ onMobileClose?: () => void }> = ({ onMobileClose }
 
     const handleUserSelect = async (userId: string) => {
         try {
-            await createDM(userId);
-            if (onMobileClose) onMobileClose();
-            setActiveTab('messages');
+            // 1. Create or Get DM Channel ID
+            const channelId = await createDM(userId);
+
+            // 2. Try RPC Fetch (Use V2)
+            const { data: chanData } = await supabase.rpc('get_channels_v2');
+            let newChan = chanData?.find((c: any) => c.channel_id === channelId);
+
+            // 3. FALLBACK: If RPC didn't return it (consistency delay?), fetch Profile manually
+            let channelObj: any = null;
+
+            if (newChan) {
+                channelObj = {
+                    id: newChan.channel_id,
+                    type: newChan.channel_type,
+                    name: newChan.channel_name,
+                    avatar_url: newChan.channel_avatar_url,
+                    last_message_at: newChan.last_message_at,
+                    unread_count: 0,
+                    // DM Extras
+                    otherUserId: newChan.receiver_id,
+                    otherUserName: newChan.receiver_name,
+                    otherUserLastSeen: newChan.receiver_last_seen,
+                    otherUserAvatar: newChan.receiver_avatar
+                };
+            } else {
+                // Manually construct from Profile
+                // This ensures UI switches even if Channel list is stale
+                const { data: user } = await supabase.from('profiles').select('*').eq('id', userId).single();
+                if (user) {
+                    channelObj = {
+                        id: channelId,
+                        type: 'dm',
+                        name: user.full_name,
+                        avatar_url: null, // DMs usually use otherUserAvatar
+                        last_message_at: new Date().toISOString(),
+                        unread_count: 0,
+                        otherUserId: user.id,
+                        otherUserName: user.full_name,
+                        otherUserAvatar: user.avatar_url,
+                        otherUserLastSeen: user.last_seen_at
+                    };
+                }
+            }
+
+            if (channelObj) {
+                // 4. Set Active & Switch
+                setActiveChannel(channelObj);
+                setActiveTab('messages');
+
+                // IMPORTANT: Force view switch
+                if (onMobileClose) onMobileClose();
+            } else {
+                // If even profile fetch failed??
+                alert("Không thể tải thông tin cuộc trò chuyện.");
+            }
+
+            // 5. Refresh Background
+            await refreshChannels();
+
         } catch (error) {
-            console.error("Failed to create DM", error);
+            console.error("Failed to navigate to chat", error);
+            alert("Lỗi: Không thể kết nối trò chuyện. Vui lòng kiểm tra mạng.");
         }
     };
 
@@ -52,41 +150,63 @@ const ChatSidebar: React.FC<{ onMobileClose?: () => void }> = ({ onMobileClose }
     };
 
     return (
-        <div className="flex flex-col h-full bg-white border-r border-gray-200 w-full md:w-80 flex-shrink-0">
-            <div className="p-4 border-b border-gray-200">
-                <h2 className="text-xl font-bold text-gray-800">Cộng đồng</h2>
-            </div>
-
-            <div className="flex bg-gray-100 p-1 mx-4 mt-4 rounded-lg">
+        <div className="flex flex-col h-full bg-white border-r border-gray-200">
+            {/* Header / Tabs */}
+            <div className="flex border-b border-gray-200">
                 <button
                     onClick={() => setActiveTab('messages')}
-                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'messages' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                    className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'messages' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                 >
                     Tin nhắn
                 </button>
                 <button
                     onClick={() => setActiveTab('contacts')}
-                    className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'contacts' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                    className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'contacts' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                 >
-                    Danh bạ
+                    Cộng đồng
                 </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto mt-2">
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto">
                 {activeTab === 'messages' ? (
-                    <div className="py-2">
-                        <div className="px-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider mt-2">Công ty</div>
+                    <div className="divide-y divide-gray-100">
+                        {/* Global & Team Channels */}
+                        <div className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Công ty</div>
                         {globalChannel && (
                             <button
                                 onClick={() => handleChannelSelect(globalChannel)}
                                 className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${activeChannel?.id === globalChannel.id ? 'bg-blue-50 border-r-4 border-blue-500' : ''}`}
                             >
-                                <div className="relative">
-                                    <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center">
-                                        <Hash className="w-5 h-5" />
+                                <div className="relative group/avatar">
+                                    <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center overflow-hidden border border-indigo-200">
+                                        {globalChannel.avatar_url ? (
+                                            <img src={globalChannel.avatar_url} alt="Global" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <Hash className="w-5 h-5" />
+                                        )}
                                     </div>
+
+                                    {/* Upload Overlay for Admin */}
+                                    {isAdmin && (
+                                        <label className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-full opacity-0 group-hover/avatar:opacity-100 cursor-pointer transition-opacity z-20">
+                                            {uploadingChannel === globalChannel.id ? (
+                                                <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                                            ) : (
+                                                <div className="text-white text-[9px] font-bold">SỬA</div>
+                                            )}
+                                            <input
+                                                type="file"
+                                                className="hidden"
+                                                accept="image/*"
+                                                disabled={uploadingChannel === globalChannel.id}
+                                                onChange={(e) => handleChannelAvatarUpload(e, globalChannel.id)}
+                                            />
+                                        </label>
+                                    )}
+
                                     {!!globalChannel.unread_count && globalChannel.unread_count > 0 && (
-                                        <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                                        <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-sm z-30">
                                             {globalChannel.unread_count > 9 ? '9+' : globalChannel.unread_count}
                                         </div>
                                     )}
@@ -114,12 +234,35 @@ const ChatSidebar: React.FC<{ onMobileClose?: () => void }> = ({ onMobileClose }
                             }}
                             className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${activeChannel?.id === teamChannel?.id ? 'bg-blue-50 border-r-4 border-blue-500' : ''}`}
                         >
-                            <div className="relative">
-                                <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center">
-                                    <Users className="w-5 h-5" />
+                            <div className="relative group/avatar">
+                                <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center overflow-hidden border border-orange-200">
+                                    {teamChannel?.avatar_url ? (
+                                        <img src={teamChannel.avatar_url} alt="Team" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <Users className="w-5 h-5" />
+                                    )}
                                 </div>
+
+                                {/* Upload Overlay for Mod */}
+                                {(isMod || isAdmin) && teamChannel && (
+                                    <label className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-full opacity-0 group-hover/avatar:opacity-100 cursor-pointer transition-opacity z-20">
+                                        {uploadingChannel === teamChannel.id ? (
+                                            <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                                        ) : (
+                                            <div className="text-white text-[9px] font-bold">SỬA</div>
+                                        )}
+                                        <input
+                                            type="file"
+                                            className="hidden"
+                                            accept="image/*"
+                                            disabled={uploadingChannel === teamChannel.id}
+                                            onChange={(e) => handleChannelAvatarUpload(e, teamChannel.id)}
+                                        />
+                                    </label>
+                                )}
+
                                 {!!teamChannel?.unread_count && teamChannel.unread_count > 0 && (
-                                    <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                                    <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-sm z-30">
                                         {teamChannel.unread_count > 9 ? '9+' : teamChannel.unread_count}
                                     </div>
                                 )}

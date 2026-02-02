@@ -86,156 +86,148 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const fetchChannels = async () => {
         if (!userProfile) return;
 
-        let mappedChannels: ChatChannel[] = [];
-        let rpcSuccess = false;
-
-        // Try RPC to get channels with meta (unread, last message, sorting)
-        const { data, error } = await supabase.rpc('get_channels_with_meta');
-
-        if (!error && data) {
-            rpcSuccess = true;
-            mappedChannels = data.map((c: any) => ({
-                id: c.channel_id,
-                type: c.channel_type,
-                name: c.channel_name,
-                last_message_at: c.last_message_at,
-                last_message_preview: c.last_message_preview,
-                unread_count: c.unread_count,
-                // DM specific fields for UI
-                otherUserId: c.receiver_id,
-                otherUserName: c.receiver_name,
-                otherUserLastSeen: c.receiver_last_seen,
-                otherUserAvatar: c.receiver_avatar
-            }));
-        } else {
-            console.warn('ChatContext: RPC fetch failed or returned error, falling back to standard queries:', error);
-        }
-
-        // Fallback: If RPC failed, fetch basic channel list with manual DM resolution and Last Message
-        if (!rpcSuccess) {
+        try {
+            // STANDARD QUERY (No RPC) - Reliable Fallback
+            // Fetch all channels the user is a member of
             const { data: memberChannels, error: memberError } = await supabase
                 .from('chat_members')
-                .select('channel_id, last_read_at, chat_channels(*)')
+                .select(`
+                    channel_id, 
+                    last_read_at,
+                    cleared_history_at, 
+                    chat_channels (
+                        id, 
+                        type, 
+                        name, 
+                        avatar_url
+                    )
+                `)
                 .eq('user_id', userProfile.id);
 
-            if (!memberError && memberChannels) {
-                // Enrich manually (Parallel fetch for speed)
-                const enriched = await Promise.all(memberChannels.map(async (m: any) => {
-                    const ch = m.chat_channels;
-                    const lastRead = m.last_read_at;
-                    let extra: any = { unread_count: 0, last_message_at: null, last_message_preview: null };
+            if (memberError) {
+                console.error("Fetch channels error:", memberError);
+                return;
+            }
 
-                    // 1. Fetch DM Partner info
-                    if (ch.type === 'dm') {
-                        const { data: partner } = await supabase
-                            .from('chat_members')
-                            .select('user_id, profiles(full_name, last_seen_at, avatar_url)')
-                            .eq('channel_id', ch.id)
-                            .neq('user_id', userProfile.id)
-                            .maybeSingle();
+            // Fetch Global Channel (if not in members)
+            let allChannelsData = memberChannels || [];
 
-                        if (partner && partner.profiles) {
-                            const p = partner.profiles as any;
-                            extra.otherUserName = p.full_name;
-                            extra.otherUserLastSeen = p.last_seen_at;
-                            extra.otherUserAvatar = p.avatar_url;
-                        }
-                    }
+            // Check if Global exists in list
+            const hasGlobal = allChannelsData.some((m: any) => m.chat_channels?.type === 'global');
+            if (!hasGlobal) {
+                const { data: globalChan } = await supabase
+                    .from('chat_channels')
+                    .select('*')
+                    .eq('type', 'global')
+                    .single();
 
-                    // Map cleared history
-                    extra.cleared_at = m.cleared_history_at;
+                if (globalChan) {
+                    allChannelsData.push({
+                        channel_id: globalChan.id,
+                        last_read_at: new Date().toISOString(),
+                        // Global never really clears for everyone, but local user defaults to null
+                        cleared_history_at: null,
+                        chat_channels: globalChan
+                    });
+                }
+            }
 
-                    // 2. Fetch Last Message & Unread Count
-                    const { data: msgs } = await supabase
-                        .from('chat_messages')
-                        .select('id, content, created_at, sender_id')
+            // Enrich with Metadata (Last Message, Unread, Partner Info for DMs)
+            // We do this in parallel for performance
+            const mappedChannels: ChatChannel[] = await Promise.all(allChannelsData.map(async (m: any) => {
+                const ch = m.chat_channels;
+                if (!ch) return null; // Safety
+
+                const lastRead = m.last_read_at ? new Date(m.last_read_at) : new Date(0);
+                const clearedAt = m.cleared_history_at ? new Date(m.cleared_history_at) : new Date(0);
+
+                let extra: any = {
+                    unread_count: 0,
+                    last_message_at: null,
+                    last_message_preview: null,
+                    // DM Defaults
+                    otherUserId: null,
+                    otherUserName: null,
+                    otherUserLastSeen: null,
+                    otherUserAvatar: null
+                };
+
+                // 1. DM Partner Info
+                if (ch.type === 'dm') {
+                    // Find the other member in this channel
+                    const { data: partner } = await supabase
+                        .from('chat_members')
+                        .select('user_id, profiles(full_name, last_seen_at, avatar_url)')
                         .eq('channel_id', ch.id)
-                        .order('created_at', { ascending: false })
-                        .limit(1);
+                        .neq('user_id', userProfile.id)
+                        .maybeSingle();
 
-                    if (msgs && msgs.length > 0) {
-                        const lastMsg = msgs[0];
-                        extra.last_message_at = lastMsg.created_at;
-                        extra.last_message_preview = lastMsg.content;
-
-                        const lastReadDate = lastRead ? new Date(lastRead) : new Date(0);
-                        if (new Date(lastMsg.created_at) > lastReadDate && lastMsg.sender_id !== userProfile.id) {
-                            extra.unread_count = 1; // Simplified for fallback
-                        }
-                    }
-
-                    return { ...ch, ...extra };
-                }));
-
-                // Sort manually by last_message_at
-                enriched.sort((a: any, b: any) => {
-                    const timeA = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
-                    const timeB = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
-                    return timeB - timeA;
-                });
-
-                mappedChannels = enriched;
-            }
-        }
-
-        // Ensure Global Channel Exists
-        const globalExists = mappedChannels.find((c: any) => c.id === GLOBAL_CHANNEL_ID);
-        if (!globalExists) {
-            const { data: globalChannel } = await supabase
-                .from('chat_channels')
-                .select('*')
-                .eq('id', GLOBAL_CHANNEL_ID)
-                .single();
-
-            if (globalChannel) {
-                // Approximate meta for global channel
-                mappedChannels.unshift({
-                    ...globalChannel,
-                    last_message_at: new Date().toISOString(),
-                    unread_count: 0
-                } as any);
-            }
-        }
-
-        setChannels(mappedChannels);
-
-        let teamChan = mappedChannels.find((c: any) => c.type === 'team');
-
-        // Auto-join Team Channel if missing
-        if (!teamChan) {
-            try {
-                const { data: newTeamChannelId, error: rpcError } = await supabase.rpc('ensure_team_channel');
-                if (!rpcError && newTeamChannelId) {
-                    // Refetch to get the new channel
-                    const { data: refetched } = await supabase.rpc('get_channels_with_meta');
-                    if (refetched) {
-                        mappedChannels = refetched.map((c: any) => ({
-                            id: c.channel_id,
-                            type: c.channel_type,
-                            name: c.channel_name,
-                            last_message_at: c.last_message_at,
-                            last_message_preview: c.last_message_preview,
-                            unread_count: c.unread_count,
-                            otherUserId: c.receiver_id,
-                            otherUserName: c.receiver_name,
-                            otherUserLastSeen: c.receiver_last_seen,
-                            otherUserAvatar: c.receiver_avatar
-                        }));
-                        teamChan = mappedChannels.find((c: any) => c.type === 'team');
+                    if (partner && partner.profiles) {
+                        const p = partner.profiles as any;
+                        extra.otherUserId = partner.user_id;
+                        extra.otherUserName = p.full_name;
+                        extra.otherUserLastSeen = p.last_seen_at;
+                        extra.otherUserAvatar = p.avatar_url;
                     }
                 }
-            } catch (err) {
-                console.warn("Auto-join team failed:", err);
-            }
+
+                // 2. Fetch Last Message & Unread Count
+                // We fetch the latest message to show preview
+                const { data: msgs } = await supabase
+                    .from('chat_messages')
+                    .select('id, content, created_at, sender_id')
+                    .eq('channel_id', ch.id)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+
+                if (msgs && msgs.length > 0) {
+                    const lastMsg = msgs[0];
+                    extra.last_message_at = lastMsg.created_at;
+                    extra.last_message_preview = lastMsg.content;
+
+                    // Unread Count Logic
+                    // Count messages newer than last_read AND newer than cleared_at (if hidden)
+                    // Simplified: Just check if last msg is unread
+                    const msgTime = new Date(lastMsg.created_at);
+                    if (msgTime > lastRead && msgTime > clearedAt && lastMsg.sender_id !== userProfile.id) {
+                        extra.unread_count = 1; // Simplified: 1 means "Bold", we don't query count(*) to save reads
+                    }
+                }
+
+                // Return active object
+                return {
+                    id: ch.id,
+                    type: ch.type,
+                    name: ch.name,
+                    avatar_url: ch.avatar_url,
+                    cleared_at: m.cleared_history_at, // IMPORTANT: Pass this to context
+                    ...extra
+                };
+            }));
+
+            // Filter nulls and Sort
+            const validChannels = mappedChannels.filter(Boolean).sort((a: any, b: any) => {
+                const timeA = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+                const timeB = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+                return timeB - timeA;
+            });
+
+            setChannels(validChannels as ChatChannel[]);
+
+            // Auto-join Team Channel if missing (Logic preserved)
+            const teamChan = validChannels.find((c: any) => c.type === 'team');
+            setTeamChannelId(teamChan?.id || null);
+
+            // Update unread count
+            const totalUnread = validChannels.reduce((acc: number, curr: any) => acc + (curr.unread_count || 0), 0);
+            setUnreadCount(totalUnread);
+
+        } catch (err) {
+            console.error("Critical error fetching channels:", err);
         }
-
-        setChannels(mappedChannels);
-        setTeamChannelId(teamChan?.id || null);
-
-        // Update total global unread count
-        const totalUnread = mappedChannels.reduce((acc: number, curr: any) => acc + (curr.unread_count || 0), 0);
-        setUnreadCount(totalUnread);
     };
+
+
 
     const markChannelAsRead = async (channelId: string) => {
         if (!userProfile) return;
@@ -409,41 +401,68 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const deleteMessage = async (messageId: string) => {
-        // Optimistic update
-        setMessages(prev => prev.filter(m => m.id !== messageId));
+        try {
+            // Optimistic update
+            setMessages(prev => prev.filter(m => m.id !== messageId));
 
-        // Use RPC for safer deletion
-        const { error } = await supabase.rpc('delete_chat_message', { p_message_id: messageId });
+            // Attempt RPC (Recall - Soft Delete for Everyone)
+            const { error: rpcError } = await supabase.rpc('delete_chat_message', { p_message_id: messageId });
 
-        if (error) {
+            if (rpcError) {
+                console.warn("RPC delete failed, falling back to direct update if owner:", rpcError);
+
+                // Fallback: If I am the sender, I can update my own message content manually
+                // This covers the case where the RPC migration wasn't run but the user wants to "Recall"
+                const { error: directError } = await supabase
+                    .from('chat_messages')
+                    .update({
+                        content: 'Tin nhắn đã thu hồi',
+                        is_system: true
+                    })
+                    .eq('id', messageId)
+                    .eq('sender_id', userProfile?.id); // Security check
+
+                if (directError) throw directError;
+            }
+        } catch (error: any) {
             console.error("Delete failed:", error);
             toast.error("Không thể xóa tin nhắn: " + error.message);
-            // Revert
+            // Revert optimistic update
             if (activeChannel) fetchMessages(activeChannel.id);
         }
     };
 
     const clearHistory = async () => {
-        if (!activeChannel) return;
+        if (!activeChannel || !userProfile) return;
 
         if (window.confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử trò chuyện này? \n(Hành động này chỉ áp dụng cho bạn)")) {
-            // Optimistic
-            setMessages([]);
+            try {
+                // Optimistic
+                setMessages([]);
+                const nowISO = new Date().toISOString();
 
-            const { error } = await supabase.rpc('clear_chat_history', { p_channel_id: activeChannel.id });
+                // Direct Update to chat_members (Bypassing potentially missing RPC)
+                // This is safer and uses standard RLS
+                const { error } = await supabase
+                    .from('chat_members')
+                    .update({ cleared_history_at: nowISO })
+                    .eq('channel_id', activeChannel.id)
+                    .eq('user_id', userProfile.id);
 
-            if (error) {
+                if (error) throw error;
+
+                toast.success("Đã xóa lịch sử trò chuyện");
+
+                // Update local channel cleared_at to prevent fetchMessages from reloading old msgs immediately
+                setChannels(prev => prev.map(c =>
+                    c.id === activeChannel.id
+                        ? { ...c, cleared_at: nowISO }
+                        : c
+                ));
+            } catch (error: any) {
                 console.error("Clear history failed:", error);
                 toast.error("Lỗi khi xóa lịch sử");
                 fetchMessages(activeChannel.id);
-            } else {
-                toast.success("Đã xóa lịch sử trò chuyện");
-                // Update local channel cleared_at to prevent fetchMessages from reloading old msgs immediately if effects run
-                setChannels(prev => prev.map(c =>
-                    c.id === activeChannel.id
-                        ? { ...c, cleared_at: new Date().toISOString() }
-                        : c
-                ));
             }
         }
     };

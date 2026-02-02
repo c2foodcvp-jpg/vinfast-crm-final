@@ -159,7 +159,7 @@ const Finance: React.FC = () => {
             // This drastically reduces payload size and memory usage
             const { data: customers } = await supabase
                 .from('customers')
-                .select('id, name, phone, source, status, deal_status, creator_id, sales_rep, created_at, updated_at, won_at, deal_details')
+                .select('id, name, phone, source, status, deal_status, creator_id, sales_rep, created_at, updated_at, won_at, deal_details, fund_period_id')
                 .eq('status', 'Chốt đơn')
                 .ilike('source', '%MKT%')
                 .range(0, 9999)
@@ -700,23 +700,27 @@ const Finance: React.FC = () => {
                     // MKT Filter: Only warn for MKT Group customers
                     if (!c.source?.toLowerCase().includes('mkt')) continue;
 
-                    // --- NEW: Filter by Fund Period Dates ---
-                    // Since "Complete Fund" is specific to a period, we must only check customers created in this period
-                    // (and potentially older customers with transactions in this period? 
-                    // No, usually "Debt" tracks by Customer Origin Period for MKT funds).
+                    // --- NEW: Filter by Fund Period Dates or Explicit Assignment ---
 
-                    const cDate = new Date(c.created_at);
-                    const pStart = new Date(period.start_date);
-                    // Reset time to ensure strict comparison if needed, or rely on ISO string comparison
-                    // Start Date is inclusive (00:00:00)
-                    pStart.setHours(0, 0, 0, 0);
+                    // 1. Check Explicit Assignment Authorization (Highest Priority)
+                    if (c.fund_period_id) {
+                        // If explicitly assigned to another fund, skip
+                        if (c.fund_period_id !== period.id) continue;
+                        // If assigned to THIS fund, proceed (skip date check)
+                    } else {
+                        // 2. Date-based Fallback
+                        const cDate = new Date(c.created_at);
+                        const pStart = new Date(period.start_date);
+                        // Reset time to ensure strict comparison
+                        pStart.setHours(0, 0, 0, 0);
 
-                    if (cDate < pStart) continue;
+                        if (cDate < pStart) continue;
 
-                    if (period.end_date) {
-                        const pEnd = new Date(period.end_date);
-                        pEnd.setHours(23, 59, 59, 999); // End of Day
-                        if (cDate > pEnd) continue;
+                        if (period.end_date) {
+                            const pEnd = new Date(period.end_date);
+                            pEnd.setHours(23, 59, 59, 999); // End of Day
+                            if (cDate > pEnd) continue;
+                        }
                     }
                     // ----------------------------------------
 
@@ -999,18 +1003,26 @@ const Finance: React.FC = () => {
                 const period = fundPeriods.find(p => p.id === selectedFundPeriod);
                 if (period) {
                     if (t.customer_id) {
-                        // Transaction has customer → use customer's created_at
+                        // Transaction has customer → use customer's Explicit Fund Period or created_at
                         const customer = allCustomers.find(c => c.id === t.customer_id);
                         if (customer) {
-                            const customerDate = new Date(customer.created_at);
-                            const periodStart = new Date(period.start_date);
+                            // NEW: Explicit Fund Assignment Check
+                            if (customer.fund_period_id) {
+                                if (customer.fund_period_id !== selectedFundPeriod) return false;
+                                // If matches, proceed (skip date check)
+                            } else {
+                                // Fallback: Date Check
+                                const customerDate = new Date(customer.created_at);
+                                const periodStart = new Date(period.start_date);
 
-                            if (customerDate < periodStart) return false;
+                                // Reset strict check logic to standard logic
+                                if (customerDate < periodStart) return false;
 
-                            if (period.end_date) {
-                                const periodEnd = new Date(period.end_date);
-                                periodEnd.setHours(23, 59, 59, 999);
-                                if (customerDate > periodEnd) return false;
+                                if (period.end_date) {
+                                    const periodEnd = new Date(period.end_date);
+                                    periodEnd.setHours(23, 59, 59, 999);
+                                    if (customerDate > periodEnd) return false;
+                                }
                             }
                         }
                     } else {
@@ -1081,20 +1093,27 @@ const Finance: React.FC = () => {
             }
 
             // NEW: Fund Period Filter - Customers are assigned based on created_at
+            // NEW: Fund Period Filter - Customers are assigned based on created_at OR explicit assignment
             if (selectedFundPeriod !== 'all') {
-                const period = fundPeriods.find(p => p.id === selectedFundPeriod);
-                if (period) {
-                    const customerDate = new Date(c.created_at);
-                    const periodStart = new Date(period.start_date);
+                // NEW: Explicit Check
+                if (c.fund_period_id) {
+                    if (c.fund_period_id !== selectedFundPeriod) return false;
+                    // If matched, we skip date check
+                } else {
+                    const period = fundPeriods.find(p => p.id === selectedFundPeriod);
+                    if (period) {
+                        const customerDate = new Date(c.created_at);
+                        const periodStart = new Date(period.start_date);
 
-                    // Customer must be created on or after period start
-                    if (customerDate < periodStart) return false;
+                        // Customer must be created on or after period start
+                        if (customerDate < periodStart) return false;
 
-                    // If period has end_date, customer must be created on or before end
-                    if (period.end_date) {
-                        const periodEnd = new Date(period.end_date);
-                        periodEnd.setHours(23, 59, 59, 999); // Include entire end day
-                        if (customerDate > periodEnd) return false;
+                        // If period has end_date, customer must be created on or before end
+                        if (period.end_date) {
+                            const periodEnd = new Date(period.end_date);
+                            periodEnd.setHours(23, 59, 59, 999); // Include entire end day
+                            if (customerDate > periodEnd) return false;
+                        }
                     }
                 }
             }
@@ -1255,14 +1274,21 @@ const Finance: React.FC = () => {
                 const effectiveDate = c.won_at || c.created_at || '';
                 if (!isInMonthYear(effectiveDate)) return false;
                 if (selectedFundPeriod !== 'all') {
-                    const period = fundPeriods.find(p => p.id === selectedFundPeriod);
-                    if (period) {
-                        const cDate = new Date(c.created_at);
-                        const pStart = new Date(period.start_date);
-                        if (cDate < pStart) return false;
-                        if (period.end_date) {
-                            const pEnd = new Date(period.end_date); pEnd.setHours(23, 59, 59, 999);
-                            if (cDate > pEnd) return false;
+                    // NEW: Prioritize Explicit Assignment for KPIs too
+                    if (c.fund_period_id) {
+                        if (c.fund_period_id !== selectedFundPeriod) return false;
+                        // If matches, we include it, skipping date checks below.
+                    } else {
+                        const period = fundPeriods.find(p => p.id === selectedFundPeriod);
+                        if (period) {
+                            const cDate = new Date(c.created_at);
+                            const pStart = new Date(period.start_date);
+                            pStart.setHours(0, 0, 0, 0); // consistency
+                            if (cDate < pStart) return false;
+                            if (period.end_date) {
+                                const pEnd = new Date(period.end_date); pEnd.setHours(23, 59, 59, 999);
+                                if (cDate > pEnd) return false;
+                            }
                         }
                     }
                 }

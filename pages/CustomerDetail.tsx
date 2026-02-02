@@ -2,11 +2,11 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Customer, CustomerStatus, Interaction, CustomerClassification, UserProfile, UserRole, Distributor, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType, DeliveryProgress, MembershipTier } from '../types';
+import { Customer, CustomerStatus, Interaction, CustomerClassification, UserProfile, UserRole, Distributor, CAR_MODELS as DEFAULT_CAR_MODELS, Transaction, TransactionType, DeliveryProgress, MembershipTier, FundPeriod } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
     ArrowLeft, Phone, Edit, MessageCircle, Send, User as UserIcon, Calendar, Flame, Ban, CheckCircle2, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, FileCheck2, Trash2, UserCheck, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, Check, Eye, Share2, Archive, Calculator, Truck,
-    ListTodo, Lock, Mic, MicOff
+    ListTodo, Lock, Mic, MicOff, Settings2
 } from 'lucide-react';
 import CustomerProgressModal, { DELIVERY_STEPS } from '../components/CustomerProgressModal';
 import TaskCreationModal from '../components/TaskCreationModal';
@@ -61,6 +61,9 @@ const CustomerDetail: React.FC = () => {
     const [distributors, setDistributors] = useState<Distributor[]>([]);
     const [employees, setEmployees] = useState<UserProfile[]>([]);
     const [carList, setCarList] = useState<string[]>(DEFAULT_CAR_MODELS);
+
+    // NEW: Fund Periods for Admin Management
+    const [fundPeriods, setFundPeriods] = useState<FundPeriod[]>([]);
 
     // Local Control States
     const [classification, setClassification] = useState<CustomerClassification>('Warm');
@@ -189,6 +192,10 @@ const CustomerDetail: React.FC = () => {
     // Task Modal State
     const [showTaskModal, setShowTaskModal] = useState(false);
 
+    // Debt Warning Modal State
+    const [showDebtWarningModal, setShowDebtWarningModal] = useState(false);
+    const [debtAmount, setDebtAmount] = useState(0);
+
     const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
     const longTermTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -238,6 +245,20 @@ const CustomerDetail: React.FC = () => {
         setIsEditingInfo(false);
         return () => { if (longTermTimeoutRef.current) clearTimeout(longTermTimeoutRef.current); };
     }, [id, userProfile]);
+
+    // NEW: Fetch Fund Periods for Admin/Mod
+    useEffect(() => {
+        if (isAdmin || isMod) {
+            (async () => {
+                let q = supabase.from('fund_periods').select('*').order('created_at', { ascending: false });
+                if (isMod && userProfile) {
+                    q = q.eq('manager_id', userProfile.id);
+                }
+                const { data } = await q;
+                if (data) setFundPeriods(data as FundPeriod[]);
+            })();
+        }
+    }, [isAdmin, isMod, userProfile]);
 
     useEffect(() => {
         if (location.state?.customerIds && location.state.customerIds.length > 0) {
@@ -708,6 +729,23 @@ const CustomerDetail: React.FC = () => {
             'refund': (isAdmin || isMod) ? 'refunded' : 'refund_pending',
         };
 
+        // CHECK DEBT CONDITION FOR 'complete'
+        if (action === 'complete') {
+            const rawRevenue = customer?.deal_details?.actual_revenue || 0;
+            const incExpenses = transactions.filter(t => t.type === 'incurred_expense' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+            const deposited = transactions.filter(t => t.type === 'deposit' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+            const expenses = transactions.filter(t => t.type === 'expense' && t.status === 'approved').reduce((sum, t) => sum + t.amount, 0);
+
+            // Debt = Revenue - Incurred - Deposited - Expenses
+            const currentDebt = Math.max(0, rawRevenue - incExpenses - deposited - expenses);
+
+            if (currentDebt > 0) {
+                setDebtAmount(currentDebt);
+                setShowDebtWarningModal(true);
+                return;
+            }
+        }
+
         const targetStatus = statusMap[action];
         let updates: Partial<Customer> = { deal_status: targetStatus };
 
@@ -774,17 +812,26 @@ const CustomerDetail: React.FC = () => {
                 status: (isAdmin || isMod) ? 'approved' : 'pending', // Admin approves to deduct fund? Prompt says "Admin/Mod phải duyệt mới trừ quỹ". Even if Admin requests? Let's assume yes or auto-approve if Admin.
                 approved_by: (isAdmin || isMod) ? userProfile?.id : null
             }]).select().single();
-            if (error) throw error;
-
             setTransactions(prev => [data as Transaction, ...prev]);
             setShowBorrowModal(false);
             setBorrowForm({ amount: '', date: '', reason: '' });
 
             const msg = (isAdmin || isMod) ? "Đã tạo khoản vay thành công!" : "Đã gửi yêu cầu mượn tiền!";
-            handleAddNote('note', `Đã tạo khoản vay: ${formatCurrency(amount)} VNĐ. Dự kiến trả: ${new Date(borrowForm.date).toLocaleDateString('vi-VN')}`);
             showToast(msg, 'success');
         } catch (e: any) {
             showToast("Lỗi: " + e.message, 'error');
+        }
+    };
+
+    const handleUpdateFundPeriod = async (periodId: string) => {
+        try {
+            const val = periodId === 'default' ? null : periodId;
+            const { error } = await supabase.from('customers').update({ fund_period_id: val }).eq('id', id);
+            if (error) throw error;
+            setCustomer(c => c ? ({ ...c, fund_period_id: val || undefined }) : null);
+            showToast("Đã cập nhật Quỹ cho khách hàng!");
+        } catch (e) {
+            showToast("Lỗi cập nhật quỹ", 'error');
         }
     };
 
@@ -1134,6 +1181,33 @@ const CustomerDetail: React.FC = () => {
                                     {canCreateTask ? <ListTodo size={16} /> : <Lock size={16} />} Thêm nhắc nhở
                                 </button>
                                 <div className="grid grid-cols-2 gap-3"><button disabled={(isDelegatedViewOnly)} onClick={() => setShowStopModal(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"><Ban size={16} /> Ngưng CS</button><button disabled={(isDelegatedViewOnly)} onClick={() => setShowWinModal(true)} className="py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-1 disabled:opacity-50"><CheckCircle2 size={16} /> Chốt Deal</button></div></div>
+                        </div>
+                    )}
+
+                    {/* NEW: ADMIN/MOD SETTINGS PANEL */}
+                    {(isAdmin || isMod) && (
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-purple-200 mt-6 relative animate-fade-in">
+                            <h3 className="font-bold text-purple-800 mb-4 border-b border-purple-100 pb-2 flex items-center gap-2">
+                                <Settings2 size={16} /> Cấu hình Admin/Mod
+                            </h3>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Điều chỉnh Quỹ (Fund Period)</label>
+                                    <select
+                                        value={customer?.fund_period_id || 'default'}
+                                        onChange={(e) => handleUpdateFundPeriod(e.target.value)}
+                                        className="w-full border border-purple-200 rounded-xl px-3 py-2 outline-none focus:border-purple-500 bg-purple-50 text-sm font-bold text-purple-900 cursor-pointer"
+                                    >
+                                        <option value="default">Mặc định (Theo ngày tạo)</option>
+                                        {fundPeriods.map(p => (
+                                            <option key={p.id} value={p.id}>{p.name} ({new Date(p.start_date).toLocaleDateString('vi-VN')})</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-gray-400 mt-1 italic">
+                                        Gán khách hàng vào quỹ cụ thể, bỏ qua quy tắc ngày tạo.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     )}
                     {/* ... Customer Info & Finance Panels ... */}
@@ -1763,9 +1837,35 @@ const CustomerDetail: React.FC = () => {
                     showToast={showToast}
                 />
             )}
+            {
+                showDebtWarningModal && (
+                    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-scale-in">
+                            <div className="flex flex-col items-center text-center">
+                                <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4 border-4 border-red-50">
+                                    <Ban size={32} />
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">Không thể hoàn thành đơn</h3>
+                                <p className="text-gray-500 text-sm mb-4">
+                                    Đơn hàng vẫn còn nợ quỹ. Vui lòng thanh toán đủ trước khi hoàn thành.
+                                </p>
+                                <div className="bg-red-50 border border-red-100 rounded-xl p-4 mb-6 w-full">
+                                    <p className="text-xs font-bold text-red-600 uppercase mb-1">SỐ TIỀN CÒN NỢ QUỸ</p>
+                                    <p className="text-2xl font-bold text-red-700">{formatCurrency(debtAmount)} VNĐ</p>
+                                </div>
+                                <button
+                                    onClick={() => setShowDebtWarningModal(false)}
+                                    className="w-full py-3 bg-gray-900 text-white font-bold rounded-xl hover:bg-black transition-all shadow-lg shadow-gray-200"
+                                >
+                                    Đã hiểu
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
         </div >
     );
 };
 
 export default CustomerDetail;
-
