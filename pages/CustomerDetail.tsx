@@ -64,6 +64,7 @@ const CustomerDetail: React.FC = () => {
 
     // NEW: Fund Periods for Admin Management
     const [fundPeriods, setFundPeriods] = useState<FundPeriod[]>([]);
+    const [showAdminConfig, setShowAdminConfig] = useState(false); // Toggle for Admin Config in Deal Card
 
     // Local Control States
     const [classification, setClassification] = useState<CustomerClassification>('Warm');
@@ -1117,7 +1118,42 @@ const CustomerDetail: React.FC = () => {
                                     </div>
                                 )}
 
-                                {(isRefunded || isSuspended) && !isDelegatedViewOnly && (<div className="space-y-2">{customer.deal_status === 'refund_pending' && (isAdmin || isMod) && <button onClick={() => handleDealAction('refund')} className="w-full py-2.5 bg-red-600 text-white border border-red-700 rounded-xl font-bold text-sm hover:bg-red-700 flex items-center justify-center gap-2 animate-pulse"><CheckCircle2 size={16} /> Duyệt Trả Cọc</button>}<button onClick={() => handleDealAction('reopen')} className="w-full py-2.5 bg-orange-100 text-orange-700 border border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Mở xử lý lại</button></div>)}{(isAdmin || isMod) && (<button onClick={() => handleDealAction('cancel')} className="w-full py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Hủy chốt / Mở lại CS</button>)}</div></div>
+                                {(isRefunded || isSuspended) && !isDelegatedViewOnly && (<div className="space-y-2">{customer.deal_status === 'refund_pending' && (isAdmin || isMod) && <button onClick={() => handleDealAction('refund')} className="w-full py-2.5 bg-red-600 text-white border border-red-700 rounded-xl font-bold text-sm hover:bg-red-700 flex items-center justify-center gap-2 animate-pulse"><CheckCircle2 size={16} /> Duyệt Trả Cọc</button>}<button onClick={() => handleDealAction('reopen')} className="w-full py-2.5 bg-orange-100 text-orange-700 border border-orange-200 rounded-xl font-bold text-sm hover:bg-orange-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Mở xử lý lại</button></div>)}{(isAdmin || isMod) && (<button onClick={() => handleDealAction('cancel')} className="w-full py-2.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Hủy chốt / Mở lại CS</button>)}
+
+                                {/* ADMIN/MOD FUND CONFIGURATION (TOGGLEABLE) */}
+                                {(isAdmin || (isMod && userProfile?.can_manage_fund)) && (
+                                    <div className="mt-4 pt-3 border-t border-green-100">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <button
+                                                onClick={() => setShowAdminConfig(!showAdminConfig)}
+                                                className="text-xs font-bold text-gray-500 hover:text-purple-600 flex items-center gap-1 transition-colors"
+                                            >
+                                                <Settings2 size={14} /> Cấu hình Quỹ {showAdminConfig ? '(Ẩn)' : '(Hiện)'}
+                                            </button>
+                                        </div>
+
+                                        {showAdminConfig && (
+                                            <div className="bg-purple-50 rounded-xl p-3 border border-purple-100 animate-fade-in">
+                                                <label className="text-[10px] font-bold text-purple-800 uppercase mb-1 block">Điều chỉnh Quỹ (Fund Period)</label>
+                                                <select
+                                                    value={customer?.fund_period_id || 'default'}
+                                                    onChange={(e) => handleUpdateFundPeriod(e.target.value)}
+                                                    className="w-full border border-purple-200 rounded-lg px-2 py-1.5 outline-none focus:border-purple-500 bg-white text-xs font-bold text-purple-900 cursor-pointer"
+                                                >
+                                                    <option value="default">Mặc định (Theo ngày tạo)</option>
+                                                    {fundPeriods.map(p => (
+                                                        <option key={p.id} value={p.id}>{p.name} ({new Date(p.start_date).toLocaleDateString('vi-VN')})</option>
+                                                    ))}
+                                                </select>
+                                                <p className="text-[10px] text-gray-400 mt-1 italic">
+                                                    Gán thủ công vào quỹ, bỏ qua ngày tạo.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     )}
                     {!hideCarePanel && (
                         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
@@ -1184,32 +1220,7 @@ const CustomerDetail: React.FC = () => {
                         </div>
                     )}
 
-                    {/* NEW: ADMIN/MOD SETTINGS PANEL */}
-                    {(isAdmin || isMod) && (
-                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-purple-200 mt-6 relative animate-fade-in">
-                            <h3 className="font-bold text-purple-800 mb-4 border-b border-purple-100 pb-2 flex items-center gap-2">
-                                <Settings2 size={16} /> Cấu hình Admin/Mod
-                            </h3>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Điều chỉnh Quỹ (Fund Period)</label>
-                                    <select
-                                        value={customer?.fund_period_id || 'default'}
-                                        onChange={(e) => handleUpdateFundPeriod(e.target.value)}
-                                        className="w-full border border-purple-200 rounded-xl px-3 py-2 outline-none focus:border-purple-500 bg-purple-50 text-sm font-bold text-purple-900 cursor-pointer"
-                                    >
-                                        <option value="default">Mặc định (Theo ngày tạo)</option>
-                                        {fundPeriods.map(p => (
-                                            <option key={p.id} value={p.id}>{p.name} ({new Date(p.start_date).toLocaleDateString('vi-VN')})</option>
-                                        ))}
-                                    </select>
-                                    <p className="text-xs text-gray-400 mt-1 italic">
-                                        Gán khách hàng vào quỹ cụ thể, bỏ qua quy tắc ngày tạo.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+
                     {/* ... Customer Info & Finance Panels ... */}
                     <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 relative">
                         <h3 className="font-bold text-gray-900 mb-4 border-b pb-2 flex justify-between items-center">

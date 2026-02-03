@@ -156,11 +156,13 @@ const Finance: React.FC = () => {
             if (profiles) setAllProfiles(profiles as UserProfile[]);
 
             // OPTIMIZED: Select only necessary fields + Filter WON + MKT Source on Server
-            // This drastically reduces payload size and memory usage
+            // This drastically reduces payload size and maintenance
+            // FIX: Removed .eq('status', 'Chốt đơn') to allow Debt Collection for "Potentials" or "Processing"
             const { data: customers } = await supabase
                 .from('customers')
                 .select('id, name, phone, source, status, deal_status, creator_id, sales_rep, created_at, updated_at, won_at, deal_details, fund_period_id')
-                .eq('status', 'Chốt đơn')
+                .neq('status', 'Đã hủy') // Exclude Lost
+                .neq('status', 'Chờ duyệt hủy') // Exclude Lost Pending
                 .ilike('source', '%MKT%')
                 .range(0, 9999)
                 .order('created_at', { ascending: false });
@@ -1160,12 +1162,9 @@ const Finance: React.FC = () => {
 
     const availableCustomersForDeposit = useMemo(() => {
         return allCustomers.filter(c => {
-            // Must be WON status
+            // STRICT REQUIREMENT: Only active WON deals in 'processing' state
             if (c.status !== CustomerStatus.WON) return false;
-
-            // Exclude Invalid Deal Statuses (Refunded/Suspended)
-            // 'completed' is ALLOWED.
-            if (c.deal_status === 'refunded' || c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
+            if (c.deal_status !== 'processing') return false; // Excludes: refunded, suspended, completed, etc.
 
             // Source Check: Must contain "MKT" (Case insensitive preferably)
             if (!isMKT(c.source)) return false;
@@ -1174,17 +1173,31 @@ const Finance: React.FC = () => {
             if (isAdmin) {
                 if (selectedTeam !== 'all') {
                     const creator = allProfiles.find(p => p.id === c.creator_id);
-                    return creator?.manager_id === selectedTeam || creator?.id === selectedTeam;
+                    // Also check Sales Rep's team if strictly assigned?
+                    // For now, stick to Creator's team or if Sales Rep is in team.
+                    // Let's simplify: Any customer handled by this team.
+                    const salesRepProfile = allProfiles.find(p => p.full_name === c.sales_rep);
+                    const isCreatorInTeam = creator?.manager_id === selectedTeam || creator?.id === selectedTeam;
+                    const isRepInTeam = salesRepProfile?.manager_id === selectedTeam || salesRepProfile?.id === selectedTeam;
+
+                    return isCreatorInTeam || isRepInTeam;
                 }
                 return true;
             }
             if (isMod) {
                 const creator = allProfiles.find(p => p.id === c.creator_id);
-                const isSelf = c.creator_id === userProfile?.id;
-                const isSubordinate = creator?.manager_id === userProfile?.id;
-                return isSelf || isSubordinate;
+                const salesRepProfile = allProfiles.find(p => p.full_name === c.sales_rep);
+
+                const isCreatorSelf = c.creator_id === userProfile?.id;
+                const isCreatorSub = creator?.manager_id === userProfile?.id;
+
+                const isRepSelf = c.sales_rep === userProfile?.full_name; // Check Name
+                const isRepSub = salesRepProfile?.manager_id === userProfile?.id;
+
+                return isCreatorSelf || isCreatorSub || isRepSelf || isRepSub;
             }
-            return c.creator_id === userProfile?.id;
+            // Regular: Creator OR Assigned Sales Rep
+            return c.creator_id === userProfile?.id || c.sales_rep === userProfile?.full_name;
         });
     }, [allCustomers, allProfiles, isAdmin, isMod, selectedTeam, userProfile]);
 
@@ -1465,7 +1478,13 @@ const Finance: React.FC = () => {
                 // Ownership: Creator OR Sales Rep (to handle transferred leads)
                 const isOwner = c.creator_id === emp.id || c.sales_rep === emp.full_name;
                 if (!isOwner) return false;
-                if (c.status !== CustomerStatus.WON) return false;
+
+                // FILTER: Exclude Lost
+                if (c.status === CustomerStatus.LOST || c.status === CustomerStatus.LOST_PENDING) return false;
+
+                // REMOVED: Strict WON check to allow Debt visibility for non-won customers
+                // if (c.status !== CustomerStatus.WON) return false;
+
                 if (c.deal_status === 'refunded' || c.deal_status === 'suspended' || c.deal_status === 'suspended_pending') return false;
 
                 if (!isMKT(c.source)) return false;
@@ -1475,11 +1494,18 @@ const Finance: React.FC = () => {
                 // Fund Period Filtering Logic for Customers
                 // If a specific fund period is selected, we filter by creation date falling within that period, IGNORING Month/Year selector
                 if (selectedFundPeriod !== 'all') {
+                    // NEW: Explicit Check First
+                    if (c.fund_period_id) {
+                        if (c.fund_period_id !== selectedFundPeriod) return false;
+                        // If match, we include it (and skip further date checks below by returning early? No, we need to return TRUE here if strictly matching fund)
+                        // Actually, if selectedFundPeriod is active, we IGNORE the Month/Year filter.
+                        return true;
+                    }
+
                     const period = fundPeriods.find(p => p.id === selectedFundPeriod);
                     if (period) {
                         const cDate = new Date(c.created_at);
                         const pStart = new Date(period.start_date);
-                        const pEnd = period.end_date ? new Date(period.end_date) : new Date();
                         // Inclusive check
                         if (period.end_date) {
                             // Closed period: strict range
@@ -1500,8 +1526,10 @@ const Finance: React.FC = () => {
                 }
             });
 
-            const countWon = empCustomers.length;
-            const expectedRevenue = empCustomers.reduce((sum, c) => sum + (c.deal_details?.revenue || 0), 0);
+            const countWon = empCustomers.filter(c => c.status === CustomerStatus.WON).length; // FIX: Count only WON
+            const expectedRevenue = empCustomers
+                .filter(c => c.status === CustomerStatus.WON)
+                .reduce((sum, c) => sum + (c.deal_details?.revenue || 0), 0);
 
             const custIds = empCustomers.map(c => c.id);
 

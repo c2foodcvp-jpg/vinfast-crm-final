@@ -40,7 +40,7 @@ const EmployeeList: React.FC = () => {
     // Permission Lock Modal
     const [showPermissionModal, setShowPermissionModal] = useState(false);
     const [targetUserForPerm, setTargetUserForPerm] = useState<UserProfile | null>(null);
-    const [permForm, setPermForm] = useState({ lockAdd: false, lockView: false, canAccessLeadsQueue: false });
+    const [permForm, setPermForm] = useState({ lockAdd: false, lockView: false, canAccessLeadsQueue: false, canManageFund: false });
 
     // Confirmation Modal State (Replaces window.confirm)
     const [confirmAction, setConfirmAction] = useState<{
@@ -349,7 +349,8 @@ const EmployeeList: React.FC = () => {
         setPermForm({
             lockAdd: !!emp.is_locked_add,
             lockView: !!emp.is_locked_view,
-            canAccessLeadsQueue: !!emp.can_access_leads_queue
+            canAccessLeadsQueue: !!emp.can_access_leads_queue,
+            canManageFund: !!emp.can_manage_fund
         });
         setShowPermissionModal(true);
     };
@@ -364,6 +365,7 @@ const EmployeeList: React.FC = () => {
             // Only save can_access_leads_queue for MOD users
             if (targetUserForPerm.role === UserRole.MOD) {
                 updates.can_access_leads_queue = permForm.canAccessLeadsQueue;
+                updates.can_manage_fund = permForm.canManageFund;
             }
             const { error } = await supabase.from('profiles').update(updates).eq('id', targetUserForPerm.id);
             if (error) throw error;
@@ -629,6 +631,12 @@ $$;
                                                             <span className="font-bold">Hết hạn: {new Date(emp.team_expiration_date).toLocaleDateString('vi-VN')}</span>
                                                         </div>
                                                     )}
+                                                    {emp.role === UserRole.MOD && emp.can_manage_fund && (
+                                                        <div className="flex items-center gap-1.5 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-100 w-fit">
+                                                            <Database size={10} />
+                                                            <span className="font-bold">Quyền Quỹ</span>
+                                                        </div>
+                                                    )}
 
                                                     {emp.manager_id && emp.role === UserRole.EMPLOYEE && (
                                                         <div className="flex items-center gap-1 text-xs text-gray-500">
@@ -727,15 +735,26 @@ $$;
 
                             {/* MOD-only permission: Leads Queue access */}
                             {targetUserForPerm.role === UserRole.MOD && (
-                                <div className="flex items-center justify-between p-3 bg-purple-50 border border-purple-100 rounded-xl">
-                                    <div>
-                                        <span className="block text-sm font-bold text-purple-900">Cho phép xem Lead Email (Chờ)</span>
-                                        <span className="text-xs text-purple-700">Truy cập trang phân bổ từ Email.</span>
+                                <>
+                                    <div className="flex items-center justify-between p-3 bg-purple-50 border border-purple-100 rounded-xl">
+                                        <div>
+                                            <span className="block text-sm font-bold text-purple-900">Cho phép xem Lead Email (Chờ)</span>
+                                            <span className="text-xs text-purple-700">Truy cập trang phân bổ từ Email.</span>
+                                        </div>
+                                        <div onClick={() => setPermForm({ ...permForm, canAccessLeadsQueue: !permForm.canAccessLeadsQueue })} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${permForm.canAccessLeadsQueue ? 'bg-purple-600' : 'bg-gray-300'}`}>
+                                            <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${permForm.canAccessLeadsQueue ? 'translate-x-5' : ''}`}></div>
+                                        </div>
                                     </div>
-                                    <div onClick={() => setPermForm({ ...permForm, canAccessLeadsQueue: !permForm.canAccessLeadsQueue })} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${permForm.canAccessLeadsQueue ? 'bg-purple-600' : 'bg-gray-300'}`}>
-                                        <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${permForm.canAccessLeadsQueue ? 'translate-x-5' : ''}`}></div>
+                                    <div className="flex items-center justify-between p-3 bg-green-50 border border-green-100 rounded-xl mt-2 animate-fade-in">
+                                        <div>
+                                            <span className="block text-sm font-bold text-green-900">Cho phép Quản lý Quỹ (Admin Mode)</span>
+                                            <span className="text-xs text-green-700">Được phép chỉnh sửa Fund Period.</span>
+                                        </div>
+                                        <div onClick={() => setPermForm({ ...permForm, canManageFund: !permForm.canManageFund })} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${permForm.canManageFund ? 'bg-green-600' : 'bg-gray-300'}`}>
+                                            <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${permForm.canManageFund ? 'translate-x-5' : ''}`}></div>
+                                        </div>
                                     </div>
-                                </div>
+                                </>
                             )}
                         </div>
 

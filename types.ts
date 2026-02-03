@@ -202,6 +202,7 @@ export interface UserProfile {
   dealership_name?: string;
   introduction?: string;
   birthdate?: string; // YYYY-MM-DD
+  can_manage_fund?: boolean; // NEW: Permission for Mod to adjust Fund Period
 }
 
 
