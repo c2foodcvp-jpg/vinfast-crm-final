@@ -176,16 +176,18 @@ const Dashboard: React.FC = () => {
                 let query = supabase.from('customers').select('*').range(page * size, (page + 1) * size - 1);
 
                 if (!isAdmin) {
-                    // For Mod and User, strictly enforce Creator ID check
+                    // For Mod and User, strictly enforce Creator ID OR Sales Rep check
                     if (teamIds.length > 0) {
-                        query = query.in('creator_id', teamIds);
+                        const idsStr = teamIds.map(id => `"${id}"`).join(',');
+                        query = query.or(`creator_id.in.(${idsStr}),sales_rep.in.(${idsStr})`);
                     } else {
-                        query = query.eq('creator_id', userProfile.id);
+                        query = query.or(`creator_id.eq.${userProfile.id},sales_rep.eq.${userProfile.id}`);
                     }
                 } else {
                     // Admin: Apply team filter if selected
                     if (selectedTeam !== 'all' && teamIds.length > 0) {
-                        query = query.in('creator_id', teamIds);
+                        const idsStr = teamIds.map(id => `"${id}"`).join(',');
+                        query = query.or(`creator_id.in.(${idsStr}),sales_rep.in.(${idsStr})`);
                     }
                 }
 

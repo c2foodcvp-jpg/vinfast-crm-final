@@ -317,16 +317,18 @@ const CustomerList: React.FC = () => {
                 .from('customers')
                 .select(selectFields, { count: 'exact' })
                 .order('created_at', { ascending: false })
-                .limit(1000); // PERFORMANCE: Limit to 1000 most recent customers
+                .limit(5000); // PERFORMANCE: Increased limit to 5000
 
             if (!isAdmin) {
                 // Combine Team IDs and Delegated IDs
                 const viewableIds = [...new Set([...teamIds, ...delegatedTargetIds])];
 
                 if (viewableIds.length > 0) {
-                    query = query.in('creator_id', viewableIds);
+                    const idsStr = viewableIds.map(id => `"${id}"`).join(',');
+                    query = query.or(`creator_id.in.(${idsStr}),sales_rep.in.(${idsStr})`);
                 } else {
-                    query = query.eq('creator_id', userProfile.id); // Fallback
+                    // query = query.eq('creator_id', userProfile.id); // Old Logic
+                    query = query.or(`creator_id.eq.${userProfile.id},sales_rep.eq.${userProfile.id}`);
                 }
             }
 
