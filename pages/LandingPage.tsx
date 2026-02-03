@@ -155,7 +155,7 @@ const LandingPage = () => {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-center max-w-6xl mx-auto">
 
                         {/* GOLD */}
-                        <div className="p-8 bg-[#1E293B] border border-gray-700 rounded-3xl relative">
+                        <div className="p-8 bg-[#1E293B] border border-gray-700 rounded-3xl relative flex flex-col h-full hover:border-yellow-500/30 transition-colors">
                             <h3 className="text-2xl font-bold text-yellow-500 flex items-center gap-2">
                                 <Star fill="currentColor" /> GOLD
                             </h3>
@@ -163,14 +163,14 @@ const LandingPage = () => {
                                 <span className="text-4xl font-bold text-white">800.000đ</span>
                                 <span className="text-gray-400">/tháng</span>
                             </div>
-                            <p className="text-gray-400 text-sm mb-6 pb-6 border-b border-gray-700">
+                            <p className="text-gray-400 text-sm mb-6 pb-6 border-b border-gray-700 min-h-[60px]">
                                 Dành cho đội nhóm nhỏ, showroom mới thành lập.
                             </p>
-                            <ul className="space-y-4 text-sm text-gray-300">
-                                <li className="flex gap-3"><Check size={18} className="text-blue-500" /> Tối đa 06 thành viên</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-500" /> Quản lý Khách hàng cơ bản</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-500" /> Báo giá & Tính lãi vay</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-500" /> Quản lý quỹ nhóm</li>
+                            <ul className="space-y-4 text-sm text-gray-300 flex-1">
+                                <li className="flex gap-3"><Check size={18} className="text-blue-500 shrink-0" /> Tối đa 06 thành viên</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-500 shrink-0" /> Quản lý Khách hàng cơ bản</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-500 shrink-0" /> Báo giá & Tính lãi vay</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-500 shrink-0" /> Quản lý quỹ nhóm</li>
                                 <li className="flex gap-3 text-gray-500"><XIcon /> Không hỗ trợ API Marketing</li>
                                 <li className="flex gap-3 text-gray-500"><XIcon /> Không có phân bổ Lead tự động</li>
                             </ul>
@@ -180,8 +180,8 @@ const LandingPage = () => {
                         </div>
 
                         {/* PLATINUM - Popular */}
-                        <div className="p-8 bg-gradient-to-b from-blue-900/50 to-[#0F172A] border border-blue-500 rounded-3xl relative scale-105 shadow-2xl shadow-blue-900/50 z-10">
-                            <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-500 text-white px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider">
+                        <div className="p-8 bg-gradient-to-b from-blue-900/50 to-[#0F172A] border border-blue-500 rounded-3xl relative md:scale-105 shadow-2xl shadow-blue-900/50 z-10 flex flex-col h-full">
+                            <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-500 text-white px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider shadow-lg">
                                 Khuyên Dùng
                             </div>
                             <h3 className="text-2xl font-bold text-blue-200 flex items-center gap-2">
@@ -191,24 +191,24 @@ const LandingPage = () => {
                                 <span className="text-5xl font-bold text-white">1.000.000đ</span>
                                 <span className="text-gray-400">/tháng</span>
                             </div>
-                            <p className="text-gray-300 text-sm mb-6 pb-6 border-b border-blue-500/30">
+                            <p className="text-gray-300 text-sm mb-6 pb-6 border-b border-blue-500/30 min-h-[60px]">
                                 Đầy đủ tính năng, phù hợp với hầu hết các đội nhóm kinh doanh chuyên nghiệp.
                             </p>
-                            <ul className="space-y-4 text-sm text-white">
-                                <li className="flex gap-3"><Check size={18} className="text-blue-400" /> <strong>TẤT CẢ tính năng Gold</strong></li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-400" /> Phân bổ Lead tự động (Automated)</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-400" /> Tích hợp Form Marketing</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-400" /> Báo cáo Analytics chuyên sâu</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-400" /> Xuất file Báo giá PDF/Ảnh High-Res</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-400" /> Hỗ trợ kỹ thuật 24/7</li>
+                            <ul className="space-y-4 text-sm text-white flex-1">
+                                <li className="flex gap-3"><Check size={18} className="text-blue-400 shrink-0" /> <strong>TẤT CẢ tính năng Gold</strong></li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-400 shrink-0" /> Phân bổ Lead tự động (Automated)</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-400 shrink-0" /> Tích hợp Form Marketing</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-400 shrink-0" /> Báo cáo Analytics chuyên sâu</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-400 shrink-0" /> Xuất file Báo giá PDF/Ảnh High-Res</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-400 shrink-0" /> Hỗ trợ kỹ thuật 24/7</li>
                             </ul>
-                            <button onClick={() => handleBuy('PLATINUM')} className="w-full py-4 mt-8 rounded-xl font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition-all">
+                            <button onClick={() => handleBuy('PLATINUM')} className="w-full py-4 mt-8 rounded-xl font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition-all transform hover:scale-105">
                                 Chọn Platinum
                             </button>
                         </div>
 
                         {/* DIAMOND */}
-                        <div className="p-8 bg-[#1E293B] border border-gray-700 rounded-3xl relative">
+                        <div className="p-8 bg-[#1E293B] border border-gray-700 rounded-3xl relative flex flex-col h-full hover:border-cyan-500/30 transition-colors">
                             <h3 className="text-2xl font-bold text-cyan-400 flex items-center gap-2">
                                 <Gem /> DIAMOND
                             </h3>
@@ -216,15 +216,15 @@ const LandingPage = () => {
                                 <span className="text-4xl font-bold text-white">1.200.000đ</span>
                                 <span className="text-gray-400">/tháng</span>
                             </div>
-                            <p className="text-gray-400 text-sm mb-6 pb-6 border-b border-gray-700">
+                            <p className="text-gray-400 text-sm mb-6 pb-6 border-b border-gray-700 min-h-[60px]">
                                 Dành cho các đại lý lớn, cần tùy biến và tính năng cao cấp nhất.
                             </p>
-                            <ul className="space-y-4 text-sm text-gray-300">
-                                <li className="flex gap-3"><Check size={18} className="text-blue-500" /> <strong>TẤT CẢ tính năng Platinum</strong></li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-500" /> Gửi Email Báo giá tự động</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-500" /> Tùy biến Quy trình bán hàng</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-500" /> Đào tạo & Setup hệ thống tận nơi</li>
-                                <li className="flex gap-3"><Check size={18} className="text-blue-500" /> API riêng biệt</li>
+                            <ul className="space-y-4 text-sm text-gray-300 flex-1">
+                                <li className="flex gap-3"><Check size={18} className="text-blue-500 shrink-0" /> <strong>TẤT CẢ tính năng Platinum</strong></li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-500 shrink-0" /> Gửi Email Báo giá tự động</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-500 shrink-0" /> Tùy biến Quy trình bán hàng</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-500 shrink-0" /> Đào tạo & Setup hệ thống tận nơi</li>
+                                <li className="flex gap-3"><Check size={18} className="text-blue-500 shrink-0" /> API riêng biệt</li>
                             </ul>
                             <button onClick={() => handleBuy('DIAMOND')} className="w-full py-4 mt-8 rounded-xl font-bold border border-gray-600 hover:bg-gray-700 transition-colors">
                                 Liên hệ Admin

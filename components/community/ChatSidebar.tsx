@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, Hash, Camera } from 'lucide-react';
+import { Users, Hash, Plus } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 import UserList from './UserList';
+import CreateTeamModal from './CreateTeamModal';
 
 const ChatSidebar: React.FC<{ onMobileClose?: () => void }> = ({ onMobileClose }) => {
-    const { channels, activeChannel, setActiveChannel, globalChannelId, teamChannelId, createDM, onlineUsers, refreshChannels } = useChat();
-    const { userProfile, isAdmin, isMod } = useAuth();
+    const { channels, activeChannel, setActiveChannel, globalChannelId, createDM, onlineUsers, refreshChannels } = useChat();
+    const { isAdmin, isMod } = useAuth();
     const [activeTab, setActiveTab] = useState<'messages' | 'contacts'>('messages');
     const [uploadingChannel, setUploadingChannel] = useState<string | null>(null);
+    const [showCreateTeam, setShowCreateTeam] = useState(false);
 
     const handleChannelAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>, channelId: string) => {
         if (!e.target.files || e.target.files.length === 0) return;
@@ -51,7 +53,7 @@ const ChatSidebar: React.FC<{ onMobileClose?: () => void }> = ({ onMobileClose }
     };
 
     const globalChannel = channels.find(c => c.id === globalChannelId);
-    const teamChannel = teamChannelId ? channels.find(c => c.id === teamChannelId) : null;
+    const teamChannels = channels.filter(c => c.type === 'team'); // Get ALL team channels
     const dmChannels = channels.filter(c => c.type === 'dm');
 
     const handleChannelSelect = (channel: any) => {
@@ -227,61 +229,78 @@ const ChatSidebar: React.FC<{ onMobileClose?: () => void }> = ({ onMobileClose }
                             </button>
                         )}
 
-                        <button
-                            onClick={() => {
-                                if (teamChannel) handleChannelSelect(teamChannel);
-                                else alert("Kênh Team chưa được thiết lập. Vui lòng thử lại sau.");
-                            }}
-                            className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${activeChannel?.id === teamChannel?.id ? 'bg-blue-50 border-r-4 border-blue-500' : ''}`}
-                        >
-                            <div className="relative group/avatar">
-                                <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center overflow-hidden border border-orange-200">
-                                    {teamChannel?.avatar_url ? (
-                                        <img src={teamChannel.avatar_url} alt="Team" className="w-full h-full object-cover" />
-                                    ) : (
-                                        <Users className="w-5 h-5" />
-                                    )}
-                                </div>
+                        <div className="flex items-center justify-between px-4 py-2 mt-2">
+                            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Nhóm Chat</div>
+                            {(isAdmin || isMod) && (
+                                <button
+                                    onClick={() => setShowCreateTeam(true)}
+                                    className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-blue-600 transition-colors"
+                                    title="Tạo nhóm mới"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                </button>
+                            )}
+                        </div>
 
-                                {/* Upload Overlay for Mod */}
-                                {(isMod || isAdmin) && teamChannel && (
-                                    <label className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-full opacity-0 group-hover/avatar:opacity-100 cursor-pointer transition-opacity z-20">
-                                        {uploadingChannel === teamChannel.id ? (
-                                            <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                        {teamChannels.map(channel => (
+                            <button
+                                key={channel.id}
+                                onClick={() => handleChannelSelect(channel)}
+                                className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${activeChannel?.id === channel.id ? 'bg-blue-50 border-r-4 border-blue-500' : ''}`}
+                            >
+                                <div className="relative group/avatar">
+                                    <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center overflow-hidden border border-orange-200">
+                                        {channel.avatar_url ? (
+                                            <img src={channel.avatar_url} alt={channel.name} className="w-full h-full object-cover" />
                                         ) : (
-                                            <div className="text-white text-[9px] font-bold">SỬA</div>
+                                            <Users className="w-5 h-5" />
                                         )}
-                                        <input
-                                            type="file"
-                                            className="hidden"
-                                            accept="image/*"
-                                            disabled={uploadingChannel === teamChannel.id}
-                                            onChange={(e) => handleChannelAvatarUpload(e, teamChannel.id)}
-                                        />
-                                    </label>
-                                )}
-
-                                {!!teamChannel?.unread_count && teamChannel.unread_count > 0 && (
-                                    <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-sm z-30">
-                                        {teamChannel.unread_count > 9 ? '9+' : teamChannel.unread_count}
                                     </div>
-                                )}
-                            </div>
 
-                            <div className="text-left flex-1 min-w-0">
-                                <div className="flex justify-between items-baseline">
-                                    <div className="text-sm font-bold text-gray-800">Team của tôi</div>
-                                    {teamChannel?.last_message_at && (
-                                        <div className="text-[10px] text-gray-400">
-                                            {new Date(teamChannel.last_message_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                    {/* Upload Overlay for Mod/Admin */}
+                                    {(isMod || isAdmin) && (
+                                        <label className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-full opacity-0 group-hover/avatar:opacity-100 cursor-pointer transition-opacity z-20">
+                                            {uploadingChannel === channel.id ? (
+                                                <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                                            ) : (
+                                                <div className="text-white text-[9px] font-bold">SỬA</div>
+                                            )}
+                                            <input
+                                                type="file"
+                                                className="hidden"
+                                                accept="image/*"
+                                                disabled={uploadingChannel === channel.id}
+                                                onChange={(e) => handleChannelAvatarUpload(e, channel.id)}
+                                            />
+                                        </label>
+                                    )}
+
+                                    {!!channel.unread_count && channel.unread_count > 0 && (
+                                        <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-sm z-30">
+                                            {channel.unread_count > 9 ? '9+' : channel.unread_count}
                                         </div>
                                     )}
                                 </div>
-                                <div className={`text-xs truncate ${teamChannel?.unread_count ? 'font-bold text-gray-900' : 'text-gray-500'}`}>
-                                    {teamChannel?.last_message_preview || 'Thảo luận nội bộ'}
+
+                                <div className="text-left flex-1 min-w-0">
+                                    <div className="flex justify-between items-baseline">
+                                        <div className="text-sm font-bold text-gray-800 truncate">{channel.name || 'Nhóm'}</div>
+                                        {channel.last_message_at && (
+                                            <div className="text-[10px] text-gray-400">
+                                                {new Date(channel.last_message_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className={`text-xs truncate ${channel.unread_count ? 'font-bold text-gray-900' : 'text-gray-500'}`}>
+                                        {channel.last_message_preview || 'Chạm để nhắn tin'}
+                                    </div>
                                 </div>
-                            </div>
-                        </button>
+                            </button>
+                        ))}
+
+                        {teamChannels.length === 0 && (
+                            <div className="px-4 py-2 text-sm text-gray-400 italic text-center">Chưa có nhóm nào.</div>
+                        )}
 
                         <div className="px-4 py-2 mt-6 text-xs font-semibold text-gray-400 uppercase tracking-wider">Tin nhắn riêng</div>
                         {dmChannels.length === 0 && (
@@ -340,6 +359,8 @@ const ChatSidebar: React.FC<{ onMobileClose?: () => void }> = ({ onMobileClose }
                     <UserList onSelectUser={handleUserSelect} />
                 )}
             </div>
+            {/* Modals */}
+            <CreateTeamModal isOpen={showCreateTeam} onClose={() => setShowCreateTeam(false)} />
         </div>
     );
 };

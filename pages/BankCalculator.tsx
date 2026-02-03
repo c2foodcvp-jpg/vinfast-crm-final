@@ -136,7 +136,10 @@ const BankCalculator: React.FC = () => {
 
             // Determine Interest Rate based on stages
             let currentAnnualRate = parseFloat(floatingRate.replace(',', '.'));
-            if (numStages >= 2 && i <= phase1Duration) {
+
+            if (numStages === 1) {
+                currentAnnualRate = parseFloat(phase1Rate.replace(',', '.'));
+            } else if (numStages >= 2 && i <= phase1Duration) {
                 currentAnnualRate = parseFloat(phase1Rate.replace(',', '.'));
             } else if (numStages === 3 && i <= (phase1Duration + phase2Duration)) {
                 currentAnnualRate = parseFloat(phase2Rate.replace(',', '.'));

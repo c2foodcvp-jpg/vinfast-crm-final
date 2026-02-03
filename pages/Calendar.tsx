@@ -1092,30 +1092,32 @@ const CalendarPage: React.FC = () => {
                         )}
                     </div>
 
-                    <button
-                        onClick={() => setShowCalendarModal(true)}
-                        className="group flex-1 md:flex-none flex items-center justify-center gap-2 bg-white text-gray-700 hover:text-primary-600 border border-gray-200 hover:border-primary-100 px-4 py-2.5 rounded-xl font-bold transition-all shadow-sm hover:shadow-md whitespace-nowrap"
-                    >
-                        <CalendarIcon size={18} className="text-gray-500 group-hover:text-primary-600 transition-colors" />
-                        <span className="hidden lg:inline">Xem lịch tháng</span>
-                        <span className="lg:hidden">Lịch</span>
-                    </button>
+                    <div className="flex w-full md:w-auto gap-3">
+                        <button
+                            onClick={() => setShowCalendarModal(true)}
+                            className="group flex-1 md:flex-none flex items-center justify-center gap-2 bg-white text-gray-700 hover:text-primary-600 border border-gray-200 hover:border-primary-100 px-4 py-2.5 rounded-xl font-bold transition-all shadow-sm hover:shadow-md whitespace-nowrap"
+                        >
+                            <CalendarIcon size={18} className="text-gray-500 group-hover:text-primary-600 transition-colors" />
+                            <span className="hidden lg:inline">Xem lịch tháng</span>
+                            <span className="lg:hidden">Lịch</span>
+                        </button>
 
-                    <button
-                        onClick={() => {
-                            if (userProfile?.is_locked_add) {
-                                alert("Bạn đã bị khóa quyền thêm khách mới.");
-                            } else {
-                                setShowAddCustomerModal(true);
-                            }
-                        }}
-                        className={`flex-1 md:flex-none flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-lg transition-all transform active:scale-95 whitespace-nowrap
-                            ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}
-                    >
-                        <Plus size={18} />
-                        <span className="hidden lg:inline">Thêm khách</span>
-                        <span className="lg:hidden">Thêm</span>
-                    </button>
+                        <button
+                            onClick={() => {
+                                if (userProfile?.is_locked_add) {
+                                    alert("Bạn đã bị khóa quyền thêm khách mới.");
+                                } else {
+                                    setShowAddCustomerModal(true);
+                                }
+                            }}
+                            className={`flex-1 md:flex-none flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-lg transition-all transform active:scale-95 whitespace-nowrap
+                                ${userProfile?.is_locked_add ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 shadow-primary-200 hover:bg-primary-700'}`}
+                        >
+                            <Plus size={18} />
+                            <span className="hidden lg:inline">Thêm khách</span>
+                            <span className="lg:hidden">Thêm</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 

@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { Send, MoreVertical, Smile, Trash2 } from 'lucide-react';
+import { Send, MoreVertical, Smile } from 'lucide-react';
+import UserInfoModal from './UserInfoModal';
+import ChannelMembersModal from './ChannelMembersModal';
+import ChatMessageList from './ChatMessageList';
 import { supabase } from '../../supabaseClient';
 
 interface ChatWindowProps {
@@ -11,7 +14,7 @@ interface ChatWindowProps {
 const COMMON_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '🔥', '👋', '🤝', '✅', '❌', '🚗', '⚡', '😃', '😊', '😐', '🆗'];
 
 const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
-    const { activeChannel, messages, sendMessage, onlineUsers, bannedUntil, banUser, deleteMessage, clearHistory } = useChat();
+    const { activeChannel, messages, sendMessage, onlineUsers, bannedUntil, banUser, deleteMessage, clearHistory, createDM, channels, setActiveChannel, refreshChannels } = useChat();
     const { userProfile } = useAuth();
 
     // Check if banned
@@ -30,6 +33,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
     const [banLoading, setBanLoading] = useState(false);
     const [banTarget, setBanTarget] = useState<any | null>(null);
 
+    // Team Members Modal State
+    const [showMembersModal, setShowMembersModal] = useState(false);
+    const [viewMember, setViewMember] = useState<any | null>(null);
+    const [members, setMembers] = useState<any[]>([]);
+    const [membersLoading, setMembersLoading] = useState(false);
+
+    // State to track where the user details were opened from: 'list' | 'chat'
+    const [viewMemberSource, setViewMemberSource] = useState<'list' | 'chat'>('list');
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const scrollToBottom = () => {
@@ -39,6 +51,49 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
     useEffect(() => {
         scrollToBottom();
     }, [messages, activeChannel]);
+
+    const fetchMembers = async () => {
+        if (!activeChannel) return;
+        if (activeChannel.type !== 'team' && activeChannel.type !== 'global') {
+            setMembers([]);
+            return;
+        }
+
+        setMembersLoading(true);
+        try {
+            let data: any[] = [];
+            if (activeChannel.type === 'global') {
+                const { data: profiles } = await supabase
+                    .from('profiles')
+                    .select('id, full_name, avatar_url, last_seen_at, role')
+                    .order('full_name');
+                if (profiles) data = profiles;
+            } else if (activeChannel.type === 'team') {
+                const { data: memberData } = await supabase
+                    .from('chat_members')
+                    .select('user_id')
+                    .eq('channel_id', activeChannel.id);
+                const memberIds = memberData?.map(m => m.user_id) || [];
+                if (memberIds.length > 0) {
+                    const { data: profiles } = await supabase
+                        .from('profiles')
+                        .select('id, full_name, avatar_url, last_seen_at, role')
+                        .in('id', memberIds)
+                        .order('full_name');
+                    if (profiles) data = profiles;
+                }
+            }
+            setMembers(data);
+        } catch (error) {
+            console.error("Error fetching members:", error);
+        } finally {
+            setMembersLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchMembers();
+    }, [activeChannel]);
 
     // Cleanup Ban State on Modal Close
     useEffect(() => {
@@ -52,29 +107,25 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
     // Search Effect for Ban User
     useEffect(() => {
         const searchTimeout = setTimeout(async () => {
-            if (showBanModal) { // Always fetch initially to show something? Or only on type?
-                // Fetch profiles
+            if (showBanModal) {
                 setBanLoading(true);
                 let query = supabase.from('profiles').select('id, full_name, avatar_url').neq('id', userProfile?.id || '');
 
                 if (banSearchTerm.trim()) {
                     query = query.ilike('full_name', `%${banSearchTerm}%`);
                 } else {
-                    query = query.limit(10); // Show recent 10 if no search
+                    query = query.limit(10);
                 }
 
                 let validUserIds: string[] | null = null;
 
-                // Step 1: Filter by Team Channel Members & Managed Users
                 if (activeChannel?.type === 'team') {
-                    // Get Chat Members
                     const { data: members } = await supabase
                         .from('chat_members')
                         .select('user_id')
                         .eq('channel_id', activeChannel.id);
                     const memberIds = members?.map(m => m.user_id) || [];
 
-                    // IF Mod, also get my employees (Profiles I manage)
                     let employeeIds: string[] = [];
                     if (userProfile?.role === 'mod') {
                         const { data: employees } = await supabase
@@ -84,20 +135,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
                         if (employees) employeeIds = employees.map(e => e.id);
                     }
 
-                    // Combine unique IDs
                     validUserIds = Array.from(new Set([...memberIds, ...employeeIds]));
                 }
 
-                // Apply ID Filter
                 if (validUserIds && validUserIds.length > 0) {
                     query = query.in('id', validUserIds);
                 } else if (activeChannel?.type === 'team' && userProfile?.role !== 'admin') {
-                    // If non-admin in team channel finds nobody/null, force return empty to be safe
-                    // (Logic: validUserIds initialized null. If entered team block, it becomes array. 
-                    // If array empty -> query.in('id', []) -> returns nothing. Correct.)
-                    // But if validUserIds is empty array, 'in' empty array throws or returns all? 
-                    // Supabase .in with empty array usually returns error or all? 
-                    // Let's force a impossible ID if empty
                     if (validUserIds && validUserIds.length === 0) query = query.eq('id', '00000000-0000-0000-0000-000000000000');
                 }
 
@@ -111,7 +154,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
 
         return () => clearTimeout(searchTimeout);
     }, [banSearchTerm, showBanModal, activeChannel, userProfile?.id]);
-
 
     const handleSend = async (e?: React.FormEvent) => {
         e?.preventDefault();
@@ -141,7 +183,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
         if (activeChannel.type === 'global') return 'Toàn bộ công ty';
         if (activeChannel.type === 'team') return 'Thành viên';
 
-        // DM Logic
         const meta = activeChannel as any;
         if (meta.otherUserId) {
             if (onlineUsers.has(meta.otherUserId)) return 'Đang hoạt động';
@@ -184,7 +225,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
         <div className="flex flex-col h-full bg-white relative">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200 bg-white">
-                <div className="flex items-center gap-3">
+                <div
+                    className={`flex items-center gap-3 ${(activeChannel.type === 'team' || activeChannel.type === 'global') ? 'cursor-pointer hover:bg-gray-50 p-2 -ml-2 rounded-lg transition-colors group' : ''}`}
+                    onClick={() => {
+                        if (activeChannel.type === 'team' || activeChannel.type === 'global') setShowMembersModal(true);
+                    }}
+                    title={(activeChannel.type === 'team' || activeChannel.type === 'global') ? "Click để xem danh sách thành viên" : ""}
+                >
                     {onBackMobile && (
                         <button onClick={onBackMobile} className="md:hidden text-gray-500">
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
@@ -268,7 +315,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
                         <p className="text-sm text-gray-500 mb-4">Tìm và chọn thành viên để cấm chat.</p>
 
                         <div className="mb-4 space-y-3">
-                            {/* Search Input */}
                             <input
                                 type="text"
                                 className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
@@ -277,7 +323,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
                                 onChange={(e) => setBanSearchTerm(e.target.value)}
                             />
 
-                            {/* User List Area */}
                             <div className="h-40 overflow-y-auto border rounded-lg bg-gray-50 p-2 space-y-1">
                                 {banLoading ? (
                                     <div className="text-center text-xs text-gray-400 py-2">Đang tìm...</div>
@@ -304,7 +349,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
                             </div>
                         </div>
 
-                        {/* Selected User Info */}
                         {banTarget && (
                             <div className="mb-4 p-2 bg-red-50 text-red-700 text-xs rounded border border-red-100">
                                 Đang chọn: <strong>{banTarget.full_name}</strong>
@@ -334,81 +378,112 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
                 </div>
             )}
 
+            {/* Members List Modal */}
+            <ChannelMembersModal
+                isOpen={showMembersModal}
+                onClose={() => setShowMembersModal(false)}
+                channelId={activeChannel ? activeChannel.id : ''}
+                channelType={activeChannel ? activeChannel.type : 'dm'}
+                members={members}
+                loading={membersLoading}
+                onMembersUpdated={fetchMembers}
+                onMemberClick={(member) => {
+                    setViewMember(member);
+                    setViewMemberSource('list');
+                    setShowMembersModal(false); // Close List -> Open Detail (Swap)
+                }}
+                onLeaveChannel={async () => {
+                    if (!activeChannel || !userProfile) return;
 
+                    try {
+                        try {
+                            await supabase
+                                .from('chat_messages')
+                                .insert({
+                                    channel_id: activeChannel.id,
+                                    sender_id: userProfile.id,
+                                    content: `${userProfile.full_name || 'Một thành viên'} đã rời khỏi nhóm chat !`,
+                                    is_system: true
+                                });
+                        } catch (msgError) {
+                            console.error("Failed to send leave message:", msgError);
+                        }
+
+                        const { error } = await supabase
+                            .from('chat_members')
+                            .delete()
+                            .eq('channel_id', activeChannel.id)
+                            .eq('user_id', userProfile.id);
+
+                        if (error) throw error;
+
+                        setShowMembersModal(false);
+                        setActiveChannel(null);
+                        await refreshChannels();
+
+                    } catch (err) {
+                        console.error("Error leaving group:", err);
+                        alert("Lỗi: Không thể rời nhóm.");
+                    }
+                }}
+            />
+
+            {/* User Info Popup (Stacked on top) */}
+            {viewMember && (
+                <UserInfoModal
+                    userId={viewMember.id}
+                    initialUser={viewMember}
+                    onClose={() => {
+                        setViewMember(null);
+                        if (viewMemberSource === 'list') {
+                            setShowMembersModal(true); // Close Detail -> Restore List only if came from list
+                        }
+                    }}
+                    onMessage={async (targetId) => {
+                        try {
+                            setViewMember(null);
+                            setShowMembersModal(false);
+
+                            const newChannelId = await createDM(targetId);
+
+                            const exisiting = channels.find(c => c.id === newChannelId);
+                            if (exisiting) {
+                                setActiveChannel(exisiting);
+                            } else {
+                                setTimeout(() => {
+                                    // Handle switch
+                                }, 500);
+                            }
+
+                            const { data: chan } = await supabase.from('chat_channels').select('*').eq('id', newChannelId).single();
+                            if (chan) {
+                                setActiveChannel({
+                                    ...chan,
+                                    unread_count: 0,
+                                });
+                            }
+
+                        } catch (error) {
+                            console.error("Failed to start chat", error);
+                        }
+                    }}
+                />
+            )}
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50" onClick={() => setOpenMenuId(null)}>
-                {messages.map((msg, index) => {
-                    const isMe = msg.sender_id === userProfile?.id;
-                    const showAvatar = index === 0 || messages[index - 1].sender_id !== msg.sender_id;
-
-                    return (
-                        <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
-                            {/* Avatar */}
-                            <div className="w-8 flex-shrink-0">
-                                {!isMe && showAvatar && (
-                                    <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-xs font-semibold text-gray-600 overflow-hidden" title={msg.sender?.full_name}>
-                                        {msg.sender?.avatar_url ? (
-                                            <img src={msg.sender.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
-                                        ) : (
-                                            msg.sender?.full_name?.charAt(0).toUpperCase() || '?'
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Bubble */}
-                            <div className={`max-w-[70%] group relative`}>
-                                {!isMe && showAvatar && (
-                                    <div className="text-xs text-gray-500 ml-1 mb-1">{msg.sender?.full_name}</div>
-                                )}
-                                <div className={`px-4 py-2 rounded-2xl shadow-sm text-sm break-words whitespace-pre-wrap ${isMe
-                                    ? 'bg-blue-600 text-white rounded-br-none'
-                                    : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'
-                                    }`}>
-                                    {msg.content}
-                                </div>
-                                <div className={`text-[10px] text-gray-400 mt-1 flex items-center gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                    <span>{new Date(msg.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' + new Date(msg.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}</span>
-
-                                    {/* Delete Button (Dropdown or Icon) */}
-                                    {/* Delete Button (Dropdown or Icon) */}
-                                    {(isMe || userProfile?.role === 'admin' || (userProfile?.role === 'mod' && activeChannel.type === 'team')) && (
-                                        <div className="relative">
-                                            <button
-                                                className="p-1 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setOpenMenuId(openMenuId === msg.id ? null : msg.id);
-                                                }}
-                                            >
-                                                <MoreVertical className="w-4 h-4" />
-                                            </button>
-
-                                            {openMenuId === msg.id && (
-                                                <div className="absolute bottom-full mb-1 right-0 bg-white shadow-lg border rounded-lg overflow-hidden z-20 min-w-[120px]">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            deleteMessage(msg.id);
-                                                            setOpenMenuId(null);
-                                                        }}
-                                                        className="w-full text-left px-4 py-2 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                                    >
-                                                        <Trash2 className="w-3 h-3" />
-                                                        {isMe ? "Thu hồi" : "Xóa tin nhắn"}
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    );
-                })}
-                <div ref={messagesEndRef} />
-            </div>
+            <ChatMessageList
+                messages={messages}
+                userProfile={userProfile}
+                activeChannel={activeChannel}
+                deleteMessage={deleteMessage}
+                openMenuId={openMenuId}
+                setOpenMenuId={setOpenMenuId}
+                bottomRef={messagesEndRef}
+                onAvatarClick={(user) => {
+                    setViewMember(user);
+                    setViewMemberSource('chat');
+                }}
+            />
 
             {/* Input */}
             <div className="p-4 bg-white border-t border-gray-200 relative">

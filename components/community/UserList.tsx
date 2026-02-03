@@ -21,7 +21,7 @@ const UserList: React.FC<UserListProps> = ({ onSelectUser }) => {
             setLoading(true);
             const { data, error } = await supabase
                 .from('profiles')
-                .select('id, full_name, avatar_url, last_seen_at')
+                .select('id, full_name, avatar_url, last_seen_at, dealership_name')
                 .neq('id', userProfile?.id || '')
                 .order('full_name');
 
@@ -34,7 +34,8 @@ const UserList: React.FC<UserListProps> = ({ onSelectUser }) => {
     }, [userProfile?.id]);
 
     const filteredUsers = users.filter(u =>
-        u.full_name?.toLowerCase().includes(searchTerm.toLowerCase())
+        u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        u.dealership_name?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     const formatLastSeen = (dateStr: string | null) => {
@@ -58,15 +59,15 @@ const UserList: React.FC<UserListProps> = ({ onSelectUser }) => {
         }
     };
 
-    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+    const [selectedUser, setSelectedUser] = useState<any | null>(null);
 
-    const handleUserClick = (userId: string) => {
-        setSelectedUserId(userId);
+    const handleUserClick = (user: any) => {
+        setSelectedUser(user);
     };
 
     const handleStartChat = (userId: string) => {
         onSelectUser(userId);
-        setSelectedUserId(null);
+        setSelectedUser(null);
     };
 
     return (
@@ -95,7 +96,7 @@ const UserList: React.FC<UserListProps> = ({ onSelectUser }) => {
                         return (
                             <button
                                 key={user.id}
-                                onClick={() => handleUserClick(user.id)}
+                                onClick={() => handleUserClick(user)}
                                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
                             >
                                 <div className="relative">
@@ -122,10 +123,11 @@ const UserList: React.FC<UserListProps> = ({ onSelectUser }) => {
                 )}
             </div>
 
-            {selectedUserId && (
+            {selectedUser && (
                 <UserInfoModal
-                    userId={selectedUserId}
-                    onClose={() => setSelectedUserId(null)}
+                    userId={selectedUser.id}
+                    initialUser={selectedUser}
+                    onClose={() => setSelectedUser(null)}
                     onMessage={handleStartChat}
                 />
             )}

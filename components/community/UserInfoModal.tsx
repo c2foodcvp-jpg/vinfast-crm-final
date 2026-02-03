@@ -5,19 +5,31 @@ import { X, Mail, Phone, Building, Calendar, MessageSquare, Loader2 } from 'luci
 
 interface UserInfoModalProps {
     userId: string | null;
+    initialUser?: any;
     onClose: () => void;
     onMessage: (userId: string) => void;
 }
 
-const UserInfoModal: React.FC<UserInfoModalProps> = ({ userId, onClose, onMessage }) => {
-    const [user, setUser] = useState<any>(null);
-    const [loading, setLoading] = useState(false);
+const UserInfoModal: React.FC<UserInfoModalProps> = ({ userId, initialUser, onClose, onMessage }) => {
+    const [user, setUser] = useState<any>(initialUser || null);
+    const [loading, setLoading] = useState(!initialUser);
 
     useEffect(() => {
         if (!userId) return;
 
-        const fetchUser = async () => {
+        // If we switched users but kept modal open (rare), reset if no initialUser match
+        if (initialUser && initialUser.id !== userId) {
+            setUser(null);
             setLoading(true);
+        } else if (initialUser && initialUser.id === userId && !user) {
+            setUser(initialUser);
+            setLoading(false);
+        }
+
+        const fetchUser = async () => {
+            // If we already have full details (implied by having email/phone), maybe skin fetch?
+            // For now, always fetch fresh data but SILENTLY if we have initialUser
+            if (!initialUser) setLoading(true);
             try {
                 const { data: userData, error: userError } = await supabase
                     .from('profiles')
@@ -28,24 +40,10 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ userId, onClose, onMessag
                 if (userError) throw userError;
 
                 if (userData) {
-                    let finalUser = { ...userData };
+                    // Update user with fresh data, merging with existing to prevent flicker
+                    setUser((prev: any) => ({ ...prev, ...userData }));
 
-                    // Fallback Logic: If no Dealership Name but Manager ID exists
-                    if (!finalUser.dealership_name && finalUser.manager_id) {
-                        const { data: managerData } = await supabase
-                            .from('profiles')
-                            .select('dealership_name')
-                            .eq('id', finalUser.manager_id)
-                            .single();
-
-                        if (managerData && managerData.dealership_name) {
-                            finalUser.dealership_name = managerData.dealership_name;
-                            // Auto-heal the data
-                            supabase.from('profiles').update({ dealership_name: managerData.dealership_name }).eq('id', userId).then();
-                        }
-                    }
-
-                    setUser(finalUser);
+                    // Removed client-side auto-healing to improve performance
                 }
             } catch (error) {
                 console.error("Error fetching user info:", error);
@@ -60,7 +58,7 @@ const UserInfoModal: React.FC<UserInfoModalProps> = ({ userId, onClose, onMessag
     if (!userId) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" onClick={onClose}>
             <div
                 className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100 relative"
                 onClick={e => e.stopPropagation()}

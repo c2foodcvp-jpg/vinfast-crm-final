@@ -77,6 +77,7 @@ export interface QuoteConfig {
   // New Fields
   target_type?: 'invoice' | 'rolling'; // 'invoice' = Trừ vào giá xe (XHĐ), 'rolling' = Trừ vào lăn bánh
   apply_to_version_ids?: string[]; // Áp dụng cho phiên bản cụ thể (null/empty = all versions of selected model)
+  is_default?: boolean; // Default selection state
 
   // NEW: Options for Fees (e.g., HCM vs Tinh) OR VinPoint mapping
   options?: QuoteConfigOption[];

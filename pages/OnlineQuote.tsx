@@ -271,7 +271,7 @@ const OnlineQuote: React.FC = () => {
     const isPlatinumOrHigher =
         userProfile?.member_tier === MembershipTier.PLATINUM ||
         userProfile?.member_tier === MembershipTier.DIAMOND ||
-        userProfile?.role === 'admin' || userProfile?.role === 'moderator'; // Allow Admin/Mod
+        userProfile?.role === UserRole.ADMIN || userProfile?.role === UserRole.MOD; // Allow Admin/Mod
 
     // --- UI HANDLERS ---
     const handleEmailButtonClick = () => {
@@ -470,7 +470,9 @@ const OnlineQuote: React.FC = () => {
                 }
                 return modelMatch && versionMatch;
             });
-            setAppliedPromos(validPromos.map(p => p.id));
+            // Only select those with is_default !== false (Default is true)
+            const defaultSelected = validPromos.filter(p => p.is_default !== false);
+            setAppliedPromos(defaultSelected.map(p => p.id));
         }
     }, [selectedModelId, selectedVersionId, promotions]);
 

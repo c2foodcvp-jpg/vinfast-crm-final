@@ -14,7 +14,7 @@ import { UserRole } from '../types';
 import NewCustomerNotification from './NewCustomerNotification';
 import VersionChecker from './VersionChecker';
 import { useTheme } from '../contexts/ThemeContext';
-import ApprovalBadge from './ApprovalBadge';
+
 import UserStatusIndicator from './UserStatusIndicator';
 
 interface NavItemDef {
@@ -48,8 +48,67 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     // Definition of all possible menu items
     const MENU_DEFINITIONS: NavItemDef[] = useMemo(() => [
         { key: 'dashboard', icon: LayoutDashboard, label: 'Tổng quan', path: '/' },
-        { key: 'calendar', icon: Calendar, label: 'Lịch làm việc', path: '/calendar' },
-        { key: 'community', icon: MessageCircle, label: 'Cộng đồng', path: '/community' },
+        {
+            key: 'calendar',
+            icon: Calendar,
+            label: 'Lịch làm việc',
+            path: '/calendar',
+            countFetcher: async () => {
+                if (!userProfile) return 0;
+                const todayStr = new Date().toISOString().split('T')[0];
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+                try {
+                    // 1. Personal Tasks (Due today or overdue)
+                    const { count: tCount } = await supabase.from('user_tasks')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('user_id', userProfile.id)
+                        .eq('is_completed', false)
+                        .lt('deadline', tomorrowStr); // deadline < tomorrow 00:00 (meaning <= today 23:59)
+
+                    // 2. Customers requiring care
+                    let profileIds: string[] = [userProfile.id];
+
+                    // Mod & not in Consultant Mode -> Fetch Team
+                    if (userProfile.role === UserRole.MOD && !userProfile.is_consultant_mode) {
+                        const { data: team } = await supabase.from('profiles').select('id').or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
+                        if (team) profileIds = team.map(t => t.id);
+                    }
+
+                    let q = supabase.from('customers').select('*', { count: 'exact', head: true });
+
+                    // Scope
+                    if (userProfile.role !== UserRole.ADMIN) {
+                        q = q.in('creator_id', profileIds);
+                    }
+
+                    // Status not WON/LOST
+                    q = q.neq('status', 'Chốt đơn').neq('status', 'Đã hủy');
+
+                    // Filter Conditions (Match Calendar.tsx logic)
+                    // - Special Care (Always)
+                    // - Regular (Due <= Today)
+                    // - Long Term (Due == Today)
+                    const orConditions = [
+                        `is_special_care.eq.true`,
+                        `and(recare_date.lte.${todayStr},is_long_term.eq.false,is_special_care.eq.false)`,
+                        `and(recare_date.eq.${todayStr},is_long_term.eq.true)`
+                    ].join(',');
+
+                    q = q.or(orConditions);
+
+                    const { count: cCount } = await q;
+
+                    return (tCount || 0) + (cCount || 0);
+                } catch (e) {
+                    console.error("Error fetching calendar badge", e);
+                    return 0;
+                }
+            }
+        },
+
         { key: 'quote', icon: Calculator, label: 'Báo giá Online', path: '/quote' },
         { key: 'analytics', icon: BarChart2, label: 'Phân tích (BI)', path: '/analytics', roleReq: [UserRole.ADMIN, UserRole.MOD] },
         { key: 'customers', icon: Users, label: 'Khách hàng', path: '/customers' },
@@ -275,6 +334,26 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                     </div>
                 </div>
 
+                <div className="px-4 py-2">
+                    <Link to="/community" onClick={() => setIsSidebarOpen(false)} className="group relative overflow-hidden flex items-center gap-3 p-3 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 bg-gradient-to-br from-indigo-50/80 to-purple-50/50 dark:from-indigo-900/20 dark:to-purple-900/20 hover:shadow-md hover:border-indigo-200 dark:hover:border-indigo-800 transition-all duration-300">
+                        <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <div className="h-10 w-10 rounded-xl bg-white dark:bg-slate-800 shadow-sm flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform duration-300">
+                            <div className="relative">
+                                <MessageCircle size={20} className="fill-indigo-100 dark:fill-indigo-900/50" />
+                                <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div className="flex-1 min-w-0 z-10">
+                            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm group-hover:text-indigo-700 dark:group-hover:text-indigo-300 transition-colors">Cộng đồng</h3>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate font-medium">Thảo luận & Trao đổi</p>
+                        </div>
+                        <ChevronRight size={16} className="text-slate-300 dark:text-slate-600 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" />
+                    </Link>
+                </div>
+
                 <div className="px-4 py-2 flex-1 overflow-y-auto custom-scrollbar">
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">Menu chính</p>
                     <nav className="space-y-1">
@@ -396,6 +475,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
             {/* New Customer Notification Popup for Employees */}
             <NewCustomerNotification />
+
+            {/* Mobile: Floating Chat Bubble */}
+
 
             {/* Auto Update Checker */}
             <VersionChecker />

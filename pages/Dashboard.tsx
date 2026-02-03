@@ -97,6 +97,9 @@ const Dashboard: React.FC = () => {
                         // If my manager is the target team leader
                         if (userProfile?.manager_id === n.target_team_id) return true;
                     }
+                    if (n.target_scope === 'specific') {
+                        return n.target_user_ids && n.target_user_ids.includes(userProfile.id);
+                    }
                     return false;
                 });
                 setSystemNotifications(visible);
@@ -453,7 +456,7 @@ const Dashboard: React.FC = () => {
                             {displayNotifCount > 0 && (<span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white animate-pulse">{displayNotifCount > 9 ? '9+' : displayNotifCount}</span>)}
                         </button>
                         {isNotiOpen && (
-                            <div className="absolute right-[-60px] sm:right-0 top-full mt-2 w-[85vw] sm:w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-[60] overflow-hidden animate-fade-in origin-top-right ring-1 ring-black/5">
+                            <div className="absolute right-0 top-full mt-2 w-[85vw] sm:w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-[60] overflow-hidden animate-fade-in origin-top-right ring-1 ring-black/5">
                                 <div className="p-4 border-b border-gray-50 bg-gray-50/50"><h4 className="font-bold text-gray-800 flex items-center gap-2"><BellRing size={16} className="text-primary-600" /> Thông báo</h4></div>
                                 <div className="max-h-[300px] overflow-y-auto">
                                     {displayNotifCount === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Không có thông báo mới.</div> : (

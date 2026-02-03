@@ -11,8 +11,9 @@ interface SystemNotification {
     title: string;
     content: string;
     sender_id: string;
-    target_scope: 'all' | 'team';
+    target_scope: 'all' | 'team' | 'specific';
     target_team_id?: string;
+    target_user_ids?: string[];
     sender_name: string;
     created_at: string;
     is_active: boolean;
@@ -34,7 +35,12 @@ const SystemNotificationSender: React.FC = () => {
     const { userProfile, isAdmin, isMod } = useAuth();
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
-    const [targetScope, setTargetScope] = useState<'all' | 'team'>('team');
+    const [targetScope, setTargetScope] = useState<'all' | 'team' | 'specific'>('team');
+
+    // Specific Targeting State
+    const [availableUsers, setAvailableUsers] = useState<any[]>([]);
+    const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+    const [loadingUsers, setLoadingUsers] = useState(false);
 
     // New Options
     const [isPopup, setIsPopup] = useState(true);
@@ -87,6 +93,55 @@ const SystemNotificationSender: React.FC = () => {
         }
     };
 
+    useEffect(() => {
+        if (targetScope === 'specific') {
+            fetchAvailableUsers();
+        }
+    }, [targetScope]);
+
+    const fetchAvailableUsers = async () => {
+        setLoadingUsers(true);
+        try {
+            // Fetch potential targets
+            let query = supabase
+                .from('profiles')
+                .select('id, full_name, email, avatar_url, role')
+                .eq('status', 'active')
+                .order('full_name');
+
+            if (!isAdmin && isMod) {
+                // Mod sees: Themselves + Direct Reports
+                query = query.or(`id.eq.${userProfile.id},manager_id.eq.${userProfile.id}`);
+            }
+
+            const { data, error } = await query;
+            if (error) throw error;
+            setAvailableUsers(data || []);
+        } catch (err) {
+            console.error("Error fetching users:", err);
+        } finally {
+            setLoadingUsers(false);
+        }
+    };
+
+    const toggleUserSelection = (userId: string) => {
+        const newSet = new Set(selectedUserIds);
+        if (newSet.has(userId)) {
+            newSet.delete(userId);
+        } else {
+            newSet.add(userId);
+        }
+        setSelectedUserIds(newSet);
+    };
+
+    const selectAllUsers = () => {
+        if (selectedUserIds.size === availableUsers.length) {
+            setSelectedUserIds(new Set());
+        } else {
+            setSelectedUserIds(new Set(availableUsers.map(u => u.id)));
+        }
+    };
+
     const handleSend = async () => {
         // Strip HTML tags to check if empty content
         const strippedContent = content.replace(/<[^>]+>/g, '').trim();
@@ -97,6 +152,11 @@ const SystemNotificationSender: React.FC = () => {
 
         if (!isPopup && !isDashboard) {
             alert("Vui lòng chọn ít nhất một hình thức hiển thị (Popup hoặc Dashboard).");
+            return;
+        }
+
+        if (targetScope === 'specific' && selectedUserIds.size === 0) {
+            alert("Vui lòng chọn ít nhất một nhân viên để gửi thông báo.");
             return;
         }
 
@@ -140,6 +200,7 @@ const SystemNotificationSender: React.FC = () => {
                 sender_id: userProfile.id,
                 target_scope: finalScope,
                 target_team_id: finalTeamId,
+                target_user_ids: finalScope === 'specific' ? Array.from(selectedUserIds) : null,
                 sender_name: userProfile.full_name,
                 is_active: true,
                 display_type: displayType,
@@ -151,6 +212,9 @@ const SystemNotificationSender: React.FC = () => {
             setSuccessMsg('Đã gửi thông báo thành công!');
             setTitle('');
             setContent('');
+            // Reset selection but keep scope if specific? Or reset to Team/All?
+            // Keep scope logic simple
+            setSelectedUserIds(new Set());
             setIsPopup(true);
             setIsDashboard(false);
             setDurationDays(1);
@@ -250,30 +314,80 @@ const SystemNotificationSender: React.FC = () => {
                 </h3>
 
                 <div className="space-y-4">
-                    {/* Scope Selection */}
-                    {isAdmin && (
-                        <div className="flex bg-gray-100 p-1 rounded-xl w-fit">
-                            <button
-                                onClick={() => setTargetScope('all')}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${targetScope === 'all' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:bg-gray-200'}`}
-                            >
-                                <Users size={16} /> Toàn hệ thống
-                            </button>
+
+                    {/* Scope Selection UI - Enhanced */}
+                    <div className="flex flex-col gap-3">
+                        <label className="block text-sm font-bold text-gray-700">Phạm vi gửi</label>
+                        <div className="flex flex-wrap gap-2">
+                            {isAdmin && (
+                                <button
+                                    onClick={() => setTargetScope('all')}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all border ${targetScope === 'all' ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+                                >
+                                    <Users size={16} /> Toàn hệ thống
+                                </button>
+                            )}
+
                             <button
                                 onClick={() => setTargetScope('team')}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${targetScope === 'team' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:bg-gray-200'}`}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all border ${targetScope === 'team' ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
                             >
-                                <UserCog size={16} /> Team của tôi
+                                <UserCog size={16} /> {isAdmin ? "Team của tôi (Admin)" : `Team ${userProfile.full_name}`}
+                            </button>
+
+                            <button
+                                onClick={() => setTargetScope('specific')}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all border ${targetScope === 'specific' ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+                            >
+                                <Users size={16} /> Chọn nhân viên cụ thể
                             </button>
                         </div>
-                    )}
 
-                    {isMod && !isAdmin && (
-                        <div className="bg-blue-50 text-blue-700 text-xs font-bold px-3 py-2 rounded-lg inline-flex items-center gap-2">
-                            <Users size={14} />
-                            Phạm vi: Thành viên Team {userProfile.full_name}
-                        </div>
-                    )}
+                        {/* Specific User Selection Area */}
+                        {targetScope === 'specific' && (
+                            <div className="mt-2 border border-gray-200 rounded-xl overflow-hidden animate-fade-in">
+                                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200 flex justify-between items-center">
+                                    <span className="text-xs font-bold text-gray-500 uppercase">Danh sách nhân viên ({availableUsers.length})</span>
+                                    <button
+                                        onClick={selectAllUsers}
+                                        className="text-xs text-blue-600 font-bold hover:underline"
+                                    >
+                                        {selectedUserIds.size === availableUsers.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                                    </button>
+                                </div>
+                                <div className="max-h-[200px] overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 bg-gray-50/50">
+                                    {loadingUsers ? (
+                                        <div className="col-span-full py-8 flex justify-center text-gray-400">
+                                            <Loader2 className="animate-spin" />
+                                        </div>
+                                    ) : availableUsers.length === 0 ? (
+                                        <div className="col-span-full py-4 text-center text-gray-400 text-sm">Không tìm thấy nhân viên nào.</div>
+                                    ) : (
+                                        availableUsers.map(u => (
+                                            <label key={u.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${selectedUserIds.has(u.id) ? 'bg-blue-50 border-blue-200 shadow-sm' : 'bg-white border-gray-100 hover:border-blue-100'}`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedUserIds.has(u.id)}
+                                                    onChange={() => toggleUserSelection(u.id)}
+                                                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                                />
+                                                <div className="w-8 h-8 rounded-full bg-gray-200 overflow-hidden shrink-0">
+                                                    {u.avatar_url ? <img src={u.avatar_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-gray-500">{u.full_name.charAt(0)}</div>}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-bold text-gray-900 truncate">{u.full_name}</p>
+                                                    <p className="text-[10px] text-gray-500 truncate">{u.email}</p>
+                                                </div>
+                                            </label>
+                                        ))
+                                    )}
+                                </div>
+                                <div className="bg-white px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex justify-end">
+                                    Đã chọn: <span className="font-bold text-blue-600 ml-1">{selectedUserIds.size}</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
                     <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1">Tiêu đề</label>
@@ -391,8 +505,10 @@ const SystemNotificationSender: React.FC = () => {
                                             <div className="flex flex-col gap-1 items-start">
                                                 {notif.target_scope === 'all' ? (
                                                     <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded">Toàn hệ thống</span>
-                                                ) : (
+                                                ) : notif.target_scope === 'team' ? (
                                                     <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded">Team</span>
+                                                ) : (
+                                                    <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded">Cụ thể ({/* @ts-ignore */ notif.target_user_ids?.length || 0})</span>
                                                 )}
                                                 {/* @ts-ignore */}
                                                 {(notif.display_type === 'dashboard' || notif.display_type === 'both') && (
@@ -442,75 +558,77 @@ const SystemNotificationSender: React.FC = () => {
             </div>
 
             {/* View Readers Modal */}
-            {viewingNotifId && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 animate-fade-in">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
-                        <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                            <div>
-                                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                    <Eye className="text-blue-600" size={20} />
-                                    Người đã xem thông báo
-                                </h3>
-                                <p className="text-xs text-gray-500 mt-1">Danh sách nhân viên đã xác nhận đọc (Popup).</p>
+            {
+                viewingNotifId && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 animate-fade-in">
+                        <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
+                            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                                <div>
+                                    <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                        <Eye className="text-blue-600" size={20} />
+                                        Người đã xem thông báo
+                                    </h3>
+                                    <p className="text-xs text-gray-500 mt-1">Danh sách nhân viên đã xác nhận đọc (Popup).</p>
+                                </div>
+                                <button onClick={() => setViewingNotifId(null)} className="text-gray-400 hover:text-gray-600 p-2 bg-white rounded-full shadow-sm hover:shadow transition-all">
+                                    <X size={20} />
+                                </button>
                             </div>
-                            <button onClick={() => setViewingNotifId(null)} className="text-gray-400 hover:text-gray-600 p-2 bg-white rounded-full shadow-sm hover:shadow transition-all">
-                                <X size={20} />
-                            </button>
-                        </div>
 
-                        <div className="flex-1 overflow-y-auto p-4">
-                            {isLoadingReaders ? (
-                                <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400">
-                                    <Loader2 className="animate-spin text-blue-500" size={32} />
-                                    <span>Đang tải danh sách...</span>
-                                </div>
-                            ) : readers.length === 0 ? (
-                                <div className="text-center py-12 text-gray-400 bg-gray-50 rounded-xl border border-gray-100 border-dashed">
-                                    <p className="font-medium">Chưa có ai xem thông báo này.</p>
-                                    <p className="text-xs mt-1">Lưu ý: Chỉ tính lượt xem qua Popup (Bấm "Đồng ý").</p>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    {readers.map((reader) => (
-                                        <div key={reader.id} className="flex items-center gap-3 p-3 bg-white border border-gray-100 rounded-xl hover:shadow-md hover:border-blue-200 transition-all">
-                                            <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold shrink-0 overflow-hidden">
-                                                {reader.avatar ? (
-                                                    <img src={reader.avatar} alt={reader.name} className="w-full h-full object-cover" />
-                                                ) : (
-                                                    reader.name.charAt(0)
-                                                )}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <h4 className="text-sm font-bold text-gray-900 truncate">{reader.name}</h4>
-                                                <p className="text-xs text-gray-500 truncate">{reader.email}</p>
-                                                <div className="flex items-center gap-1 mt-1">
-                                                    <CheckCircle2 size={12} className="text-green-500" />
-                                                    <span className="text-[10px] text-gray-400">
-                                                        Đã xem: {new Date(reader.viewedAt).toLocaleString('vi-VN')}
-                                                    </span>
+                            <div className="flex-1 overflow-y-auto p-4">
+                                {isLoadingReaders ? (
+                                    <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400">
+                                        <Loader2 className="animate-spin text-blue-500" size={32} />
+                                        <span>Đang tải danh sách...</span>
+                                    </div>
+                                ) : readers.length === 0 ? (
+                                    <div className="text-center py-12 text-gray-400 bg-gray-50 rounded-xl border border-gray-100 border-dashed">
+                                        <p className="font-medium">Chưa có ai xem thông báo này.</p>
+                                        <p className="text-xs mt-1">Lưu ý: Chỉ tính lượt xem qua Popup (Bấm "Đồng ý").</p>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {readers.map((reader) => (
+                                            <div key={reader.id} className="flex items-center gap-3 p-3 bg-white border border-gray-100 rounded-xl hover:shadow-md hover:border-blue-200 transition-all">
+                                                <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold shrink-0 overflow-hidden">
+                                                    {reader.avatar ? (
+                                                        <img src={reader.avatar} alt={reader.name} className="w-full h-full object-cover" />
+                                                    ) : (
+                                                        reader.name.charAt(0)
+                                                    )}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <h4 className="text-sm font-bold text-gray-900 truncate">{reader.name}</h4>
+                                                    <p className="text-xs text-gray-500 truncate">{reader.email}</p>
+                                                    <div className="flex items-center gap-1 mt-1">
+                                                        <CheckCircle2 size={12} className="text-green-500" />
+                                                        <span className="text-[10px] text-gray-400">
+                                                            Đã xem: {new Date(reader.viewedAt).toLocaleString('vi-VN')}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="p-4 border-t border-gray-100 bg-gray-50 text-right">
-                            <div className="text-xs text-gray-500 italic inline-block mr-4">
-                                Tổng cộng: <span className="font-bold text-gray-900">{readers.length}</span> người đã xem
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                            <button
-                                onClick={() => setViewingNotifId(null)}
-                                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 bg-white"
-                            >
-                                Đóng
-                            </button>
+
+                            <div className="p-4 border-t border-gray-100 bg-gray-50 text-right">
+                                <div className="text-xs text-gray-500 italic inline-block mr-4">
+                                    Tổng cộng: <span className="font-bold text-gray-900">{readers.length}</span> người đã xem
+                                </div>
+                                <button
+                                    onClick={() => setViewingNotifId(null)}
+                                    className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 bg-white"
+                                >
+                                    Đóng
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 };
 

@@ -7,8 +7,9 @@ interface SystemNotification {
     id: string;
     title: string;
     content: string;
-    target_scope: 'all' | 'team';
+    target_scope: 'all' | 'team' | 'specific';
     target_team_id?: string;
+    target_user_ids?: string[];
     created_at: string;
     display_type?: 'popup' | 'dashboard' | 'both';
 }
@@ -55,8 +56,11 @@ const SystemNotificationModal: React.FC = () => {
                     if (n.target_scope === 'all') return true;
                     if (n.target_scope === 'team') {
                         // I see it if I am in the team (my manager is the target id)
-                        // Or if I am the manager myself? (Maybe usually not, but let's exclude sender for now if implied)
-                        return userProfile.manager_id === n.target_team_id;
+                        // Also include if I am the target team leader (the manager themselves)
+                        return userProfile.manager_id === n.target_team_id || userProfile.id === n.target_team_id;
+                    }
+                    if (n.target_scope === 'specific') {
+                        return n.target_user_ids && n.target_user_ids.includes(userProfile.id);
                     }
                     return false;
                 });

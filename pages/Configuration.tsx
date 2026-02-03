@@ -544,6 +544,7 @@ const Configuration: React.FC = () => {
 alter table public.quote_configs drop constraint if exists quote_configs_type_check;
 alter table public.quote_configs add constraint quote_configs_type_check check (type in ('promotion', 'fee', 'gift', 'membership', 'warranty'));
 alter table public.quote_configs add column if not exists gift_ratio numeric default 0;
+alter table public.quote_configs add column if not exists is_default boolean default true;
 
 alter table public.quote_configs add column if not exists target_type text check (target_type in ('invoice', 'rolling')) default 'invoice';
 alter table public.quote_configs add column if not exists apply_to_version_ids text[];
@@ -1147,6 +1148,17 @@ alter table public.chat_channels add column if not exists avatar_url text;
                                             </div>
                                         </div>
                                     )}
+
+                                    {/* Default Checked Toggle */}
+                                    <div className="flex items-center gap-2 mt-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={formData.is_default !== false}
+                                            onChange={e => setFormData({ ...formData, is_default: e.target.checked })}
+                                            className="w-4 h-4 text-primary-600 rounded"
+                                        />
+                                        <label className="text-sm font-medium text-gray-700">Mặc định chọn (Tick sẵn)</label>
+                                    </div>
 
                                     <div className="flex items-center gap-2 mt-2"><input type="checkbox" checked={formData.is_active !== false} onChange={e => setFormData({ ...formData, is_active: e.target.checked })} className="w-4 h-4" /><label className="text-sm">Đang kích hoạt</label></div>
                                 </>
