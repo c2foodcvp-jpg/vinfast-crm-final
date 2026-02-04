@@ -11,11 +11,8 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      strategies: 'injectManifest',
-      srcDir: 'src',
-      filename: 'sw.ts',
       registerType: 'autoUpdate',
-      includeAssets: ['apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
+      includeAssets: ['apple-touch-icon.png'],
       manifest: {
         name: 'VinFast CRM Enterprise',
         short_name: 'VinFast CRM',
@@ -37,7 +34,7 @@ export default defineConfig({
           }
         ]
       },
-      injectManifest: {
+      workbox: {
         maximumFileSizeToCacheInBytes: 5000000
       }
     })

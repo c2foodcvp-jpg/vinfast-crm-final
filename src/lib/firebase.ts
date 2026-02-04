@@ -32,19 +32,9 @@ try {
 export { messaging };
 
 export const requestForToken = async () => {
+    if (!messaging) return null; // Safe exit if init failed
     try {
-        if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null;
-
-        // Use the PWA Service Worker (Vite PWA)
-        // This is critical: We must use the SAME registration for Push to work with the PWA scope.
-        const registration = await navigator.serviceWorker.ready;
-        console.log("✅ Using PWA Service Worker for FCM:", registration.scope);
-
-        const currentToken = await getToken(messaging, {
-            vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
-            serviceWorkerRegistration: registration
-        });
-
+        const currentToken = await getToken(messaging, { vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY });
         if (currentToken) {
             console.log('current token for client: ', currentToken);
             return currentToken;

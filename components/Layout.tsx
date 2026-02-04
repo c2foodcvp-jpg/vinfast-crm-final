@@ -312,7 +312,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                             <img src={menuLogo} alt="Logo" className="w-10 h-10 object-contain rounded-lg" />
                         </div>
                     ) : (
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 flex items-center justify-center text-white font-bold text-2xl shadow-glow mr-3">V</div>
+                        <div className="mr-3 flex items-center justify-center">
+                            <img src="/logo.svg" alt="VinFast Logo" className="w-10 h-10 object-contain" />
+                        </div>
                     )}
                     <div>
                         <h1 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-none">VinFast<span className="text-primary-600">CRM</span></h1>
@@ -482,7 +484,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                         {menuLogo ? (
                             <img src={menuLogo} alt="Logo" className="w-8 h-8 object-contain rounded-lg" />
                         ) : (
-                            <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white font-bold">V</div>
+                            <img src="/logo.svg" alt="VinFast Logo" className="w-8 h-8 object-contain" />
                         )}
                         <span className="font-extrabold text-slate-800 dark:text-white text-lg">VinFast CRM</span>
                     </div>
