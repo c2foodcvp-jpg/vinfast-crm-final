@@ -25,4 +25,5 @@ dist-ssr
 .env
 .env.local
 /google-antigravity-main
+public/firebase-messaging-sw.js
 /.agent

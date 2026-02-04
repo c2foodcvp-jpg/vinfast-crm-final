@@ -7,12 +7,12 @@ importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-comp
 // your app's Firebase config object.
 // https://firebase.google.com/docs/web/setup#config
 const firebaseConfig = {
-    apiKey: "AIzaSyCsYQj9qNn5eCpCPvawiB9SjNRrsNj31GM",
-    authDomain: "vinfast-crm-981ba.firebaseapp.com",
-    projectId: "vinfast-crm-981ba",
-    storageBucket: "vinfast-crm-981ba.firebasestorage.app",
-    messagingSenderId: "79419992202",
-    appId: "1:79419992202:web:086f9b9ccfe615cb09e573"
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_AUTH_DOMAIN",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_STORAGE_BUCKET",
+    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+    appId: "YOUR_APP_ID"
 };
 
 // Retrieve an instance of Firebase Messaging so that it can handle background
