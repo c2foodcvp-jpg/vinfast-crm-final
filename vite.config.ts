@@ -36,6 +36,9 @@ export default defineConfig({
             type: 'image/png'
           }
         ]
+      },
+      injectManifest: {
+        maximumFileSizeToCacheInBytes: 5000000
       }
     })
   ],
