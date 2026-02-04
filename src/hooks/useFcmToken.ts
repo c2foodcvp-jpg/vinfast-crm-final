@@ -36,17 +36,27 @@ const useFcmToken = () => {
     };
 
     const requestPermission = async () => {
-        if (typeof window === 'undefined' || !('Notification' in window)) return;
+        // Check for iOS PWA limitations
+        if (typeof window === 'undefined') return;
+
+        if (!('Notification' in window)) {
+            toast.error("Hệ thống chưa hỗ trợ thông báo trên thiết bị này. Hãy chắc chắn bạn đã 'Thêm vào màn hình chính'.");
+            return;
+        }
 
         try {
             const permission = await Notification.requestPermission();
             setNotificationPermissionStatus(permission);
+
             if (permission === 'granted') {
                 await retrieveToken();
-                toast.success('Đã bật thông báo!');
+                toast.success('Đã bật thông báo thành công!');
+            } else if (permission === 'denied') {
+                toast.error('Bạn đã chặn thông báo. Vui lòng vào Cài đặt -> VinFast CRM -> Bật thông báo.');
             }
         } catch (err) {
             console.error('Error requesting permission:', err);
+            toast.error("Lỗi khi xin quyền: " + String(err));
         }
     };
 
