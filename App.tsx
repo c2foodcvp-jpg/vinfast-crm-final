@@ -65,7 +65,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 import SupportWidget from './components/SupportWidget';
 
 import { PresenceProvider } from './contexts/PresenceContext';
-import useFcmToken from './hooks/useFcmToken';
+import useFcmToken from './src/hooks/useFcmToken';
 
 const FcmInit: React.FC = () => {
   useFcmToken();
