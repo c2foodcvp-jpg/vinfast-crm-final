@@ -1,8 +1,236 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Upload, Save, Loader2, Image as ImageIcon, AlertCircle, CheckCircle2, LayoutTemplate, LogIn, RefreshCw, Bell, User } from 'lucide-react';
+import { Upload, Save, Loader2, Image as ImageIcon, AlertCircle, CheckCircle2, LayoutTemplate, LogIn, RefreshCw, Bell, User, Percent, Users } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 type LogoType = 'favicon' | 'login' | 'menu' | 'customer_avatar' | 'email_logo';
+
+// KPI Penalty Rate Configuration Component (Supports Team-Specific Settings)
+const KPIPenaltyConfig: React.FC = () => {
+    const { userProfile, isAdmin, isMod } = useAuth();
+    const [rate, setRate] = useState<string>('3'); // Display as percentage (3 = 3%)
+    const [globalRate, setGlobalRate] = useState<string>('3'); // Global fallback
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+    const [hasTeamSetting, setHasTeamSetting] = useState(false); // Whether team has custom setting
+
+    useEffect(() => {
+        fetchRate();
+    }, [userProfile]);
+
+    const fetchRate = async () => {
+        if (!userProfile) return;
+        try {
+            // 1. Fetch Global Rate first (fallback)
+            const { data: globalData } = await supabase
+                .from('app_settings')
+                .select('value')
+                .eq('key', 'kpi_penalty_rate')
+                .is('manager_id', null)
+                .maybeSingle();
+
+            if (globalData?.value) {
+                const globalPercent = (parseFloat(globalData.value) * 100).toFixed(1);
+                setGlobalRate(globalPercent);
+                setRate(globalPercent); // Default to global
+            }
+
+            // 2. If MOD, also fetch team-specific rate
+            if (isMod && userProfile) {
+                const { data: teamData } = await supabase
+                    .from('app_settings')
+                    .select('value')
+                    .eq('key', 'kpi_penalty_rate')
+                    .eq('manager_id', userProfile.id)
+                    .maybeSingle();
+
+                if (teamData?.value) {
+                    const teamPercent = (parseFloat(teamData.value) * 100).toFixed(1);
+                    setRate(teamPercent);
+                    setHasTeamSetting(true);
+                }
+            }
+        } catch (e) {
+            console.error('Error fetching KPI rate:', e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        const numRate = parseFloat(rate);
+        if (isNaN(numRate) || numRate < 0 || numRate > 100) {
+            setMsg({ type: 'error', text: 'Giá trị không hợp lệ (0-100%)' });
+            return;
+        }
+
+        setSaving(true);
+        setMsg(null);
+        try {
+            const decimalValue = (numRate / 100).toFixed(4);
+
+            if (isMod && userProfile) {
+                // MOD: Delete existing + Insert new for team
+                await supabase
+                    .from('app_settings')
+                    .delete()
+                    .eq('key', 'kpi_penalty_rate')
+                    .eq('manager_id', userProfile.id);
+
+                const { error } = await supabase
+                    .from('app_settings')
+                    .insert({
+                        key: 'kpi_penalty_rate',
+                        value: decimalValue,
+                        description: `Tỉ lệ phạt KPI - Team ${userProfile.full_name}`,
+                        manager_id: userProfile.id,
+                        updated_at: new Date().toISOString(),
+                        updated_by: userProfile.id
+                    });
+                if (error) throw error;
+                setHasTeamSetting(true);
+                setMsg({ type: 'success', text: `Đã lưu tỉ lệ phạt KPI cho Team: ${numRate}%/xe` });
+            } else if (isAdmin) {
+                // Admin: Delete existing global + Insert new
+                await supabase
+                    .from('app_settings')
+                    .delete()
+                    .eq('key', 'kpi_penalty_rate')
+                    .is('manager_id', null);
+
+                const { error } = await supabase
+                    .from('app_settings')
+                    .insert({
+                        key: 'kpi_penalty_rate',
+                        value: decimalValue,
+                        description: 'Tỉ lệ phạt KPI mặc định toàn hệ thống',
+                        manager_id: null,
+                        updated_at: new Date().toISOString(),
+                        updated_by: userProfile?.id
+                    });
+                if (error) throw error;
+                setGlobalRate(rate);
+                setMsg({ type: 'success', text: `Đã lưu tỉ lệ phạt KPI toàn hệ thống: ${numRate}%/xe` });
+            }
+        } catch (e: any) {
+            setMsg({ type: 'error', text: 'Lỗi lưu: ' + e.message });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleResetToGlobal = async () => {
+        if (!isMod || !userProfile) return;
+        setSaving(true);
+        try {
+            // Delete team-specific setting
+            const { error } = await supabase
+                .from('app_settings')
+                .delete()
+                .eq('key', 'kpi_penalty_rate')
+                .eq('manager_id', userProfile.id);
+
+            if (error) throw error;
+            setRate(globalRate);
+            setHasTeamSetting(false);
+            setMsg({ type: 'success', text: 'Đã xóa cấu hình riêng, sử dụng giá trị mặc định toàn hệ thống' });
+        } catch (e: any) {
+            setMsg({ type: 'error', text: 'Lỗi: ' + e.message });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="mt-8 pt-6 border-t border-gray-200 flex items-center gap-2 text-gray-400">
+                <Loader2 className="animate-spin" size={18} /> Đang tải cấu hình KPI...
+            </div>
+        );
+    }
+
+    return (
+        <div className="mt-8 pt-6 border-t border-gray-200">
+            <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <Percent className="text-red-500" /> Cấu hình Phạt KPI
+                {isMod && (
+                    <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full flex items-center gap-1">
+                        <Users size={12} /> Team của bạn
+                    </span>
+                )}
+                {isAdmin && (
+                    <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-bold rounded-full">
+                        Toàn hệ thống
+                    </span>
+                )}
+            </h3>
+
+            <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-5">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex-1">
+                        <p className="font-bold text-gray-900 mb-1">Tỉ lệ phạt KPI mỗi xe thiếu chỉ tiêu</p>
+                        <p className="text-sm text-gray-600">
+                            Khi nhân viên không đạt KPI, mỗi xe thiếu sẽ bị trừ % này vào phần chia lợi nhuận.
+                        </p>
+                        {isMod && (
+                            <p className="text-xs text-blue-600 mt-2 font-medium">
+                                📌 Giá trị mặc định toàn hệ thống: <strong>{globalRate}%/xe</strong>
+                                {hasTeamSetting && ' (Team của bạn đang dùng giá trị riêng)'}
+                            </p>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-3 flex-wrap">
+                        <div className="relative">
+                            <input
+                                type="number"
+                                step="0.1"
+                                min="0"
+                                max="100"
+                                value={rate}
+                                onChange={(e) => setRate(e.target.value)}
+                                className="w-24 px-3 py-2.5 pr-8 border-2 border-red-300 rounded-xl text-center font-bold text-lg text-red-700 focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400"
+                            />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-red-400 font-bold">%</span>
+                        </div>
+                        <span className="text-gray-500 font-medium">/xe</span>
+                        <button
+                            onClick={handleSave}
+                            disabled={saving}
+                            className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-red-200 transition-all"
+                        >
+                            {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                            Lưu
+                        </button>
+                        {isMod && hasTeamSetting && (
+                            <button
+                                onClick={handleResetToGlobal}
+                                disabled={saving}
+                                className="px-4 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-xl font-bold text-sm disabled:opacity-50 transition-all"
+                            >
+                                Dùng mặc định
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {msg && (
+                    <div className={`mt-4 p-3 rounded-xl flex items-center gap-2 text-sm font-medium ${msg.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {msg.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                        {msg.text}
+                    </div>
+                )}
+
+                <div className="mt-4 p-3 bg-white/60 rounded-xl text-xs text-gray-600 border border-red-100">
+                    <strong>💡 Gợi ý:</strong> Tỉ lệ phổ biến là <strong>3%</strong>.
+                    {isMod ? ' Thay đổi này chỉ áp dụng cho Team của bạn.' : ' Thay đổi này áp dụng cho toàn hệ thống (các team chưa có cấu hình riêng).'}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 const SystemSettingsPanel: React.FC = () => {
     const [settings, setSettings] = useState<{
@@ -318,6 +546,9 @@ with check ( bucket_id = 'system-assets' );
                     )}
                 </div>
             </div>
+
+            {/* KPI Penalty Rate Configuration */}
+            <KPIPenaltyConfig />
         </div>
     );
 };

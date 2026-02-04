@@ -467,7 +467,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
-    // Active Channel Effect
+    // Active Channel Effect - Triggers only on ID change
     useEffect(() => {
         if (activeChannel) {
             fetchMessages(activeChannel.id);
@@ -476,7 +476,19 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
             setBannedUntil(null);
         }
-    }, [activeChannel]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeChannel?.id]);
+
+    // Keep activeChannel in sync with channels list (e.g. metadata updates like Avatar)
+    useEffect(() => {
+        if (activeChannel) {
+            const updated = channels.find(c => c.id === activeChannel.id);
+            if (updated && updated !== activeChannel) {
+                setActiveChannel(updated);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [channels]);
 
     // ... (sendMessage, createDM, etc.)
     const sendMessage = async (content: string, channelId: string) => {

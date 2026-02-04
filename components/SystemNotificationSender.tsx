@@ -176,9 +176,13 @@ const SystemNotificationSender: React.FC = () => {
                     finalTeamId = userProfile.id;
                 }
             } else if (isMod) {
-                // Mod logic: Always team, always their own ID
-                finalScope = 'team';
-                finalTeamId = userProfile.id;
+                // Mod logic: Allow specific scope, but enforce team context for history
+                if (targetScope === 'specific') {
+                    finalScope = 'specific';
+                } else {
+                    finalScope = 'team'; // Default to team if not specific (prevents 'all')
+                }
+                finalTeamId = userProfile.id; // Always tag with Mod's ID so it appears in their history filter
             }
 
             // Determine Display Type

@@ -1,10 +1,11 @@
 
-import React, { useEffect, useState } from 'react';
+
+import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
-import { Customer, UserProfile } from '../types';
+import { Customer, UserProfile, LeadEmailPage } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
-    Loader2, CheckSquare, Square, UserPlus, Users, Mail, RefreshCw
+    Loader2, CheckSquare, Square, UserPlus, Users, Mail, RefreshCw, AlertCircle
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -20,6 +21,10 @@ const LeadsQueue: React.FC = () => {
     const [targetRepId, setTargetRepId] = useState<string>('');
     const [isAssigning, setIsAssigning] = useState(false);
 
+    // MOD Page Config State
+    const [modPageConfig, setModPageConfig] = useState<LeadEmailPage | null>(null);
+    const [noPageAssigned, setNoPageAssigned] = useState(false);
+
     useEffect(() => {
         // Admin always has access. MOD needs can_access_leads_queue permission
         const hasAccess = isAdmin || (isMod && userProfile?.can_access_leads_queue);
@@ -33,14 +38,39 @@ const LeadsQueue: React.FC = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            // 1. Fetch Pendings Leads (sales_rep IS NULL or dedicated status)
-            // Assuming 'sales_rep' is text name, usually we check creator_id or a specific flag. 
-            // Better strategy: Check if 'sales_rep' is null OR 'System' OR empty
-            const { data: leadData, error } = await supabase
+            // 0. Fetch MOD's page config (if MOD)
+            let pageConfig: LeadEmailPage | null = null;
+            if (isMod && !isAdmin && userProfile?.id) {
+                const { data: pageData } = await supabase
+                    .from('lead_email_pages')
+                    .select('*')
+                    .eq('mod_id', userProfile.id)
+                    .eq('is_active', true)
+                    .maybeSingle();
+
+                if (pageData) {
+                    pageConfig = pageData as LeadEmailPage;
+                    setModPageConfig(pageConfig);
+                    setNoPageAssigned(false);
+                } else {
+                    setNoPageAssigned(true);
+                    setModPageConfig(null);
+                }
+            }
+
+            // 1. Fetch Pending Leads (sales_rep IS NULL or dedicated status)
+            let leadsQuery = supabase
                 .from('customers')
                 .select('*')
                 .or('sales_rep.is.null,sales_rep.eq.,sales_rep.eq.System,sales_rep.eq.Chưa phân bổ')
                 .order('created_at', { ascending: false });
+
+            // Apply source_filter if MOD has page config with filter
+            if (pageConfig?.source_filter && isMod && !isAdmin) {
+                leadsQuery = leadsQuery.eq('source', pageConfig.source_filter);
+            }
+
+            const { data: leadData, error } = await leadsQuery;
 
             if (error) throw error;
             setLeads(leadData as Customer[]);
@@ -132,13 +162,19 @@ const LeadsQueue: React.FC = () => {
     const [emailScriptUrl, setEmailScriptUrl] = useState<string>('');
 
     useEffect(() => {
-        // Fetch Email Script URL from app_settings
+        // Fetch Email Script URL - use MOD's page config or fallback to global app_settings
         const fetchEmailConfig = async () => {
+            // First check if MOD has page-specific config
+            if (modPageConfig?.email_script_url) {
+                setEmailScriptUrl(modPageConfig.email_script_url);
+                return;
+            }
+            // Fallback to global config (for Admin or if MOD has no page)
             const { data } = await supabase.from('app_settings').select('value').eq('key', 'email_script_url').maybeSingle();
             if (data?.value) setEmailScriptUrl(data.value);
         };
         fetchEmailConfig();
-    }, []);
+    }, [modPageConfig]);
 
     const handleAssign = async () => {
         if (selectedLeadIds.length === 0) return;
@@ -367,8 +403,8 @@ const LeadsQueue: React.FC = () => {
                                 key={lead.id}
                                 onClick={() => toggleSelectOne(lead.id)}
                                 className={`p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedLeadIds.includes(lead.id)
-                                        ? 'bg-purple-50 border-purple-300 shadow-sm ring-1 ring-purple-200'
-                                        : 'bg-white border-gray-200 shadow-sm'
+                                    ? 'bg-purple-50 border-purple-300 shadow-sm ring-1 ring-purple-200'
+                                    : 'bg-white border-gray-200 shadow-sm'
                                     }`}
                             >
                                 <div className="flex items-start gap-3">

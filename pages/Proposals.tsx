@@ -34,6 +34,9 @@ const Proposals: React.FC = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
 
+    // NEW: Dynamic KPI Penalty Rate
+    const [kpiPenaltyRate, setKpiPenaltyRate] = useState<number>(0.03); // Default 3%
+
     useEffect(() => {
         fetchData();
     }, [userProfile]);
@@ -54,6 +57,53 @@ const Proposals: React.FC = () => {
             const { data: profiles } = await supabase.from('profiles').select('*');
             const profilesList = profiles as UserProfile[] || [];
             setAllProfiles(profilesList);
+
+            // Determine manager_id for team context
+            let teamManagerId: string | null = null;
+            if (isMod && userProfile) {
+                teamManagerId = userProfile.id;
+            } else if (userProfile?.manager_id) {
+                teamManagerId = userProfile.manager_id;
+            }
+
+            // Fetch KPI Penalty Rate: Try team-specific first, fallback to global
+            let kpiRate = 0.03; // Default
+
+            if (teamManagerId) {
+                const { data: teamRateSetting } = await supabase
+                    .from('app_settings')
+                    .select('value')
+                    .eq('key', 'kpi_penalty_rate')
+                    .eq('manager_id', teamManagerId)
+                    .maybeSingle();
+
+                if (teamRateSetting?.value) {
+                    kpiRate = parseFloat(teamRateSetting.value) || 0.03;
+                } else {
+                    // Fallback to global rate
+                    const { data: globalRateSetting } = await supabase
+                        .from('app_settings')
+                        .select('value')
+                        .eq('key', 'kpi_penalty_rate')
+                        .is('manager_id', null)
+                        .maybeSingle();
+                    if (globalRateSetting?.value) {
+                        kpiRate = parseFloat(globalRateSetting.value) || 0.03;
+                    }
+                }
+            } else {
+                // No team context, use global
+                const { data: globalRateSetting } = await supabase
+                    .from('app_settings')
+                    .select('value')
+                    .eq('key', 'kpi_penalty_rate')
+                    .is('manager_id', null)
+                    .maybeSingle();
+                if (globalRateSetting?.value) {
+                    kpiRate = parseFloat(globalRateSetting.value) || 0.03;
+                }
+            }
+            setKpiPenaltyRate(kpiRate);
 
             // 2. Determine Viewable User IDs based on Role (Isolation Logic)
             let viewableIds: string[] = [];
@@ -198,7 +248,7 @@ const Proposals: React.FC = () => {
             }).length;
 
             const missedKpi = Math.max(0, kpiTarget - kpiActual);
-            const penaltyPercent = missedKpi * 0.03;
+            const penaltyPercent = missedKpi * kpiPenaltyRate; // Dynamic rate
             const finalShareRatio = Math.max(0, baseRatio * (1 - penaltyPercent));
 
             const userExclusions = profitExclusions.filter(ex => ex.user_id === emp.id).map(ex => ex.customer_id);

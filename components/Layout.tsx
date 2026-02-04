@@ -132,10 +132,28 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                     path: '/leads/queue',
                     roleReq: [UserRole.ADMIN, UserRole.MOD],
                     countFetcher: async () => {
-                        const { count } = await supabase.from('customers').select('*', { count: 'exact', head: true }).or('sales_rep.is.null,sales_rep.eq.,sales_rep.eq.System,sales_rep.eq.Chưa phân bổ');
+                        // Base query for pending leads
+                        let query = supabase.from('customers').select('*', { count: 'exact', head: true }).or('sales_rep.is.null,sales_rep.eq.,sales_rep.eq.System,sales_rep.eq.Chưa phân bổ');
+
+                        // If MOD, check their page config for source_filter
+                        if (userProfile?.role === UserRole.MOD) {
+                            const { data: pageConfig } = await supabase
+                                .from('lead_email_pages')
+                                .select('source_filter')
+                                .eq('mod_id', userProfile.id)
+                                .eq('is_active', true)
+                                .maybeSingle();
+
+                            if (pageConfig?.source_filter) {
+                                query = query.eq('source', pageConfig.source_filter);
+                            }
+                        }
+
+                        const { count } = await query;
                         return count || 0;
                     }
                 },
+                { key: 'lead_email_settings', icon: Settings, label: 'Cấu hình Lead Email', path: '/admin/lead-email-settings', roleReq: [UserRole.ADMIN] },
             ]
         },
         { key: 'finance', icon: BadgeDollarSign, label: 'Tài chính & Quỹ', path: '/finance' },
@@ -368,6 +386,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                                 // Check if any child is active to highlight parent
                                 const isChildActive = visibleChildren.some(child => location.pathname === child.path);
 
+                                // Calculate total badge count for the group
+                                const totalGroupCount = visibleChildren.reduce((sum, child) => sum + (counts[child.key] || 0), 0);
+
                                 return (
                                     <div key={item.key} className="mb-1">
                                         <button
@@ -381,7 +402,14 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                                                 <item.icon size={20} className={`${isExpanded || isChildActive ? 'text-primary-600' : 'text-slate-400'} transition-colors`} />
                                                 <span>{item.label}</span>
                                             </div>
-                                            <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                            <div className="flex items-center gap-2">
+                                                {totalGroupCount > 0 && (
+                                                    <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">
+                                                        {totalGroupCount}
+                                                    </span>
+                                                )}
+                                                <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                            </div>
                                         </button>
 
                                         <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96 opacity-100 mt-1 space-y-1' : 'max-h-0 opacity-0'}`}>

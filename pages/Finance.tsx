@@ -118,6 +118,9 @@ const Finance: React.FC = () => {
     const [isEditingFund, setIsEditingFund] = useState<string | null>(null); // New: Track editing state
     const [isClosingFund, setIsClosingFund] = useState(false);
 
+    // NEW: Dynamic KPI Penalty Rate (fetched from app_settings)
+    const [kpiPenaltyRate, setKpiPenaltyRate] = useState<number>(0.03); // Default 3%
+
     const todayStr = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
 
 
@@ -128,6 +131,20 @@ const Finance: React.FC = () => {
     const [showSalaryConfirmModal, setShowSalaryConfirmModal] = useState(false);
     const [salaryPayoutTarget, setSalaryPayoutTarget] = useState<{ user: UserProfile, maxAmount: number } | null>(null);
     const [salaryPayoutAmount, setSalaryPayoutAmount] = useState<string>('');
+
+    // KPI Penalty Rate Config Modal (for MOD)
+    const [showKpiConfigModal, setShowKpiConfigModal] = useState(false);
+    const [kpiConfigValue, setKpiConfigValue] = useState<string>('3');
+    const [kpiConfigSaving, setKpiConfigSaving] = useState(false);
+    const [kpiConfigMsg, setKpiConfigMsg] = useState<string | null>(null);
+
+    // NEW: User Specific KPI Penalty Config Modal
+    const [showUserKpiConfigModal, setShowUserKpiConfigModal] = useState(false);
+    const [targetUserForKpiConfig, setTargetUserForKpiConfig] = useState<UserProfile | null>(null);
+    const [userKpiConfigValue, setUserKpiConfigValue] = useState<string>('');
+
+    // NEW: Map of User ID -> Penalty Rate (0.01 = 1%)
+    const [userPenaltyRates, setUserPenaltyRates] = useState<Record<string, number>>({});
 
     useEffect(() => {
         if (userProfile) {
@@ -148,12 +165,75 @@ const Finance: React.FC = () => {
         try {
             setLoading(true);
 
-            // REMOVED: Global QR Code Fetch (Now using Team-based Profile QR)
-            // const { data: configData } = await supabase.from('app_settings').select('value').eq('key', 'qr_code_url').maybeSingle();
-            // if (configData) setQrCodeUrl(configData.value);
-
             const { data: profiles } = await supabase.from('profiles').select('*');
             if (profiles) setAllProfiles(profiles as UserProfile[]);
+
+            // Determine manager_id for team context
+            let teamManagerId: string | null = null;
+            if (isAdmin && selectedTeam !== 'all') {
+                teamManagerId = selectedTeam;
+            } else if (isMod && userProfile) {
+                teamManagerId = userProfile.id;
+            } else if (userProfile?.manager_id) {
+                teamManagerId = userProfile.manager_id;
+            }
+
+            // Fetch KPI Penalty Rate: Try team-specific first, fallback to global
+            let kpiRate = 0.03; // Default
+
+            // 1. Try team-specific rate
+            if (teamManagerId) {
+                const { data: teamRateSetting } = await supabase
+                    .from('app_settings')
+                    .select('value')
+                    .eq('key', 'kpi_penalty_rate')
+                    .eq('manager_id', teamManagerId)
+                    .maybeSingle();
+
+                if (teamRateSetting?.value) {
+                    kpiRate = parseFloat(teamRateSetting.value) || 0.03;
+                } else {
+                    // 2. Fallback to global rate
+                    const { data: globalRateSetting } = await supabase
+                        .from('app_settings')
+                        .select('value')
+                        .eq('key', 'kpi_penalty_rate')
+                        .is('manager_id', null)
+                        .maybeSingle();
+                    if (globalRateSetting?.value) {
+                        kpiRate = parseFloat(globalRateSetting.value) || 0.03;
+                    }
+                }
+            } else {
+                // No team context, use global
+                const { data: globalRateSetting } = await supabase
+                    .from('app_settings')
+                    .select('value')
+                    .eq('key', 'kpi_penalty_rate')
+                    .is('manager_id', null)
+                    .maybeSingle();
+                if (globalRateSetting?.value) {
+                    kpiRate = parseFloat(globalRateSetting.value) || 0.03;
+                }
+            }
+            setKpiPenaltyRate(kpiRate);
+
+            // NEW: Fetch User Specific Rates
+            const { data: userRatesData } = await supabase
+                .from('app_settings')
+                .select('key, value')
+                .like('key', 'kpi_penalty_rate_USER_%');
+
+            const newUserRates: Record<string, number> = {};
+            if (userRatesData) {
+                userRatesData.forEach(r => {
+                    const uid = r.key.replace('kpi_penalty_rate_USER_', '');
+                    if (uid) {
+                        newUserRates[uid] = parseFloat(r.value);
+                    }
+                });
+            }
+            setUserPenaltyRates(newUserRates);
 
             // OPTIMIZED: Select only necessary fields + Filter WON + MKT Source on Server
             // This drastically reduces payload size and maintenance
@@ -352,7 +432,8 @@ const Finance: React.FC = () => {
                 amount: amount,
                 reason: `Chi quỹ: ${expenseForm.reason}`,
                 status: status,
-                approved_by: status === 'approved' ? userProfile?.id : null
+                approved_by: status === 'approved' ? userProfile?.id : null,
+                fund_period_id: expenseForm.fundPeriodId || null
             }]);
             if (error) throw error;
             setShowExpenseModal(false); setExpenseForm({ amount: '', reason: '', fundPeriodId: '' }); fetchDataWithIsolation(); showToast(status === 'approved' ? "Đã duyệt Chi tiền" : "Đã gửi yêu cầu Chi!", 'success');
@@ -567,6 +648,48 @@ const Finance: React.FC = () => {
             showToast("Lỗi xử lý quỹ: " + e.message, 'error');
         } finally {
             setIsClosingFund(false);
+        }
+    };
+
+    // NEW: Handle User KPI Config Save
+    const handleSaveUserKpiConfig = async () => {
+        if (!targetUserForKpiConfig) return;
+        const rateVal = parseFloat(userKpiConfigValue);
+        if (isNaN(rateVal) || rateVal < 0) {
+            showToast("Vui lòng nhập số hợp lệ", 'error');
+            return;
+        }
+
+        const finalRate = rateVal / 100; // 5 -> 0.05
+        const key = `kpi_penalty_rate_USER_${targetUserForKpiConfig.id}`;
+
+        try {
+            // Upsert (Check conflict based on KEY + MANAGER_ID constraint, but here manager_id specific?)
+            // We use manager_id = NULL for global, but here we want to ensure uniqueness.
+            // Our index is unique on (key, coalesce(manager_id...)).
+            // We can just use manager_id = null for simplicity, OR rely on the KEY being unique enough conceptually.
+            // But if we want to separate "My setting for this user" vs "Others setting", we might need manager_id.
+            // Let's stick effectively to: Key is Unique for "User Config".
+            // Since User ID is IN the key, we don't need manager_id differentiation unless multiple managers rate the same user differently?
+            // Assuming Global/Shared setting for that user in the team context.
+            // Let's use manager_id = NULL so it's visible globally? Or UserProfile.manager_id?
+            // Actually, keep it simple: manager_id = NULL (as it's a "System" or "Absolute" override for now).
+
+            // Check if exists
+            const { data: existing } = await supabase.from('app_settings').select('id').eq('key', key).maybeSingle();
+
+            if (existing) {
+                await supabase.from('app_settings').update({ value: finalRate.toString(), updated_by: userProfile?.id }).eq('id', existing.id);
+            } else {
+                await supabase.from('app_settings').insert([{ key: key, value: finalRate.toString(), updated_by: userProfile?.id, manager_id: null }]);
+            }
+
+            setUserPenaltyRates(prev => ({ ...prev, [targetUserForKpiConfig.id]: finalRate }));
+            setShowUserKpiConfigModal(false);
+            showToast(`Đã lưu tỉ lệ phạt riêng cho ${targetUserForKpiConfig.full_name}!`, 'success');
+
+        } catch (e: any) {
+            showToast("Lỗi lưu cấu hình: " + e.message, 'error');
         }
     };
 
@@ -1029,16 +1152,22 @@ const Finance: React.FC = () => {
                         }
                     } else {
                         // Transaction has NO customer (advance, expense, adjustment, dealer_debt)
-                        // Use transaction's own created_at
-                        const transDate = new Date(t.created_at);
-                        const periodStart = new Date(period.start_date);
 
-                        if (transDate < periodStart) return false;
+                        // NEW: Explicit Fund Assignment Check
+                        if (t.fund_period_id) {
+                            if (t.fund_period_id !== selectedFundPeriod) return false;
+                        } else {
+                            // Link by Date (Fallback)
+                            const transDate = new Date(t.created_at);
+                            const periodStart = new Date(period.start_date);
 
-                        if (period.end_date) {
-                            const periodEnd = new Date(period.end_date);
-                            periodEnd.setHours(23, 59, 59, 999);
-                            if (transDate > periodEnd) return false;
+                            if (transDate < periodStart) return false;
+
+                            if (period.end_date) {
+                                const periodEnd = new Date(period.end_date);
+                                periodEnd.setHours(23, 59, 59, 999);
+                                if (transDate > periodEnd) return false;
+                            }
                         }
                     }
                 }
@@ -1407,16 +1536,27 @@ const Finance: React.FC = () => {
         });
 
         // --- STEP 3: KPI PENALTY ---
+        // IMPORTANT: Penalty is calculated on BASE EQUAL SHARE (personalNetPool), NOT on grossShare
+        // Example: Pool=100M, 5 employees → Each gets 20M base
+        // If Employee A misses KPI (10% penalty) → loses 2M (10% of 20M, NOT 10% of 100M)
+        // The 2M is redistributed to employees who met KPI
         const employeesWithFullKpi = rows.filter(r => r.missedKpi === 0);
         rows.forEach(row => {
             if (row.missedKpi > 0) {
-                const penaltyPercent = row.missedKpi * 0.03;
+                // Determine rate: User Specific > Team Default
+                const userRate = userPenaltyRates[row.user.id];
+                const effectiveRate = userRate !== undefined ? userRate : kpiPenaltyRate;
+
+                const penaltyPercent = row.missedKpi * effectiveRate; // Dynamic KPI penalty rate
                 row.penaltyPercent = penaltyPercent;
-                const penaltyAmount = row.grossShare * penaltyPercent;
+
+                // Calculate penalty on BASE SHARE (after equal division), not modified grossShare
+                const penaltyAmount = row.personalNetPool * penaltyPercent;
 
                 row.grossShare -= penaltyAmount;
                 row.finalShareRatio = row.baseShareRatio * (1 - penaltyPercent);
 
+                // Redistribute penalty to employees with full KPI
                 if (employeesWithFullKpi.length > 0) {
                     const bonusPerPerson = penaltyAmount / employeesWithFullKpi.length;
                     employeesWithFullKpi.forEach(b => {
@@ -1451,7 +1591,7 @@ const Finance: React.FC = () => {
         });
 
         return rows;
-    }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, allKPIs, selectedFundPeriod, fundPeriods, fundCalculationPool]);
+    }, [allProfiles, allCustomers, profitExclusions, filteredTransactions, selectedMonth, selectedYear, isAdmin, isMod, selectedTeam, userProfile, allKPIs, selectedFundPeriod, fundPeriods, fundCalculationPool, kpiPenaltyRate, userPenaltyRates]);
 
     // --- NEW: Employee Performance & Debt Stats ---
     const employeeStats = useMemo(() => {
@@ -1953,7 +2093,21 @@ const Finance: React.FC = () => {
             {/* --- PROFIT DISTRIBUTION SECTION --- */}
             <div className="bg-white rounded-2xl border border-indigo-100 shadow-sm overflow-hidden mb-6">
                 <div className="p-4 bg-indigo-50 border-b border-indigo-100 flex justify-between items-center">
-                    <h3 className="font-bold text-indigo-900 flex items-center gap-2"><Percent size={20} className="text-indigo-600" /> Phân chia Lợi Nhuận (Bonus)</h3>
+                    <h3 className="font-bold text-indigo-900 flex items-center gap-2">
+                        <Percent size={20} className="text-indigo-600" /> Phân chia Lợi Nhuận (Bonus)
+                        {isMod && (
+                            <button
+                                onClick={() => {
+                                    setKpiConfigValue(((kpiPenaltyRate * 100)).toFixed(1));
+                                    setShowKpiConfigModal(true);
+                                }}
+                                className="ml-2 p-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+                                title="Cấu hình tỉ lệ phạt KPI cho team"
+                            >
+                                <Settings2 size={14} />
+                            </button>
+                        )}
+                    </h3>
                     <div className="flex items-center gap-2">
                         <span className="text-xs font-medium text-indigo-600 bg-white px-2 py-1 rounded-lg border border-indigo-200">
                             Pool: <strong>{formatCurrency(fundCalculationPool)}</strong>
@@ -2021,8 +2175,13 @@ const Finance: React.FC = () => {
                                             </span>
                                         )}
                                     </td>
-                                    <td className="px-4 py-3 text-center text-red-500 font-medium">
-                                        {row.penaltyPercent > 0 ? `-${(row.penaltyPercent * 100).toFixed(0)}% (share)` : '-'}
+                                    <td className="px-4 py-3 text-center text-red-500 font-medium whitespace-nowrap">
+                                        {row.penaltyPercent > 0 ? (
+                                            <span className="flex items-center justify-center gap-1">
+                                                -{(row.penaltyPercent * 100).toFixed(0)}% (share)
+                                                {userPenaltyRates[row.user.id] !== undefined && <span className="text-[10px] bg-red-100 px-1 rounded" title="Đã chỉnh tay">Tay</span>}
+                                            </span>
+                                        ) : '-'}
                                     </td>
                                     <td className="px-4 py-3 text-center font-bold text-indigo-700">
                                         {row.finalShareRatio.toFixed(2)}%
@@ -2045,6 +2204,14 @@ const Finance: React.FC = () => {
                                         <td className="px-4 py-3 text-center flex items-center justify-center gap-2">
                                             <button onClick={() => { setTargetUserForExclusion(row.user); setShowExclusionModal(true); }} className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-red-50 hover:text-red-600 transition-colors" title="Loại trừ Khách hàng">
                                                 <MinusCircle size={16} />
+                                            </button>
+                                            <button onClick={() => {
+                                                setTargetUserForKpiConfig(row.user);
+                                                const currentRate = userPenaltyRates[row.user.id] !== undefined ? userPenaltyRates[row.user.id] * 100 : kpiPenaltyRate * 100;
+                                                setUserKpiConfigValue(currentRate.toFixed(1));
+                                                setShowUserKpiConfigModal(true);
+                                            }} className="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 border border-red-200 transition-colors" title="Phạt thủ công (Cấu hình %)">
+                                                <Scale size={16} />
                                             </button>
                                             {/* Show Payout Button ALWAYS if Admin/Mod, regardless of estimated income */}
                                             <button onClick={() => openSalaryModal(row.user, row.estimatedIncome)} className="p-1.5 bg-green-50 text-green-600 rounded hover:bg-green-100 border border-green-200 transition-colors" title="Chi tiền lương (Payout)">
@@ -2492,6 +2659,73 @@ const Finance: React.FC = () => {
                 )
             }
             {showExclusionModal && targetUserForExclusion && (<div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[80vh] flex flex-col"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900">Loại trừ khách hàng</h3><button onClick={() => setShowExclusionModal(false)}><X size={24} className="text-gray-400" /></button></div><div className="bg-yellow-50 p-3 rounded-xl mb-4 border border-yellow-100"><p className="text-sm text-yellow-800">Đang chọn loại trừ cho: <strong>{targetUserForExclusion.full_name}</strong></p><p className="text-xs text-yellow-700 mt-1">Danh sách hiển thị: Khách <strong>MKT Group</strong>, Đã chốt, Chưa hoàn tiền (Thuộc Team đang chọn).</p></div><div className="overflow-y-auto flex-1 space-y-2 border-t border-gray-100 pt-2">{exclusionCandidates.length === 0 ? <p className="text-center text-gray-400 py-4">Không có khách hàng MKT nào phù hợp.</p> : exclusionCandidates.map(c => { const isExcluded = profitExclusions.some(ex => ex.user_id === targetUserForExclusion.id && ex.customer_id === c.id); return (<div key={c.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 cursor-pointer" onClick={() => handleToggleExclusion(c.id)}><div><p className="font-bold text-sm text-gray-900">{c.name} <span className="font-normal text-gray-500">({c.sales_rep})</span></p><p className="text-xs text-gray-500">{formatCurrency(c.deal_details?.revenue || 0)} VNĐ • {c.source}</p></div><div className={`w-5 h-5 rounded border flex items-center justify-center ${isExcluded ? 'bg-red-500 border-red-500 text-white' : 'border-gray-300'}`}>{isExcluded && <Check size={14} />}</div></div>); })}</div><div className="mt-4 pt-2 border-t flex justify-end"><button onClick={() => setShowExclusionModal(false)} className="px-4 py-2 bg-gray-100 font-bold rounded-xl text-gray-700 hover:bg-gray-200">Đóng</button></div></div></div>)}
+
+            {/* NEW: User KPI Config Modal */}
+            {showUserKpiConfigModal && targetUserForKpiConfig && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                <Scale className="text-red-600" /> Phạt thủ công (Cá nhân)
+                            </h3>
+                            <button onClick={() => setShowUserKpiConfigModal(false)}><X className="text-gray-400 hover:text-gray-600" /></button>
+                        </div>
+
+                        <div className="mb-6 bg-red-50 p-4 rounded-xl border border-red-100">
+                            <p className="text-sm text-red-800 font-bold mb-1">Cấu hình cho: {targetUserForKpiConfig.full_name}</p>
+                            <p className="text-xs text-red-600">Thay đổi này sẽ ghi đè thiết lập chung của Team.</p>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">Tỉ lệ phạt KPI / Xe thiếu</label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        value={userKpiConfigValue}
+                                        onChange={(e) => setUserKpiConfigValue(e.target.value)}
+                                        className="w-full text-center border-2 border-red-100 focus:border-red-500 rounded-xl px-4 py-3 text-2xl font-bold text-red-600 outline-none"
+                                        autoFocus
+                                    />
+                                    <span className="text-xl font-bold text-gray-400">% /xe</span>
+                                </div>
+                            </div>
+
+                            <div className="text-xs text-gray-500 italic p-2">
+                                * Nhập 0 để không áp dụng phạt cho nhân viên này.
+                            </div>
+
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => {
+                                        // Reset to Default (Remove Override)
+                                        // Logic: Delete the key from app_settings
+                                        const key = `kpi_penalty_rate_USER_${targetUserForKpiConfig.id}`;
+                                        supabase.from('app_settings').delete().eq('key', key).then(() => {
+                                            setUserPenaltyRates(prev => {
+                                                const next = { ...prev };
+                                                delete next[targetUserForKpiConfig.id];
+                                                return next;
+                                            });
+                                            setShowUserKpiConfigModal(false);
+                                            showToast("Đã về mặc định Team!", 'success');
+                                        });
+                                    }}
+                                    className="px-4 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200"
+                                >
+                                    Mặc định
+                                </button>
+                                <button
+                                    onClick={handleSaveUserKpiConfig}
+                                    className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200"
+                                >
+                                    Lưu riêng
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             {transactionToDelete && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-red-100"><div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-600"><Trash2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận xóa giao dịch?</h3><p className="text-sm text-gray-500 mb-4">Bạn có chắc chắn muốn xóa giao dịch này khỏi hệ thống?</p><div className="flex gap-3 w-full"><button onClick={() => setTransactionToDelete(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={confirmDeleteTransaction} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Xóa ngay</button></div></div></div></div>)}
             {advanceToRepay && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-purple-100"><div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4 text-purple-600"><Undo2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Xác nhận Hoàn ứng?</h3><div className="bg-purple-50 p-4 rounded-xl text-left w-full mb-4 border border-purple-100 space-y-2"><div><p className="text-xs text-gray-500">Nội dung ứng</p><p className="font-bold text-gray-900">{advanceToRepay.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền hoàn trả</p><p className="font-bold text-purple-600 text-lg">{formatCurrency(advanceToRepay.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ gửi yêu cầu hoàn trả. Vui lòng chờ Admin/Mod duyệt để cập nhật quỹ.</p><div className="flex gap-3 w-full"><button onClick={() => setAdvanceToRepay(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={handleManualRepay} className="flex-1 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors">Xác nhận Thu</button></div></div></div></div>)}
             {showResetConfirm && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70  animate-fade-in"><div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl border-2 border-red-200"><div className="flex flex-col items-center text-center"><div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-600 animate-pulse"><AlertTriangle size={40} /></div><h3 className="text-2xl font-bold text-gray-900 mb-2">CẢNH BÁO NGUY HIỂM!</h3><div className="bg-red-50 p-4 rounded-xl text-left w-full mb-6 border border-red-100"><p className="text-red-800 font-bold text-sm mb-2">Hành động này sẽ XÓA SẠCH:</p><ul className="list-disc list-inside text-red-700 text-sm space-y-1"><li>Toàn bộ lịch sử Thu/Chi/Nộp tiền.</li><li>Toàn bộ Tiền phạt và Quỹ nhóm.</li><li>Reset "Doanh thu thực tế" của tất cả khách hàng về 0.</li></ul><p className="text-red-600 text-xs italic mt-3 font-semibold text-center">Dữ liệu sẽ KHÔNG THỂ khôi phục được.</p></div><div className="flex gap-3 w-full"><button onClick={() => setShowResetConfirm(false)} className="flex-1 py-3.5 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition-colors">Hủy bỏ</button><button onClick={executeResetFinance} disabled={isResetting} className="flex-1 py-3.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-colors flex items-center justify-center gap-2">{isResetting && <Loader2 className="animate-spin" size={20} />} Xác nhận RESET</button></div></div></div></div>)}
@@ -2705,6 +2939,121 @@ const Finance: React.FC = () => {
                                 </div>
                             </>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* KPI Penalty Rate Config Modal (MOD Only) */}
+            {showKpiConfigModal && isMod && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+                        <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                            <Percent className="text-red-500" /> Cấu hình Phạt KPI (Team của bạn)
+                        </h3>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">
+                                    Tỉ lệ phạt KPI mỗi xe thiếu chỉ tiêu
+                                </label>
+                                <p className="text-xs text-gray-500 mb-3">
+                                    Khi nhân viên không đạt KPI, mỗi xe thiếu sẽ bị trừ % này vào phần chia lợi nhuận.
+                                </p>
+                                <div className="flex items-center gap-3">
+                                    <div className="relative flex-1">
+                                        <input
+                                            type="number"
+                                            step="0.1"
+                                            min="0"
+                                            max="100"
+                                            value={kpiConfigValue}
+                                            onChange={(e) => setKpiConfigValue(e.target.value)}
+                                            className="w-full px-4 py-3 pr-10 border-2 border-red-300 rounded-xl text-center font-bold text-xl text-red-700 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                        />
+                                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-red-400 font-bold">%</span>
+                                    </div>
+                                    <span className="text-gray-500 font-medium text-lg">/xe</span>
+                                </div>
+                            </div>
+
+                            {kpiConfigMsg && (
+                                <div className={`p-3 rounded-xl text-sm font-medium flex items-center gap-2 ${kpiConfigMsg.includes('thành công') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                    {kpiConfigMsg.includes('thành công') ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                                    {kpiConfigMsg}
+                                </div>
+                            )}
+
+                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700">
+                                <strong>💡 Lưu ý:</strong> Thay đổi này chỉ áp dụng cho Team của bạn. Các team khác sử dụng giá trị mặc định do Admin cấu hình.
+                            </div>
+
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    onClick={() => {
+                                        setShowKpiConfigModal(false);
+                                        setKpiConfigMsg(null);
+                                    }}
+                                    className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+                                >
+                                    Hủy
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        const numRate = parseFloat(kpiConfigValue);
+                                        if (isNaN(numRate) || numRate < 0 || numRate > 100) {
+                                            setKpiConfigMsg('Giá trị không hợp lệ (0-100%)');
+                                            return;
+                                        }
+
+                                        setKpiConfigSaving(true);
+                                        setKpiConfigMsg(null);
+                                        try {
+                                            const decimalValue = (numRate / 100).toFixed(4);
+
+                                            // Strategy: Delete existing + Insert new (avoid constraint conflicts)
+                                            // First delete any existing record for this MOD
+                                            await supabase
+                                                .from('app_settings')
+                                                .delete()
+                                                .eq('key', 'kpi_penalty_rate')
+                                                .eq('manager_id', userProfile?.id);
+
+                                            // Then insert fresh
+                                            const { error } = await supabase
+                                                .from('app_settings')
+                                                .insert({
+                                                    key: 'kpi_penalty_rate',
+                                                    value: decimalValue,
+                                                    description: `Tỉ lệ phạt KPI - Team ${userProfile?.full_name}`,
+                                                    manager_id: userProfile?.id,
+                                                    updated_at: new Date().toISOString(),
+                                                    updated_by: userProfile?.id
+                                                });
+
+                                            if (error) throw error;
+
+                                            setKpiPenaltyRate(parseFloat(decimalValue));
+                                            setKpiConfigMsg(`Đã lưu thành công: ${numRate}%/xe`);
+                                            showToast(`Đã cập nhật tỉ lệ phạt KPI: ${numRate}%/xe`, 'success');
+
+                                            setTimeout(() => {
+                                                setShowKpiConfigModal(false);
+                                                setKpiConfigMsg(null);
+                                            }, 1500);
+                                        } catch (e: any) {
+                                            setKpiConfigMsg('Lỗi lưu: ' + e.message);
+                                        } finally {
+                                            setKpiConfigSaving(false);
+                                        }
+                                    }}
+                                    disabled={kpiConfigSaving}
+                                    className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
+                                >
+                                    {kpiConfigSaving && <Loader2 size={16} className="animate-spin" />}
+                                    Lưu cho Team
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

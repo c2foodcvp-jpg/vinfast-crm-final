@@ -246,7 +246,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onBackMobile }) => {
                                     ((activeChannel as any).otherUserName || '#').charAt(0).toUpperCase()
                                 )
                             ) : (
-                                activeChannel.name ? activeChannel.name.charAt(0).toUpperCase() : '#'
+                                activeChannel.avatar_url ? (
+                                    <img src={activeChannel.avatar_url} alt={activeChannel.name} className="w-full h-full object-cover" />
+                                ) : (
+                                    activeChannel.name ? activeChannel.name.charAt(0).toUpperCase() : '#'
+                                )
                             )}
                         </div>
                         {isOnline && (

@@ -36,6 +36,7 @@ import CalendarPage from './pages/Calendar';
 import OnlineQuote from './pages/OnlineQuote';
 import BankCalculator from './pages/BankCalculator';
 import LeadsQueue from './pages/LeadsQueue';
+import LeadEmailSettings from './pages/LeadEmailSettings';
 import Utilities from './pages/Utilities';
 import NotFound from './pages/NotFound';
 import Community from './pages/Community';
@@ -124,6 +125,7 @@ const App: React.FC = () => {
                   {/* System */}
                   <Route path="/utilities" element={<ProtectedRoute><Utilities /></ProtectedRoute>} />
                   <Route path="/system" element={<ProtectedRoute><Configuration /></ProtectedRoute>} />
+                  <Route path="/admin/lead-email-settings" element={<ProtectedRoute><LeadEmailSettings /></ProtectedRoute>} />
                   <Route path="/distributors" element={<Navigate to="/system" replace />} />
                   <Route path="/configuration" element={<Navigate to="/system" replace />} />
 

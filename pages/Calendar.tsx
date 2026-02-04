@@ -8,7 +8,7 @@ import {
     Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2, Phone, User, Clock,
     Plus, CheckCircle2, Flame, AlertCircle, X,
     AlertTriangle, Timer, ListTodo, Flag, Activity, Calendar, Star, Bell, BellRing,
-    Users, UserCircle, Lock, LayoutList, CheckSquare, Banknote, PauseCircle, ExternalLink, Mic, Trash2, CalendarClock, Search
+    Users, UserCircle, Lock, LayoutList, Banknote, PauseCircle, ExternalLink, Mic, Trash2, CalendarClock, Search
 } from 'lucide-react';
 import QuickInteractionModal from '../components/QuickInteractionModal';
 import AddCustomerModal from '../components/AddCustomerModal';
@@ -1003,7 +1003,7 @@ const CalendarPage: React.FC = () => {
         green: { bg: 'bg-green-50/30', border: 'border-green-200', headerBg: 'bg-green-50/80', iconBg: 'bg-green-100', iconText: 'text-green-600', badge: 'bg-green-100', badgeText: 'text-green-700' },
     };
 
-    const Column = ({ title, icon: Icon, theme, items, type, emptyText, onCardClick }: {
+    const Column = ({ title, icon: Icon, theme, items, type, emptyText, onCardClick, className, isGrid }: {
         title: string;
         icon: React.ElementType;
         theme: ThemeColor;
@@ -1011,6 +1011,8 @@ const CalendarPage: React.FC = () => {
         type: 'customer' | 'task';
         emptyText: string;
         onCardClick?: (item: any) => void;
+        className?: string; // Allow custom class for layout (e.g., col-span-2)
+        isGrid?: boolean;   // Allow grid layout for items
     }) => {
         const contextIds = useMemo(() => {
             if (type === 'customer') return (items as Customer[]).map(c => c.id);
@@ -1020,7 +1022,7 @@ const CalendarPage: React.FC = () => {
         const styles = THEMES[theme];
 
         return (
-            <div className={`${styles.bg} rounded-2xl border ${styles.border} flex flex-col overflow-hidden h-full shadow-sm`}>
+            <div className={`${styles.bg} rounded-2xl border ${styles.border} flex flex-col overflow-hidden h-full shadow-sm ${className || ''}`}>
                 <div className={`p-4 flex items-center justify-between border-b ${styles.border} ${styles.headerBg} backdrop-blur-sm`}>
                     <h3 className="font-bold text-gray-800 flex items-center gap-2.5 text-sm uppercase tracking-wide">
                         <div className={`p-1.5 rounded-lg ${styles.iconBg} ${styles.iconText}`}>
@@ -1030,9 +1032,9 @@ const CalendarPage: React.FC = () => {
                     </h3>
                     <span className={`${styles.badge} ${styles.badgeText} text-xs font-bold px-2.5 py-0.5 rounded-lg shadow-sm`}>{items.length}</span>
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar bg-white/50 max-h-[350px] lg:max-h-none">
+                <div className={`flex-1 overflow-y-auto p-3 custom-scrollbar bg-white/50 max-h-[350px] lg:max-h-none ${isGrid ? 'grid grid-cols-1 lg:grid-cols-2 gap-3' : 'space-y-2.5'}`}>
                     {items.length === 0 ? (
-                        <div className="text-center py-6 text-gray-400 text-sm">
+                        <div className={`text-center py-6 text-gray-400 text-sm ${isGrid ? 'col-span-full' : ''}`}>
                             <CheckCircle2 size={24} className="mx-auto mb-2 text-gray-300" />
                             {emptyText}
                         </div>
@@ -1209,7 +1211,7 @@ const CalendarPage: React.FC = () => {
                                 />
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:h-full h-auto">
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:h-full h-auto">
                                 <Column
                                     title="Đang xử lý"
                                     icon={LayoutList}
@@ -1222,18 +1224,7 @@ const CalendarPage: React.FC = () => {
                                         setShowProgressModal(true);
                                     }}
                                 />
-                                <Column
-                                    title="Đã hoàn thành"
-                                    icon={CheckSquare}
-                                    theme="green"
-                                    items={completedDeals}
-                                    type="customer"
-                                    emptyText="Không có đơn hoàn thành"
-                                    onCardClick={(c) => {
-                                        setSelectedCustomerForProgress(c);
-                                        setShowProgressModal(true);
-                                    }}
-                                />
+                                {/* REMOVED "Đã hoàn thành" COLUMN AS REQUESTED */}
                                 <Column
                                     title="Trả cọc"
                                     icon={Banknote}

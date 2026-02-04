@@ -315,6 +315,7 @@ export interface Transaction {
   approved_by?: string;
   created_at: string;
   _is_part_time_creator?: boolean; // Helper for finance calc
+  fund_period_id?: string; // Explicit Fund Period Assignment
 }
 
 export interface TeamPolicy {
@@ -414,3 +415,23 @@ export interface Proposal {
   approved_by?: string;
   created_at: string;
 }
+
+// NEW: Lead Email Page (MOD-specific configuration)
+export interface LeadEmailPage {
+  id: string;
+  mod_id: string;
+  name: string;
+  email_script_url?: string;
+  auto_import_script_url?: string; // Script URL to auto-import leads from external source
+  source_filter?: string;         // Filter leads by source field
+  auto_download_enabled?: boolean;
+  auto_assign_enabled?: boolean;
+  auto_assign_config?: {
+    round_robin?: boolean;
+    max_per_day?: number;
+  };
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
