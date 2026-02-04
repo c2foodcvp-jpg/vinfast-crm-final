@@ -68,7 +68,33 @@ import { PresenceProvider } from './contexts/PresenceContext';
 import useFcmToken from './src/hooks/useFcmToken';
 
 const FcmInit: React.FC = () => {
-  useFcmToken();
+  const { notificationPermissionStatus, requestPermission } = useFcmToken();
+  const [showBanner, setShowBanner] = React.useState(true);
+
+  if (notificationPermissionStatus === 'default' && showBanner) {
+    return (
+      <div className="fixed bottom-0 left-0 right-0 bg-primary-600 text-white p-4 flex justify-between items-center z-[200] animate-slide-up shadow-lg">
+        <div className="flex flex-col mr-4">
+          <span className="font-bold text-sm">Bật thông báo?</span>
+          <span className="text-xs opacity-90">Nhận tin tức mới nhất từ hệ thống.</span>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowBanner(false)}
+            className="text-white/60 hover:text-white px-2 text-xs"
+          >
+            Để sau
+          </button>
+          <button
+            onClick={requestPermission}
+            className="bg-white text-primary-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-gray-100 transition-colors shadow-sm"
+          >
+            Bật ngay
+          </button>
+        </div>
+      </div>
+    );
+  }
   return null;
 }
 
