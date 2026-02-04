@@ -32,6 +32,7 @@ try {
 export { messaging };
 
 export const requestForToken = async () => {
+    if (!messaging) return null; // Safe exit if init failed
     try {
         const currentToken = await getToken(messaging, { vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY });
         if (currentToken) {
@@ -49,6 +50,7 @@ export const requestForToken = async () => {
 
 export const onMessageListener = () =>
     new Promise((resolve) => {
+        if (!messaging) return; // Safe exit
         onMessage(messaging, (payload) => {
             resolve(payload);
         });
