@@ -65,6 +65,13 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 import SupportWidget from './components/SupportWidget';
 
 import { PresenceProvider } from './contexts/PresenceContext';
+import useFcmToken from './src/hooks/useFcmToken';
+
+const FcmInit: React.FC = () => {
+  useFcmToken();
+  return null;
+}
+
 
 const App: React.FC = () => {
   return (
@@ -79,6 +86,7 @@ const App: React.FC = () => {
               <BrowserRouter>
                 <SupportWidget />
                 <GlobalChatBubble />
+                <FcmInit />
                 <Routes>
                   <Route path="/login" element={<Login />} />
                   <Route path="/register" element={<Register />} />

@@ -233,6 +233,7 @@ const KPIPenaltyConfig: React.FC = () => {
 
 
 const SystemSettingsPanel: React.FC = () => {
+    const { userProfile } = useAuth();
     const [settings, setSettings] = useState<{
         favicon: string | null;
         loginLogo: string | null;
@@ -337,9 +338,39 @@ const SystemSettingsPanel: React.FC = () => {
                 { key: 'system_email_logo', value: settings.emailLogo },
             ].filter(i => i.value !== null); // Only save what we have
 
-            const { error } = await supabase.from('app_settings').upsert(updates, { onConflict: 'key' });
+            // Process each update individually to avoid "ON CONFLICT" errors
+            await Promise.all(updates.map(async (item) => {
+                // 1. Check if exists (global setting -> manager_id is null)
+                const { data: existing } = await supabase
+                    .from('app_settings')
+                    .select('id')
+                    .eq('key', item.key)
+                    .is('manager_id', null)
+                    .maybeSingle();
 
-            if (error) throw error;
+                if (existing) {
+                    return supabase
+                        .from('app_settings')
+                        .update({
+                            value: item.value,
+                            updated_at: new Date().toISOString(),
+                            updated_by: userProfile?.id
+                        })
+                        .eq('id', existing.id);
+                } else {
+                    return supabase
+                        .from('app_settings')
+                        .insert({
+                            key: item.key,
+                            value: item.value,
+                            description: `Cấu hình ${item.key}`,
+                            manager_id: null,
+                            updated_at: new Date().toISOString(),
+                            updated_by: userProfile?.id
+                        });
+                }
+            }));
+
             setMsg({ type: 'success', text: "Đã lưu tất cả cấu hình logo thành công!" });
         } catch (error: any) {
             setMsg({ type: 'error', text: "Lỗi lưu cấu hình: " + error.message });
@@ -511,10 +542,38 @@ with check ( bucket_id = 'system-assets' );
                                 setForceUpdateSaving(true);
                                 const newValue = !forceUpdate;
                                 try {
-                                    const { error } = await supabase
+                                    // 1. Check if exists
+                                    const { data: existing } = await supabase
                                         .from('app_settings')
-                                        .upsert({ key: 'force_update', value: newValue.toString() }, { onConflict: 'key' });
-                                    if (error) throw error;
+                                        .select('id')
+                                        .eq('key', 'force_update')
+                                        .is('manager_id', null)
+                                        .maybeSingle();
+
+                                    if (existing) {
+                                        const { error } = await supabase
+                                            .from('app_settings')
+                                            .update({
+                                                value: newValue.toString(),
+                                                updated_at: new Date().toISOString(),
+                                                updated_by: userProfile?.id
+                                            })
+                                            .eq('id', existing.id);
+                                        if (error) throw error;
+                                    } else {
+                                        const { error } = await supabase
+                                            .from('app_settings')
+                                            .insert({
+                                                key: 'force_update',
+                                                value: newValue.toString(),
+                                                description: 'Bắt buộc cập nhật app',
+                                                manager_id: null,
+                                                updated_at: new Date().toISOString(),
+                                                updated_by: userProfile?.id
+                                            });
+                                        if (error) throw error;
+                                    }
+
                                     setForceUpdate(newValue);
                                     setMsg({ type: 'success', text: newValue ? 'Đã BẬT thông báo cập nhật!' : 'Đã TẮT thông báo cập nhật' });
                                 } catch (e: any) {
