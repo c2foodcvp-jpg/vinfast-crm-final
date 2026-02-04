@@ -3,6 +3,7 @@ import { getMessaging, getToken, onMessage, Messaging } from "firebase/messaging
 
 // TODO: Replace with your actual Firebase project configuration
 // You can find these in the Firebase Console > Project Settings
+// Check configuration
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -12,8 +13,23 @@ const firebaseConfig = {
     appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-const app = initializeApp(firebaseConfig);
-export const messaging: Messaging = getMessaging(app);
+console.log("🔥 Initializing Firebase with Project ID:", firebaseConfig.projectId ? "OK" : "MISSING");
+
+let app;
+let messaging: Messaging;
+
+try {
+    if (!firebaseConfig.projectId) {
+        throw new Error("Firebase Configuration Missing: projectId is undefined. Check Environment Variables.");
+    }
+    app = initializeApp(firebaseConfig);
+    messaging = getMessaging(app);
+} catch (error) {
+    console.error("❌ Firebase Initialization Error:", error);
+    // Don't crash the entire app if Firebase fails, but features won't work
+}
+
+export { messaging };
 
 export const requestForToken = async () => {
     try {
