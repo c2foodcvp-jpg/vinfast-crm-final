@@ -120,9 +120,16 @@ serve(async (req) => {
                         title: title,
                         body: message,
                     },
+                    data: {
+                        title: title,
+                        body: message,
+                        link: record.link || '/',
+                        type: record.type || 'system',
+                        related_id: record.related_id || ''
+                    },
                     webpush: {
                         fcm_options: {
-                            link: 'https://vinfast-crm.web.app' // Optional: Update with your URL
+                            link: 'https://vinfast-crm.web.app' + (record.link || '/')
                         }
                     }
                 }

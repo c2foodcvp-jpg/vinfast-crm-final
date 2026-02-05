@@ -1,4 +1,3 @@
-
 -- Enable pg_net extension to make HTTP requests
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
@@ -6,17 +5,11 @@ CREATE EXTENSION IF NOT EXISTS pg_net;
 CREATE OR REPLACE FUNCTION public.trigger_send_push()
 RETURNS TRIGGER AS $$
 DECLARE
-    project_url TEXT := 'https://ksrzwrizbqkjyzqhkfkn.supabase.co'; -- Replace with your actual Project URL if different
+    project_url TEXT := 'https://ksrzwrizbqkjyzqhkfkn.supabase.co'; -- REAL URL
     function_name TEXT := 'send-push';
     url TEXT := project_url || '/functions/v1/' || function_name;
-    -- You need to put your SERVICE_ROLE_KEY here or use a secure way to store it if using vault
-    -- For this example, we assume we can pass the Anon Key or explicit header, but usually Edge Functions are protected.
-    -- Better approach: Put this in a Security Definer function or use Database Webhooks in Dashboard.
     
-    -- NOTE: Creating Database Webhooks via SQL is complex because it involves `supabase_functions` schema which is managed.
-    -- BELOW IS A SIMPLIFIED HTTP CALL USING pg_net.
-    
-    -- REPLACE 'YOUR_SERVICE_ROLE_KEY' with the actual key if you run this manually.
+    -- Using ANON KEY for authorization to Trigger Edge Function
     service_role_key TEXT := 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtzcnp3cml6YnFranl6cWhrZmtuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczMzkyMDcsImV4cCI6MjA4MjkxNTIwN30.8OxhjfjI0hqfYONKO4sC650KZO8uGNFtdwSV-2rmbEA'; 
     payload JSONB;
 BEGIN
