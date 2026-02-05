@@ -33,29 +33,3 @@ messaging.onBackgroundMessage((payload) => {
 
     self.registration.showNotification(notificationTitle, notificationOptions);
 });
-
-self.addEventListener('notificationclick', function (event) {
-    console.log('[firebase-messaging-sw.js] Notification click Received.', event);
-    event.notification.close();
-
-    const link = event.notification.data?.link || '/';
-
-    // Open the app and navigate
-    event.waitUntil(
-        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clientList) {
-            // Check if there's already a tab open
-            for (var i = 0; i < clientList.length; i++) {
-                var client = clientList[i];
-                if (client.url.includes(self.registration.scope) && 'focus' in client) {
-                    return client.focus().then(c => {
-                        if (c) c.navigate(link);
-                        return c;
-                    });
-                }
-            }
-            // If not open, open it
-            if (clients.openWindow)
-                return clients.openWindow(link);
-        })
-    );
-});
