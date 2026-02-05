@@ -289,8 +289,21 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
             // Notification if not active
             if (msg.sender_id !== userProfile?.id) {
-                toast('Tin nhắn mới: ' + (msg.sender?.full_name || '...'), { icon: '💬' });
-                audioRef.current?.play().catch(() => { });
+                // toast('Tin nhắn mới: ' + (msg.sender?.full_name || '...'), { icon: '💬' });
+                // audioRef.current?.play().catch(() => { });
+
+                // Use System Notification instead of Toast
+                if (Notification.permission === 'granted') {
+                    const n = new Notification('Tin nhắn từ ' + (msg.sender?.full_name || 'Cộng đồng'), {
+                        body: msg.content || 'Bạn có tin nhắn mới',
+                        icon: '/pwa-192x192.png',
+                        tag: 'chat-msg-' + msg.channel_id // Group by channel to avoid spam
+                    });
+                    n.onclick = () => {
+                        window.focus();
+                        // Optionally navigate to community
+                    };
+                }
             }
         }
 

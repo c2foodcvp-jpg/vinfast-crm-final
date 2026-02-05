@@ -62,6 +62,9 @@ const SystemNotificationSender: React.FC = () => {
     const [history, setHistory] = useState<SystemNotification[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
 
+    // Bulk Delete State
+    const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string>>(new Set());
+
     if (!userProfile || (!isAdmin && !isMod)) return null;
 
     useEffect(() => {
@@ -242,9 +245,58 @@ const SystemNotificationSender: React.FC = () => {
             const { error } = await supabase.from('system_notifications').delete().eq('id', id);
             if (error) throw error;
             setHistory(prev => prev.filter(n => n.id !== id));
+            // Also remove from selection if present
+            if (selectedHistoryIds.has(id)) {
+                const newSet = new Set(selectedHistoryIds);
+                newSet.delete(id);
+                setSelectedHistoryIds(newSet);
+            }
         } catch (err) {
             console.error("Delete error:", err);
             alert("Lỗi khi xóa thông báo");
+        }
+    };
+
+    const toggleHistorySelection = (id: string) => {
+        const newSet = new Set(selectedHistoryIds);
+        if (newSet.has(id)) {
+            newSet.delete(id);
+        } else {
+            newSet.add(id);
+        }
+        setSelectedHistoryIds(newSet);
+    };
+
+    const toggleAllHistory = () => {
+        if (selectedHistoryIds.size === history.length && history.length > 0) {
+            setSelectedHistoryIds(new Set());
+        } else {
+            setSelectedHistoryIds(new Set(history.map(n => n.id)));
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedHistoryIds.size === 0) return;
+        if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedHistoryIds.size} thông báo đã chọn? Hành động này không thể hoàn tác.`)) return;
+
+        setLoadingHistory(true);
+        try {
+            const { error } = await supabase
+                .from('system_notifications')
+                .delete()
+                .in('id', Array.from(selectedHistoryIds));
+
+            if (error) throw error;
+
+            setHistory(prev => prev.filter(n => !selectedHistoryIds.has(n.id)));
+            setSelectedHistoryIds(new Set());
+            setSuccessMsg(`Đã xóa ${selectedHistoryIds.size} thông báo thành công!`);
+            setTimeout(() => setSuccessMsg(''), 3000);
+        } catch (err) {
+            console.error("Bulk delete error:", err);
+            alert("Lỗi khi xóa các thông báo đã chọn");
+        } finally {
+            setLoadingHistory(false);
         }
     };
 
@@ -484,15 +536,34 @@ const SystemNotificationSender: React.FC = () => {
                         <Clock className="text-gray-500" size={20} />
                         Lịch Sử Thông Báo
                     </h3>
-                    <button onClick={fetchHistory} className="p-2 text-gray-400 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 rounded-lg transition-colors">
-                        <RefreshCw size={18} className={loadingHistory ? 'animate-spin' : ''} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {selectedHistoryIds.size > 0 && (
+                            <button
+                                onClick={handleBulkDelete}
+                                className="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-red-100 transition-colors border border-red-100 animate-fade-in"
+                            >
+                                <Trash2 size={16} />
+                                Xóa {selectedHistoryIds.size} mục
+                            </button>
+                        )}
+                        <button onClick={fetchHistory} className="p-2 text-gray-400 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 rounded-lg transition-colors">
+                            <RefreshCw size={18} className={loadingHistory ? 'animate-spin' : ''} />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b">
                             <tr>
+                                <th className="px-4 py-3 w-[50px]">
+                                    <input
+                                        type="checkbox"
+                                        checked={history.length > 0 && selectedHistoryIds.size === history.length}
+                                        onChange={toggleAllHistory}
+                                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                                    />
+                                </th>
                                 <th className="px-4 py-3">Tiêu đề</th>
                                 <th className="px-4 py-3">Phạm vi</th>
                                 <th className="px-4 py-3">Người gửi</th>
@@ -504,6 +575,14 @@ const SystemNotificationSender: React.FC = () => {
                             {history.length > 0 ? (
                                 history.map(notif => (
                                     <tr key={notif.id} className="hover:bg-gray-50">
+                                        <td className="px-4 py-3">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedHistoryIds.has(notif.id)}
+                                                onChange={() => toggleHistorySelection(notif.id)}
+                                                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                                            />
+                                        </td>
                                         <td className="px-4 py-3 font-medium text-gray-900">{notif.title}</td>
                                         <td className="px-4 py-3">
                                             <div className="flex flex-col gap-1 items-start">
@@ -548,7 +627,7 @@ const SystemNotificationSender: React.FC = () => {
                                 ))
                             ) : (
                                 <tr>
-                                    <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
+                                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
                                         <div className="flex flex-col items-center gap-2">
                                             <AlertCircle size={32} className="opacity-20" />
                                             Chưa có thông báo nào được gửi

@@ -72,7 +72,19 @@ const useFcmToken = () => {
     useEffect(() => {
         onMessageListener().then((payload: any) => {
             console.log('Foreground Message:', payload);
-            toast.success(payload?.notification?.title || 'New Message');
+
+            // Remove toast popup, use System Notification instead if allowed
+            if (Notification.permission === 'granted') {
+                const title = payload?.notification?.title || 'Tin nhắn mới';
+                const body = payload?.notification?.body || '';
+
+                new Notification(title, {
+                    body: body,
+                    icon: '/pwa-192x192.png',
+                    // Tag allows replacing old notifications if from same source, optional
+                    // tag: 'new-message' 
+                });
+            }
         }).catch(err => console.log('failed: ', err));
     }, []);
 

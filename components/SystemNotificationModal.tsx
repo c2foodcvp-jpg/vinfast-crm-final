@@ -46,6 +46,10 @@ const SystemNotificationModal: React.FC = () => {
 
                 // 3. Filter relevant notifications
                 const pending = allNotifs.filter(n => {
+                    // Filter out Chat Sync notifications (Titles starting with "Tin nhắn mới từ")
+                    // These are intended for Push Notifications only, not Modals
+                    if (n.title && n.title.startsWith('Tin nhắn mới từ')) return false;
+
                     // Filter out Dashboard Only notifications
                     if (n.display_type === 'dashboard') return false;
 
@@ -62,6 +66,9 @@ const SystemNotificationModal: React.FC = () => {
                     if (n.target_scope === 'specific') {
                         return n.target_user_ids && n.target_user_ids.includes(userProfile.id);
                     }
+
+
+
                     return false;
                 });
 

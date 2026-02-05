@@ -101,6 +101,26 @@ const TaskCreationModal: React.FC<TaskCreationModalProps> = ({ visible, onClose,
 
     const handleCreateTask = async () => {
         if (!taskForm.title.trim() || !userProfile || !customer.id) return;
+
+        // Validate: Không cho phép tạo ghi chú với thời gian quá khứ
+        if (taskForm.deadline) {
+            const now = new Date();
+            let deadlineDate: Date;
+
+            if (taskForm.deadlineTime) {
+                // Có cả ngày và giờ
+                deadlineDate = new Date(`${taskForm.deadline}T${taskForm.deadlineTime}:00`);
+            } else {
+                // Chỉ có ngày → so sánh với cuối ngày
+                deadlineDate = new Date(`${taskForm.deadline}T23:59:59`);
+            }
+
+            if (deadlineDate < now) {
+                showToast('Không thể tạo ghi chú với thời gian trong quá khứ!', 'error');
+                return;
+            }
+        }
+
         setSavingTask(true);
         try {
             let deadlineValue: string | null = null;

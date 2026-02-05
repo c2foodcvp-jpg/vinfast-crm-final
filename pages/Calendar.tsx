@@ -618,6 +618,25 @@ const CalendarPage: React.FC = () => {
             return;
         }
 
+        // Validate: Không cho phép tạo ghi chú với thời gian quá khứ
+        if (taskForm.deadline) {
+            const now = new Date();
+            let deadlineDate: Date;
+
+            if (taskForm.deadlineTime) {
+                // Có cả ngày và giờ
+                deadlineDate = new Date(`${taskForm.deadline}T${taskForm.deadlineTime}:00`);
+            } else {
+                // Chỉ có ngày → so sánh với cuối ngày
+                deadlineDate = new Date(`${taskForm.deadline}T23:59:59`);
+            }
+
+            if (deadlineDate < now) {
+                alert('⚠️ Không thể tạo ghi chú với thời gian trong quá khứ!');
+                return;
+            }
+        }
+
         setSaving(true);
         try {
             const deadlineISO = taskForm.deadline && taskForm.deadlineTime
