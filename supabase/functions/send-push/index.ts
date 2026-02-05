@@ -111,10 +111,10 @@ serve(async (req) => {
             const fcmMessage = {
                 message: {
                     token: token,
-                    // notification: { // Commented out to prevent DUPLICATE notifications (System + SW)
-                    //     title: title,
-                    //     body: message,
-                    // },
+                    notification: {
+                        title: title,
+                        body: message,
+                    },
                     data: {
                         title: title,
                         body: message,
@@ -123,10 +123,6 @@ serve(async (req) => {
                         related_id: record.related_id || ''
                     },
                     webpush: {
-                        headers: {
-                            Urgency: "high",
-                            TTL: "86400"
-                        },
                         fcm_options: {
                             link: 'https://vinfast-crm.web.app' + (record.link || '/')
                         }

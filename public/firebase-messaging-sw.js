@@ -24,16 +24,11 @@ const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
     console.log('[firebase-messaging-sw.js] Received background message ', payload);
-
-    // FIX: With Data-Only messages, payload.notification might be undefined.
-    // We must read from payload.data
-    const notificationTitle = payload.notification?.title || payload.data?.title || 'VinFast CRM';
+    // Customize notification here
+    const notificationTitle = payload.notification.title;
     const notificationOptions = {
-        body: payload.notification?.body || payload.data?.body || 'Bạn có thông báo mới',
-        icon: '/pwa-192x192.png',
-        badge: '/pwa-192x192.png',
-        data: payload.data, // Store data for click handler
-        tag: 'vinfast-crm-notification' // Optional: grouping
+        body: payload.notification.body,
+        icon: '/pwa-192x192.png'
     };
 
     self.registration.showNotification(notificationTitle, notificationOptions);
