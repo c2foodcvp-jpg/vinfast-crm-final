@@ -24,12 +24,43 @@ const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
     console.log('[firebase-messaging-sw.js] Received background message ', payload);
-    // Customize notification here
-    const notificationTitle = payload.notification.title;
+
+    // If payload has notification object, the SDK usually handles it.
+    // But if we want to force or customize, or if it's a data-only message:
+
+    const notificationTitle = payload.notification?.title || payload.data?.title || 'VinFast CRM';
     const notificationOptions = {
-        body: payload.notification.body,
-        icon: '/pwa-192x192.png'
+        body: payload.notification?.body || payload.data?.body || 'Bạn có thông báo mới',
+        icon: '/pwa-192x192.png',
+        badge: '/pwa-192x192.png',
+        data: payload.data // Pass data to click handler
     };
 
-    self.registration.showNotification(notificationTitle, notificationOptions);
+    // Only show if we explicitly have content, or if standard SDK didn't pick it up
+    // Note: If 'notification' is present in payload, showing it here might cause duplicates
+    // unless we strictly use data-only messages from backend.
+
+    // Check if window is focused (optional, usually handled by foreground handler)
+
+    return self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+self.addEventListener('notificationclick', function (event) {
+    console.log('[firebase-messaging-sw.js] Notification click Received.', event);
+    event.notification.close();
+
+    // Open the app
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clientList) {
+            // If app is already open, focus it
+            for (var i = 0; i < clientList.length; i++) {
+                var client = clientList[i];
+                if (client.url === '/' && 'focus' in client)
+                    return client.focus();
+            }
+            // If not open, open it
+            if (clients.openWindow)
+                return clients.openWindow('/');
+        })
+    );
 });
