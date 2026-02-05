@@ -12,16 +12,22 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['apple-touch-icon.png'],
+      includeAssets: ['app-icon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'VinFast CRM Enterprise',
         short_name: 'VinFast CRM',
         description: 'Hệ thống quản lý quan hệ khách hàng chuyên nghiệp dành cho VinFast',
-        theme_color: '#ffffff',
+        theme_color: '#2462bd', // VinFast Blue
         background_color: '#ffffff',
         display: 'standalone',
         start_url: '/',
         icons: [
+          {
+            src: 'app-icon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any maskable'
+          },
           {
             src: 'pwa-192x192.png',
             sizes: '192x192',
