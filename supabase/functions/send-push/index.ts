@@ -138,11 +138,15 @@ serve(async (req) => {
                 },
                 body: JSON.stringify(fcmMessage)
             });
-            results.push(res.status);
+            results.push({
+                status: res.status,
+                token_preview: token.substring(0, 10) + '...',
+                body: await res.json().catch(() => ({}))
+            });
         }
 
         return new Response(
-            JSON.stringify({ success: true, sent_count: results.length }),
+            JSON.stringify({ success: true, results: results }),
             { headers: { "Content-Type": "application/json" } },
         );
 

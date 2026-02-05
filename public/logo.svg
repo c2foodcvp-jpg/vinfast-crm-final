@@ -1,9 +1,23 @@
-<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
 <defs>
-<linearGradient id="paint0_linear" x1="100" y1="0" x2="100" y2="200" gradientUnits="userSpaceOnUse">
-<stop stop-color="#C0C0C0"/>
-<stop offset="1" stop-color="#808080"/>
+<linearGradient id="blue_grad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#2462bd"/>
+<stop offset="1" stop-color="#1a3967"/>
 </linearGradient>
+<linearGradient id="silver_grad" x1="100" y1="100" x2="400" y2="400" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#ffffff"/>
+<stop offset="0.5" stop-color="#e0e0e0"/>
+<stop offset="1" stop-color="#bdd4f0"/>
+</linearGradient>
+<filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+<feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.25"/>
+</filter>
 </defs>
-<path d="M20 20 L100 180 L180 20 L150 20 L100 120 L50 20 Z" fill="url(#paint0_linear)" stroke="#555" stroke-width="2"/>
+<!-- Background for App Icon (Optional - remove if want transparent logo) -->
+<!-- <rect width="512" height="512" rx="120" fill="url(#blue_grad)"/> -->
+
+<!-- The V Shape (VinFast Style) -->
+<path d="M60 60 L180 60 L256 380 L332 60 L452 60 L256 480 L60 60Z" fill="url(#blue_grad)" filter="url(#shadow)"/>
+<path d="M185 65 L256 360 L327 65" stroke="url(#silver_grad)" stroke-width="5" fill="none"/>
+
 </svg>
