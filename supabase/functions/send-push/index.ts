@@ -35,18 +35,13 @@ const getAccessToken = async ({ client_email, private_key }: { client_email: str
 
 serve(async (req) => {
     try {
-        const { record } = await req.json(); // Payload from Database Webhook or explicit call
+        const payload = await req.json(); // Read once
+        const record = payload.record || payload; // Support nested 'record' or flat payload
 
         // Validate payload
-        if (!record || !record.title || !record.body) {
-            // Handle case where function is called directly with { title, body, user_id }
-            // This block is for manual testing or direct invocation
-            const body = await req.json().catch(() => ({}));
-            if (body.title && body.body) {
-                // proceed with body
-            } else {
-                return new Response("Missing record or title/body", { status: 400 });
-            }
+        // Support 'content' (from DB) OR 'body' (from direct call)
+        if (!record || !record.title || (!record.body && !record.content)) {
+            return new Response("Missing record or title/content", { status: 400 });
         }
 
         const title = record.title;
