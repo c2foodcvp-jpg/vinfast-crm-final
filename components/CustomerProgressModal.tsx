@@ -455,12 +455,6 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
                     >
                         <Truck size={16} /> Tiến trình
                     </button>
-                    <button
-                        onClick={() => setActiveTab('finance')}
-                        className={`flex-1 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${activeTab === 'finance' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500 hover:bg-white/50'}`}
-                    >
-                        <BadgeDollarSign size={16} /> Thu chi
-                    </button>
                 </div>
 
                 {activeTab === 'progress' ? (
@@ -596,53 +590,7 @@ const CustomerProgressModal: React.FC<Props> = ({ customer, visible, onClose, on
                             })}
                         </div>
                     </>
-                ) : (
-                    <div className="flex-1 overflow-y-auto bg-gray-50 p-4">
-                        {loadingTransactions ? (
-                            <div className="text-center py-10 text-gray-500">Đang tải dữ liệu...</div>
-                        ) : transactions.length === 0 ? (
-                            <div className="text-center py-10 text-gray-400 flex flex-col items-center">
-                                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
-                                    <BadgeDollarSign size={24} className="text-gray-300" />
-                                </div>
-                                <p>Chưa có giao dịch nào</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {/* Summary Cards can go here if needed */}
-                                {transactions.map((t) => {
-                                    const isIncome = ['deposit', 'revenue', 'loan_repayment'].includes(t.type);
-                                    return (
-                                        <div key={t.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col gap-2">
-                                            <div className="flex justify-between items-start">
-                                                <div>
-                                                    <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase ${t.type === 'revenue' ? 'bg-green-100 text-green-700' :
-                                                        t.type === 'deposit' ? 'bg-blue-100 text-blue-700' :
-                                                            t.type === 'dealer_debt' ? 'bg-red-100 text-red-700' :
-                                                                'bg-gray-100 text-gray-600'
-                                                        }`}>
-                                                        {t.type === 'revenue' ? 'Doanh thu' :
-                                                            t.type === 'deposit' ? 'Tiền cọc' :
-                                                                t.type === 'dealer_debt' ? 'Đại lý nợ' :
-                                                                    t.type === 'incurred_expense' ? 'Chi phí' : t.type}
-                                                    </span>
-                                                    <p className="font-medium text-gray-800 mt-1">{t.reason}</p>
-                                                </div>
-                                                <span className={`font-bold text-lg ${isIncome ? 'text-green-600' : 'text-red-600'}`}>
-                                                    {isIncome ? '+' : '-'}{t.amount.toLocaleString('vi-VN')}
-                                                </span>
-                                            </div>
-                                            <div className="flex justify-between items-center text-xs text-gray-400 pt-2 border-t border-gray-50 mt-1">
-                                                <span className="flex items-center gap-1"><Calendar size={12} /> {new Date(t.created_at).toLocaleDateString('vi-VN')}</span>
-                                                <span>{t.user_name}</span>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                )}
+                ) : null}
 
             </div>
 

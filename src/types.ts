@@ -61,14 +61,14 @@ export interface QuoteConfig {
   priority: number; // Thứ tự ưu tiên tính toán
   is_active: boolean;
   apply_to_model_ids?: string[]; // Áp dụng cho dòng xe nào (null = all)
-  
+
   // New Fields
   target_type?: 'invoice' | 'rolling'; // 'invoice' = Trừ vào giá xe (XHĐ), 'rolling' = Trừ vào lăn bánh
   apply_to_version_ids?: string[]; // Áp dụng cho phiên bản cụ thể (null/empty = all versions of selected model)
-  
+
   // NEW: Options for Fees (e.g., HCM vs Tinh) OR VinPoint mapping
-  options?: QuoteConfigOption[]; 
-  
+  options?: QuoteConfigOption[];
+
   // NEW: Gift Ratio for Membership (% Tặng thêm)
   gift_ratio?: number;
 
@@ -126,7 +126,7 @@ export interface UserProfile {
   kpi_target?: number; // Deprecated: Use EmployeeKPI table
   is_part_time?: boolean; // New Flag for Part-time
   profit_share_ratio?: number; // Custom profit share ratio (optional)
-  
+
   // Restricted Permissions
   is_locked_add?: boolean; // Block adding new customers
   is_locked_view?: boolean; // Block viewing/editing existing customers
@@ -156,25 +156,25 @@ export interface Customer {
   sales_rep?: string;
   creator_id?: string;
   notes?: string;
-  
+
   classification?: CustomerClassification;
   recare_date?: string;
   is_special_care?: boolean;
   special_care_start_date?: string;
-  
+
   is_long_term?: boolean;
   long_term_return_date?: string;
-  
+
   stop_reason?: string;
-  deal_details?: DealDetails; 
+  deal_details?: DealDetails;
   deal_status?: DealStatus;
-  
+
   pending_transfer_to?: string;
   is_acknowledged?: boolean;
 
   created_at: string;
   updated_at?: string;
-  
+
   // Virtual field for UI
   _is_delegated?: boolean;
   _shared_permission?: 'view' | 'edit'; // New field for per-customer share
@@ -226,7 +226,19 @@ export interface Transaction {
   proof_url?: string; // For images/receipts
   approved_by?: string;
   created_at: string;
+  transaction_date?: string; // NEW: Actual date of transaction
   _is_part_time_creator?: boolean; // Helper for finance calc
+}
+
+export interface CustomerTransaction {
+  id: string;
+  customer_id: string;
+  type: 'revenue' | 'expense';
+  amount: number;
+  transaction_date: string;
+  reason: string;
+  created_by: string;
+  created_at: string;
 }
 
 export interface TeamPolicy {

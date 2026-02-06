@@ -25,6 +25,7 @@ import AssignCustomers from './pages/AssignCustomers';
 import LeadsFromForm from './pages/LeadsFromForm';
 import Promotions from './pages/Promotions';
 import Finance from './pages/Finance';
+import CustomerFinance from './pages/CustomerFinance';
 import TeamFund from './pages/TeamFund';
 import FinanceHistory from './pages/FinanceHistory';
 import CarPrices from './pages/CarPrices';
@@ -147,6 +148,7 @@ const App: React.FC = () => {
 
                   {/* Finance */}
                   <Route path="/finance" element={<ProtectedRoute><Finance /></ProtectedRoute>} />
+                  <Route path="/finance/customer" element={<ProtectedRoute><CustomerFinance /></ProtectedRoute>} />
                   <Route path="/fund-history" element={<ProtectedRoute><FinanceHistory /></ProtectedRoute>} />
                   <Route path="/fund" element={<ProtectedRoute><TeamFund /></ProtectedRoute>} />
 

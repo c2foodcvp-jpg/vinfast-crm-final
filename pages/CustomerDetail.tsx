@@ -6,11 +6,12 @@ import { Customer, CustomerStatus, Interaction, CustomerClassification, UserProf
 import { useAuth } from '../contexts/AuthContext';
 import {
     ArrowLeft, Phone, Edit, MessageCircle, Send, User as UserIcon, Calendar, Flame, Ban, CheckCircle2, RefreshCcw, ArrowRightLeft, X, Loader2, AlertTriangle, FileCheck2, Trash2, UserCheck, ChevronRight, ChevronLeft, Save, Plus, BadgeDollarSign, Wallet, Undo2, Building2, Check, Eye, Share2, Archive, Calculator, Truck,
-    ListTodo, Lock, Mic, MicOff, Settings2
+    ListTodo, Lock, Mic, Settings2
 } from 'lucide-react';
 import CustomerProgressModal, { DELIVERY_STEPS } from '../components/CustomerProgressModal';
 import TaskCreationModal from '../components/TaskCreationModal';
 import VoiceRecordingModal from '../components/VoiceRecordingModal';
+import CustomerFinancePopup from '../components/Finance/CustomerFinancePopup';
 
 const { useParams, useNavigate, useLocation } = ReactRouterDOM as any;
 
@@ -169,9 +170,15 @@ const CustomerDetail: React.FC = () => {
     const [existingShares, setExistingShares] = useState<any[]>([]);
     const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
 
-    const [showExpenseModal, setShowExpenseModal] = useState(false);
-    const [expenseForm, setExpenseForm] = useState({ type: 'expense' as TransactionType, amount: '', reason: '' });
+    const [dealerDebtToConfirm, setDealerDebtToConfirm] = useState<Transaction | null>(null);
 
+    // Progress Modal
+    const [showProgressModal, setShowProgressModal] = useState(false);
+
+    const [showTaskModal, setShowTaskModal] = useState(false);
+    const [showFinancePopup, setShowFinancePopup] = useState(false);
+
+    // Missing Forms State Restoration
     const [showAddRevenueModal, setShowAddRevenueModal] = useState(false);
     const [revenueForm, setRevenueForm] = useState({ amount: '', note: '' });
 
@@ -179,19 +186,12 @@ const CustomerDetail: React.FC = () => {
     const [incurredExpenseForm, setIncurredExpenseForm] = useState({ amount: '', reason: '' });
 
     const [showRepayModal, setShowRepayModal] = useState(false);
-    const [repayForm, setRepayForm] = useState({ amount: '', reason: 'Nộp lại tiền ứng' });
+    const [repayForm, setRepayForm] = useState({ amount: '', reason: 'Trả nợ vay' });
 
     const [showDealerDebtModal, setShowDealerDebtModal] = useState(false);
     const [dealerDebtForm, setDealerDebtForm] = useState({ amount: '', targetDate: '', reason: 'Đại lý nợ tiền', isNewDebt: true });
 
     const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
-    const [dealerDebtToConfirm, setDealerDebtToConfirm] = useState<Transaction | null>(null);
-
-    // Progress Modal
-    const [showProgressModal, setShowProgressModal] = useState(false);
-
-    // Task Modal State
-    const [showTaskModal, setShowTaskModal] = useState(false);
 
     // Debt Warning Modal State
     const [showDebtWarningModal, setShowDebtWarningModal] = useState(false);
@@ -566,7 +566,7 @@ const CustomerDetail: React.FC = () => {
             await updateCustomerField({ is_special_care: true, is_long_term: false, special_care_start_date: new Date().toISOString(), classification: 'Hot' });
             handleAddNote('note', "Đã đánh dấu: Chăm sóc đặc biệt (Hot)");
         } else {
-            await updateCustomerField({ is_special_care: false, special_care_start_date: null });
+            await updateCustomerField({ is_special_care: false, special_care_start_date: null as any });
         }
     };
 
@@ -657,7 +657,7 @@ const CustomerDetail: React.FC = () => {
     };
 
     const handleReopenCare = async () => {
-        await updateCustomerField({ status: CustomerStatus.POTENTIAL, stop_reason: null });
+        await updateCustomerField({ status: CustomerStatus.POTENTIAL, stop_reason: null as any });
         handleAddNote('note', 'Đã mở lại chăm sóc khách hàng.');
         showToast("Đã mở lại chăm sóc!");
     };
@@ -695,7 +695,7 @@ const CustomerDetail: React.FC = () => {
         const rep = employees.find(e => e.id === newRepId);
         if (rep) { newRepName = rep.full_name; } else { const { data } = await supabase.from('profiles').select('full_name').eq('id', newRepId).single(); if (data) newRepName = data.full_name; }
 
-        await updateCustomerField({ sales_rep: newRepName, creator_id: newRepId, pending_transfer_to: null });
+        await updateCustomerField({ sales_rep: newRepName, creator_id: newRepId, pending_transfer_to: null as any });
         handleAddNote('note', `[Admin/Mod] Đã duyệt chuyển quyền chăm sóc sang ${newRepName}.`);
 
         // NOTIFICATION REMOVED (Handled by Trigger)
@@ -703,7 +703,7 @@ const CustomerDetail: React.FC = () => {
         showToast("Đã duyệt chuyển quyền!");
     };
 
-    const handleRejectTransfer = async () => { await updateCustomerField({ pending_transfer_to: null }); handleAddNote('note', '[Admin/Mod] Đã từ chối yêu cầu chuyển quyền.'); showToast("Đã từ chối!"); };
+    const handleRejectTransfer = async () => { await updateCustomerField({ pending_transfer_to: null as any }); handleAddNote('note', '[Admin/Mod] Đã từ chối yêu cầu chuyển quyền.'); showToast("Đã từ chối!"); };
 
     const prepareChangeSales = (newRep: UserProfile) => { if (isAdmin || isMod) { setShowChangeSalesConfirm({ rep: newRep, type: 'direct' }); } else { setShowChangeSalesConfirm({ rep: newRep, type: 'request' }); } };
 
@@ -1128,6 +1128,7 @@ const CustomerDetail: React.FC = () => {
                         {(isAdmin || isMod) && (
                             <button onClick={() => setShowDeleteConfirm(true)} className="p-2 bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><Trash2 size={18} /></button>
                         )}
+
                     </div>
                 </div>
             </div>
@@ -1164,6 +1165,21 @@ const CustomerDetail: React.FC = () => {
                                     {canCreateTask ? <ListTodo size={14} /> : <Lock size={14} />} Thêm nhắc nhở
                                 </button>
                             </div><div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center mb-4"><p className="text-xs text-green-600 font-bold uppercase mb-1">TÌNH TRẠNG HIỆN TẠI</p><p className="text-xl font-bold text-green-800">{isCompleted ? 'Đã hoàn thành' : isRefunded ? 'Đã trả cọc' : isSuspended ? 'Hồ sơ Treo' : customer.deal_status === 'completed_pending' ? 'Chờ duyệt hoàn thành' : customer.deal_status === 'refund_pending' ? 'Chờ duyệt trả cọc' : customer.deal_status === 'suspended_pending' ? 'Chờ duyệt Treo' : 'Đang Xử Lý'}</p></div><div className="space-y-3"><button className="w-full py-2.5 bg-white border border-green-600 text-green-700 rounded-xl font-bold text-sm hover:bg-green-50 flex items-center justify-center gap-2"><FileCheck2 size={16} /> Quản lý Đơn hàng</button>
+                                {((userProfile?.member_tier === 'Platinum' || userProfile?.member_tier === 'Diamond') || isAdmin || isMod) && (
+                                    <button
+                                        onClick={() => {
+                                            const canAccess = (userProfile?.member_tier === 'Platinum' || userProfile?.member_tier === 'Diamond') || isAdmin || isMod;
+                                            if (!canAccess) {
+                                                showToast('🔒 Tính năng chỉ dành cho hạng Platinum/Diamond!', 'error');
+                                                return;
+                                            }
+                                            setShowFinancePopup(true);
+                                        }}
+                                        className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-bold text-sm hover:from-amber-600 hover:to-orange-700 shadow-lg shadow-orange-200 flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02]"
+                                    >
+                                        <BadgeDollarSign size={18} /> Quản lý Thu/Chi
+                                    </button>
+                                )}
                                 {!isCompleted && !isRefunded && !isSuspended && customer.deal_status !== 'refund_pending' && !isDelegatedViewOnly && (<><button onClick={() => handleDealAction('complete')} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 flex items-center justify-center gap-2"><CheckCircle2 size={16} /> Hoàn thành Đơn hàng</button><div className="grid grid-cols-2 gap-2"><button onClick={() => setShowRefundConfirm(true)} className="py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 flex items-center justify-center gap-2"><RefreshCcw size={16} /> Trả cọc</button><button onClick={() => handleDealAction('suspend')} className="py-2.5 bg-gray-100 text-gray-700 border border-gray-200 rounded-xl font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"><Archive size={16} /> Treo hồ sơ</button></div></>)}
 
                                 {/* REFUND PENDING STATE */}
@@ -1410,6 +1426,14 @@ const CustomerDetail: React.FC = () => {
                 isListening={isListening}
             />
 
+            {showFinancePopup && customer && (
+                <CustomerFinancePopup
+                    customer={customer}
+                    onClose={() => setShowFinancePopup(false)}
+                    userProfile={userProfile}
+                />
+            )}
+
             {/* ... Modals ... */}
             {
                 showSuspendModal && (
@@ -1623,138 +1647,7 @@ const CustomerDetail: React.FC = () => {
                 )
             }
 
-            {/* --- ADD REVENUE MODAL --- */}
-            {
-                showAddRevenueModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-bold text-gray-900">Thêm Doanh thu Thực tế</h3>
-                                <button onClick={() => setShowAddRevenueModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                            </div>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={revenueForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setRevenueForm({ ...revenueForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú</label>
-                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={revenueForm.note} onChange={e => setRevenueForm({ ...revenueForm, note: e.target.value })} placeholder="Đợt 2, Phụ kiện..." />
-                                </div>
-                                <button onClick={handleAddRevenue} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận Thêm</button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
 
-            {/* --- INCURRED EXPENSE MODAL --- */}
-            {
-                showIncurredExpenseModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-bold text-gray-900">Chi phí Phát sinh (Đơn hàng)</h3>
-                                <button onClick={() => setShowIncurredExpenseModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                            </div>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500 font-bold" value={incurredExpenseForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setIncurredExpenseForm({ ...incurredExpenseForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Lý do chi</label>
-                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-red-500" value={incurredExpenseForm.reason} onChange={e => setIncurredExpenseForm({ ...incurredExpenseForm, reason: e.target.value })} placeholder="Hoa hồng ngoài, phí..." />
-                                </div>
-                                <div className="text-xs bg-gray-50 p-2 rounded text-gray-500">
-                                    Khoản này sẽ được trừ vào <strong>Doanh thu thực tế</strong> của đơn hàng này, không ảnh hưởng quỹ nhóm chung.
-                                </div>
-                                <button onClick={handleAddIncurredExpense} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">Xác nhận Chi</button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
-
-            {
-                showRepayModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-bold text-gray-900">Hoàn ứng / Nộp tiền</h3>
-                                <button onClick={() => setShowRepayModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                            </div>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền nộp (VNĐ)</label>
-                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={repayForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setRepayForm({ ...repayForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Nội dung</label>
-                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 bg-gray-100" value={repayForm.reason} disabled />
-                                </div>
-                                <button onClick={handleRepayLoan} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Gửi yêu cầu Trả</button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
-
-            {
-                showDealerDebtModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-bold text-gray-900">Đại lý Nợ</h3>
-                                <button onClick={() => setShowDealerDebtModal(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
-                            </div>
-                            <div className="space-y-4">
-                                {/* Debt Type Selection */}
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-bold text-gray-700 mb-2">Loại khoản nợ</label>
-                                    <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${dealerDebtForm.isNewDebt ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                                        <input type="radio" name="debtType" checked={dealerDebtForm.isNewDebt === true} onChange={() => setDealerDebtForm({ ...dealerDebtForm, isNewDebt: true })} className="mt-1 accent-green-600" />
-                                        <div>
-                                            <p className="font-bold text-gray-900 text-sm">Khoản nợ mới</p>
-                                            <p className="text-xs text-gray-500">Cộng thêm vào doanh thu thực tế tổng</p>
-                                        </div>
-                                    </label>
-                                    <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${dealerDebtForm.isNewDebt === false ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                                        <input type="radio" name="debtType" checked={dealerDebtForm.isNewDebt === false} onChange={() => setDealerDebtForm({ ...dealerDebtForm, isNewDebt: false })} className="mt-1 accent-orange-600" />
-                                        <div>
-                                            <p className="font-bold text-gray-900 text-sm">Nợ từ doanh thu đã báo</p>
-                                            <p className="text-xs text-gray-500">Đã nằm trong DT thực tế, không cộng thêm</p>
-                                        </div>
-                                    </label>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500 font-bold" value={dealerDebtForm.amount} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setDealerDebtForm({ ...dealerDebtForm, amount: v ? Number(v).toLocaleString('vi-VN') : '' }); }} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Hạn thanh toán</label>
-                                    <input type="date" min={todayStr} className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.targetDate} onChange={e => setDealerDebtForm({ ...dealerDebtForm, targetDate: e.target.value })} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Ghi chú</label>
-                                    <input type="text" className="w-full border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-green-500" value={dealerDebtForm.reason} onChange={e => setDealerDebtForm({ ...dealerDebtForm, reason: e.target.value })} />
-                                </div>
-                                <button onClick={handleSubmitDealerDebt} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Xác nhận</button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
-
-            {
-                dealerDebtToConfirm && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-fade-in">
-                        <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-green-100">
-                            <div className="flex flex-col items-center text-center"><div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600"><CheckCircle2 size={32} /></div><h3 className="text-xl font-bold text-gray-900 mb-2">Đại lý đã trả nợ?</h3><div className="bg-green-50 p-4 rounded-xl text-left w-full mb-4 border border-green-100 space-y-2"><div><p className="text-xs text-gray-500">Khoản nợ</p><p className="font-bold text-gray-900">{dealerDebtToConfirm.reason}</p></div><div><p className="text-xs text-gray-500">Số tiền</p><p className="font-bold text-green-600 text-lg">{formatCurrency(dealerDebtToConfirm.amount)} VNĐ</p></div></div><p className="text-xs text-gray-500 mb-4">Hành động này sẽ ghi nhận <strong>Doanh thu/Nộp tiền</strong> vào hệ thống.</p><div className="flex gap-3 w-full"><button onClick={() => setDealerDebtToConfirm(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button><button onClick={executeDealerDebtPaid} className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">Xác nhận</button></div></div>
-                        </div>
-                    </div>
-                )
-            }
 
             {
                 showBorrowModal && (

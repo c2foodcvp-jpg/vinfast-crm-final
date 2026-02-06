@@ -19,6 +19,7 @@ import AssignCustomers from './pages/AssignCustomers';
 import LeadsFromForm from './pages/LeadsFromForm';
 import Promotions from './pages/Promotions';
 import Finance from './pages/Finance';
+import CustomerFinance from './pages/CustomerFinance';
 import TeamFund from './pages/TeamFund';
 import CarPrices from './pages/CarPrices';
 import BankRates from './pages/BankRates';
@@ -84,6 +85,7 @@ const App: React.FC = () => {
               <Route path="/leads-form" element={<ProtectedRoute><LeadsFromForm /></ProtectedRoute>} />
               <Route path="/promotions" element={<ProtectedRoute><Promotions /></ProtectedRoute>} />
               <Route path="/finance" element={<ProtectedRoute><Finance /></ProtectedRoute>} />
+              <Route path="/finance/customer" element={<ProtectedRoute><CustomerFinance /></ProtectedRoute>} />
               <Route path="/team-fund" element={<ProtectedRoute><TeamFund /></ProtectedRoute>} />
               <Route path="/car-prices" element={<ProtectedRoute><CarPrices /></ProtectedRoute>} />
               <Route path="/bank-rates" element={<ProtectedRoute><BankRates /></ProtectedRoute>} />

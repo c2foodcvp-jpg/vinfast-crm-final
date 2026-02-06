@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { MembershipTier } from '../types';
 import { Sparkles, Lock, ArrowUpCircle } from 'lucide-react';
@@ -6,6 +7,7 @@ import LunarCalendar from '../components/LunarCalendar';
 
 const Utilities: React.FC = () => {
     const { userProfile } = useAuth();
+    const navigate = useNavigate();
 
     const isPlatinumOrHigher =
         userProfile?.member_tier === MembershipTier.PLATINUM ||
@@ -53,6 +55,15 @@ const Utilities: React.FC = () => {
             {/* Placeholder Grid for Future Tools */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Example Placeholder Card 1 */}
+                {/* Finance Tool */}
+                <div onClick={() => navigate('/finance/customer')} className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow group cursor-pointer">
+                    <div className="w-12 h-12 bg-green-50 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                        <Sparkles className="text-green-600" size={24} />
+                    </div>
+                    <h3 className="font-bold text-gray-800 mb-2">Quản lý Thu Chi (Beta)</h3>
+                    <p className="text-sm text-gray-500">Theo dõi, quản lý công nợ và lợi nhuận từng khách hàng.</p>
+                </div>
+
                 <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow group">
                     <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                         <Sparkles className="text-purple-600" size={24} />

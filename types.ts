@@ -316,6 +316,7 @@ export interface Transaction {
   created_at: string;
   _is_part_time_creator?: boolean; // Helper for finance calc
   fund_period_id?: string; // Explicit Fund Period Assignment
+  transaction_date?: string; // NEW: Actual date of transaction
 }
 
 export interface TeamPolicy {
