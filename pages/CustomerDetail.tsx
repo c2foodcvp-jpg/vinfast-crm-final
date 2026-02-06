@@ -694,18 +694,83 @@ const CustomerDetail: React.FC = () => {
         let newRepName = 'Unknown';
         const rep = employees.find(e => e.id === newRepId);
         if (rep) { newRepName = rep.full_name; } else { const { data } = await supabase.from('profiles').select('full_name').eq('id', newRepId).single(); if (data) newRepName = data.full_name; }
+
         await updateCustomerField({ sales_rep: newRepName, creator_id: newRepId, pending_transfer_to: null });
         handleAddNote('note', `[Admin/Mod] Đã duyệt chuyển quyền chăm sóc sang ${newRepName}.`);
+
+        // NOTIFICATION REMOVED (Handled by Trigger)
+
         showToast("Đã duyệt chuyển quyền!");
     };
 
     const handleRejectTransfer = async () => { await updateCustomerField({ pending_transfer_to: null }); handleAddNote('note', '[Admin/Mod] Đã từ chối yêu cầu chuyển quyền.'); showToast("Đã từ chối!"); };
+
     const prepareChangeSales = (newRep: UserProfile) => { if (isAdmin || isMod) { setShowChangeSalesConfirm({ rep: newRep, type: 'direct' }); } else { setShowChangeSalesConfirm({ rep: newRep, type: 'request' }); } };
-    const executeChangeSales = async () => { if (!showChangeSalesConfirm) return; const { rep, type } = showChangeSalesConfirm; if (type === 'direct') { await updateCustomerField({ sales_rep: rep.full_name, creator_id: rep.id }); handleAddNote('note', `Đã chuyển khách hàng sang TVBH: ${rep.full_name}`); showToast("Đã chuyển Sales thành công!"); } else { await updateCustomerField({ pending_transfer_to: rep.id }); handleAddNote('note', `Đã gửi yêu cầu chuyển khách sang: ${rep.full_name}`); showToast("Đã gửi yêu cầu!"); } setShowChangeSalesConfirm(null); setShowChangeSalesModal(false); };
+
+    const executeChangeSales = async () => {
+        if (!showChangeSalesConfirm) return;
+        const { rep, type } = showChangeSalesConfirm;
+
+        if (type === 'direct') {
+            await updateCustomerField({ sales_rep: rep.full_name, creator_id: rep.id });
+            handleAddNote('note', `Đã chuyển khách hàng sang TVBH: ${rep.full_name}`);
+
+            // NOTIFICATION REMOVED (Handled by Trigger)
+
+            showToast("Đã chuyển Sales thành công!");
+        } else {
+            await updateCustomerField({ pending_transfer_to: rep.id });
+            handleAddNote('note', `Đã gửi yêu cầu chuyển khách sang: ${rep.full_name}`);
+            showToast("Đã gửi yêu cầu!");
+        }
+        setShowChangeSalesConfirm(null);
+        setShowChangeSalesModal(false);
+    };
 
     const handleOpenShareModal = async () => { if (!id) return; const { data } = await supabase.from('customer_shares').select('*').eq('customer_id', id); const mappedShares = []; if (data) { for (const s of data) { const u = employees.find(e => e.id === s.shared_with); mappedShares.push({ ...s, user_name: u?.full_name || 'Unknown' }); } } setExistingShares(mappedShares); setShowShareModal(true); };
 
-    const handleShareCustomer = async () => { if (!shareForm.recipientId || !id) return; if (shareForm.recipientId === userProfile?.id) { alert("Không thể chia sẻ cho chính mình."); return; } try { const { data: existing } = await supabase.from('customer_shares').select('id').eq('customer_id', id).eq('shared_with', shareForm.recipientId).maybeSingle(); if (existing) { await supabase.from('customer_shares').update({ permission: shareForm.permission }).eq('id', existing.id); } else { await supabase.from('customer_shares').insert([{ customer_id: id, shared_by: userProfile?.id, shared_with: shareForm.recipientId, permission: shareForm.permission }]); } const recipient = employees.find(e => e.id === shareForm.recipientId); handleAddNote('note', `Đã chia sẻ quyền truy cập (${shareForm.permission === 'view' ? 'Xem' : 'Sửa'}) cho: ${recipient?.full_name}`); alert("Đã chia sẻ thành công!"); handleOpenShareModal(); } catch (e: any) { if (e.code === '42P01') alert("Lỗi: Bảng chia sẻ chưa được tạo trong Database. Vui lòng báo Admin."); else alert("Lỗi chia sẻ: " + e.message); } };
+    const handleShareCustomer = async () => {
+        if (!shareForm.recipientId || !id) return;
+        if (shareForm.recipientId === userProfile?.id) { alert("Không thể chia sẻ cho chính mình."); return; }
+
+        try {
+            const { data: existing } = await supabase.from('customer_shares').select('id').eq('customer_id', id).eq('shared_with', shareForm.recipientId).maybeSingle();
+
+            if (existing) {
+                await supabase.from('customer_shares').update({ permission: shareForm.permission }).eq('id', existing.id);
+            } else {
+                await supabase.from('customer_shares').insert([{ customer_id: id, shared_by: userProfile?.id, shared_with: shareForm.recipientId, permission: shareForm.permission }]);
+            }
+
+            const recipient = employees.find(e => e.id === shareForm.recipientId);
+            const permLabel = shareForm.permission === 'view' ? 'Xem' : 'Sửa';
+
+            handleAddNote('note', `Đã chia sẻ quyền truy cập (${permLabel}) cho: ${recipient?.full_name}`);
+
+            // NOTIFICATION
+            try {
+                await supabase.from('system_notifications').insert([{
+                    title: 'Chia sẻ khách hàng',
+                    content: `Bạn được chia sẻ quyền <b>${permLabel}</b> khách hàng <b>${customer?.name}</b> từ <b>${userProfile?.full_name}</b>.`,
+                    sender_id: userProfile?.id,
+                    target_scope: 'specific',
+                    target_user_ids: [shareForm.recipientId],
+                    sender_name: userProfile?.full_name,
+                    is_active: true,
+                    display_type: 'popup',
+                    type: 'customer_share',
+                    link: `/customers/${id}`,
+                    related_id: id
+                }]);
+            } catch (e) { console.error("Error sending notification", e); }
+
+            alert("Đã chia sẻ thành công!");
+            handleOpenShareModal();
+        } catch (e: any) {
+            if (e.code === '42P01') alert("Lỗi: Bảng chia sẻ chưa được tạo trong Database. Vui lòng báo Admin.");
+            else alert("Lỗi chia sẻ: " + e.message);
+        }
+    };
     const executeRevokeShare = async (shareId: string, userName: string) => { try { await supabase.from('customer_shares').delete().eq('id', shareId); handleAddNote('note', `Đã hủy quyền truy cập của: ${userName}`); handleOpenShareModal(); } catch (e) { alert("Lỗi hủy chia sẻ."); } setRevokeConfirmId(null); };
     const executeDeleteCustomer = async () => { if (!id) return; try { await supabase.from('interactions').delete().eq('customer_id', id); await supabase.from('transactions').delete().eq('customer_id', id); await supabase.from('customer_shares').delete().eq('customer_id', id); const { error } = await supabase.from('customers').delete().eq('id', id); if (error) { throw new Error(error.message); } navigate('/customers'); } catch (e: any) { showToast("Lỗi xóa: " + e.message, 'error'); setShowDeleteConfirm(false); } };
     const handleDealAction = async (action: 'complete' | 'refund' | 'cancel' | 'reopen' | 'suspend') => {
