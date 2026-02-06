@@ -29,7 +29,8 @@ import {
     ChevronRight,
     Building2,
     AlertTriangle,
-    BarChart2
+    BarChart2,
+    Wallet
 } from 'lucide-react';
 
 import ProgressMonitorModal from '../components/ProgressMonitorModal';
@@ -77,6 +78,9 @@ const Deals: React.FC = () => {
 
     // --- NEW: Progress Monitor Modal State ---
     const [showProgressMonitor, setShowProgressMonitor] = useState(false);
+
+    // --- NEW: Dealer Debt Summary Modal State ---
+    const [showDealerDebtSummary, setShowDealerDebtSummary] = useState(false);
 
     // --- RESTORE STATE LOGIC (SessionStorage) ---
     const [isRestored, setIsRestored] = useState(false); // NEW: Guard flag
@@ -393,6 +397,91 @@ const Deals: React.FC = () => {
         return Math.max(0, (actualRevenue - incurred) - deposited);
     };
 
+    // --- NEW: Dealer Debt Summary by Distributor ---
+    const dealerDebtSummary = useMemo(() => {
+        // Get all unpaid dealer debts
+        let unpaidDebts = transactions.filter(t =>
+            t.type === 'dealer_debt' &&
+            t.status === 'approved' &&
+            !t.reason.includes('(Đã thu)')
+        );
+
+        // --- TEAM FILTER ---
+        // Filter debts based on the customer's creator or sales rep team
+        unpaidDebts = unpaidDebts.filter(debt => {
+            const customer = debt.customer_id ? customers.find(c => c.id === debt.customer_id) : null;
+            if (!customer) return false; // Skip debts without linked customer
+
+            // Find creator profile
+            const creator = employees.find(p => p.id === customer.creator_id);
+            // Find sales rep profile
+            const salesRepProfile = employees.find(p => p.full_name === customer.sales_rep);
+
+            if (isAdmin) {
+                // Admin: Filter by selected team
+                if (selectedTeam !== 'all') {
+                    const isCreatorInTeam = creator?.manager_id === selectedTeam || creator?.id === selectedTeam;
+                    const isRepInTeam = salesRepProfile?.manager_id === selectedTeam || salesRepProfile?.id === selectedTeam;
+                    return isCreatorInTeam || isRepInTeam;
+                }
+                return true; // Admin with 'all' sees everything
+            } else if (isMod) {
+                // MOD: Only see debts from their team
+                const isCreatorSelf = customer.creator_id === userProfile?.id;
+                const isCreatorSub = creator?.manager_id === userProfile?.id;
+                const isRepSelf = customer.sales_rep === userProfile?.full_name;
+                const isRepSub = salesRepProfile?.manager_id === userProfile?.id;
+                return isCreatorSelf || isCreatorSub || isRepSelf || isRepSub;
+            } else {
+                // Regular employee: Only their own debts
+                return customer.creator_id === userProfile?.id || customer.sales_rep === userProfile?.full_name;
+            }
+        });
+
+        // Group by distributor (from customer's deal_details)
+        const debtsByDistributor: Record<string, {
+            distributor: string;
+            items: Array<{
+                customerName: string;
+                salesRep: string;
+                amount: number;
+                targetDate: string;
+                reason: string;
+                customerId: string;
+            }>;
+            total: number
+        }> = {};
+
+        for (const debt of unpaidDebts) {
+            // Find customer to get distributor info
+            const customer = debt.customer_id ? customers.find(c => c.id === debt.customer_id) : null;
+            const distributorName = customer?.deal_details?.distributor || 'Không xác định';
+
+            if (!debtsByDistributor[distributorName]) {
+                debtsByDistributor[distributorName] = {
+                    distributor: distributorName,
+                    items: [],
+                    total: 0
+                };
+            }
+
+            debtsByDistributor[distributorName].items.push({
+                customerName: debt.customer_name || customer?.name || 'N/A',
+                salesRep: customer?.sales_rep || 'N/A',
+                amount: debt.amount,
+                targetDate: debt.target_date || '',
+                reason: debt.reason,
+                customerId: debt.customer_id || ''
+            });
+            debtsByDistributor[distributorName].total += debt.amount;
+        }
+
+        const grouped = Object.values(debtsByDistributor).sort((a, b) => b.total - a.total);
+        const grandTotal = unpaidDebts.reduce((sum, t) => sum + t.amount, 0);
+
+        return { grouped, grandTotal };
+    }, [transactions, customers, employees, isAdmin, isMod, selectedTeam, userProfile]);
+
     if (loading) return <div className="p-8 text-center text-gray-500">Đang tải danh sách...</div>;
 
     return (
@@ -504,6 +593,13 @@ const Deals: React.FC = () => {
                                 title="Kiểm tra tiến độ giao xe"
                             >
                                 <BarChart2 size={18} /> <span className="hidden sm:inline">Tiến độ</span>
+                            </button>
+                            <button
+                                onClick={() => setShowDealerDebtSummary(true)}
+                                className="flex items-center gap-2 h-10 px-4 bg-red-600 text-white rounded-xl font-bold shadow-md hover:bg-red-700 transition-colors"
+                                title="Xem tổng hợp nợ đại lý"
+                            >
+                                <Wallet size={18} /> <span className="hidden sm:inline">Nợ Đại Lý</span>
                             </button>
                             <button
                                 onClick={handleExport}
@@ -863,6 +959,115 @@ const Deals: React.FC = () => {
                         <div className="flex gap-2 pt-2">
                             <button onClick={() => setShowDateModal(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Hủy</button>
                             <button onClick={handleUpdateDate} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg">Lưu thay đổi</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Dealer Debt Summary */}
+            {showDealerDebtSummary && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden shadow-2xl flex flex-col">
+                        {/* Header */}
+                        <div className="p-5 border-b bg-gradient-to-r from-red-50 to-orange-50 flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 bg-red-600 rounded-xl">
+                                    <Wallet size={22} className="text-white" />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-bold text-gray-900">Tổng hợp Nợ Đại Lý</h3>
+                                    <p className="text-xs text-gray-500">Các khoản nợ chưa thu từ đại lý</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowDealerDebtSummary(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                                <X size={20} className="text-gray-500" />
+                            </button>
+                        </div>
+
+                        {/* Summary Banner */}
+                        <div className="px-5 py-4 bg-red-600 text-white flex justify-between items-center">
+                            <span className="font-bold">TỔNG NỢ CHƯA THU:</span>
+                            <span className="text-2xl font-bold">{formatCurrency(dealerDebtSummary.grandTotal)} VNĐ</span>
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                            {dealerDebtSummary.grouped.length === 0 ? (
+                                <div className="text-center py-12 text-gray-500">
+                                    <CheckCircle2 size={48} className="mx-auto text-green-500 mb-3" />
+                                    <p className="font-bold">Không có khoản nợ nào!</p>
+                                    <p className="text-sm mt-1">Tất cả các khoản nợ đại lý đã được thu.</p>
+                                </div>
+                            ) : (
+                                dealerDebtSummary.grouped.map((group) => (
+                                    <div key={group.distributor} className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
+                                        {/* Distributor Header */}
+                                        <div className="p-4 bg-gradient-to-r from-orange-100 to-amber-50 flex justify-between items-center border-b border-orange-200">
+                                            <div className="flex items-center gap-2">
+                                                <Building2 size={18} className="text-orange-600" />
+                                                <span className="font-bold text-gray-900">{group.distributor}</span>
+                                                <span className="text-xs bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full font-bold">
+                                                    {group.items.length} khoản
+                                                </span>
+                                            </div>
+                                            <span className="font-bold text-red-600">{formatCurrency(group.total)} VNĐ</span>
+                                        </div>
+
+                                        {/* Debt Items */}
+                                        <div className="divide-y divide-gray-100">
+                                            {group.items.map((item, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    className="p-3 hover:bg-white transition-colors cursor-pointer"
+                                                    onClick={() => {
+                                                        if (item.customerId) {
+                                                            setShowDealerDebtSummary(false);
+                                                            navigate(`/customers/${item.customerId}`);
+                                                        }
+                                                    }}
+                                                >
+                                                    <div className="flex justify-between items-start">
+                                                        <div className="flex-1">
+                                                            <p className="font-bold text-gray-900 text-sm">{item.customerName}</p>
+                                                            <div className="flex items-center gap-2 mt-1">
+                                                                <span className="text-xs text-gray-500">TVBH:</span>
+                                                                <span className="text-xs font-bold text-blue-600">{item.salesRep}</span>
+                                                            </div>
+                                                            {item.targetDate && (
+                                                                <div className="flex items-center gap-1 mt-1">
+                                                                    <Calendar size={12} className="text-gray-400" />
+                                                                    <span className="text-xs text-gray-500">
+                                                                        Hạn: {new Date(item.targetDate).toLocaleDateString('vi-VN')}
+                                                                    </span>
+                                                                    {new Date(item.targetDate) < new Date() && (
+                                                                        <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-bold animate-pulse">
+                                                                            Quá hạn
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <span className="font-bold text-red-600">{formatCurrency(item.amount)}</span>
+                                                    </div>
+                                                    {item.reason && (
+                                                        <p className="text-xs text-gray-400 mt-2 italic line-clamp-1">{item.reason}</p>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-4 border-t bg-gray-50">
+                            <button
+                                onClick={() => setShowDealerDebtSummary(false)}
+                                className="w-full py-2.5 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition-colors"
+                            >
+                                Đóng
+                            </button>
                         </div>
                     </div>
                 </div>

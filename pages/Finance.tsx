@@ -51,6 +51,7 @@ const Finance: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [transactions, setTransactions] = useState<ExtendedTransaction[]>([]);
     const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+
     const [allProfiles, setAllProfiles] = useState<UserProfile[]>([]);
     const [profitExclusions, setProfitExclusions] = useState<ProfitExclusion[]>([]);
     const [allKPIs, setAllKPIs] = useState<EmployeeKPI[]>([]); // NEW: Store all KPIs
@@ -131,6 +132,7 @@ const Finance: React.FC = () => {
     const [showSalaryConfirmModal, setShowSalaryConfirmModal] = useState(false);
     const [salaryPayoutTarget, setSalaryPayoutTarget] = useState<{ user: UserProfile, maxAmount: number } | null>(null);
     const [salaryPayoutAmount, setSalaryPayoutAmount] = useState<string>('');
+    const [salaryPayoutFundId, setSalaryPayoutFundId] = useState<string>(''); // NEW: Fund selection for salary payout
 
     // KPI Penalty Rate Config Modal (for MOD)
     const [showKpiConfigModal, setShowKpiConfigModal] = useState(false);
@@ -145,6 +147,8 @@ const Finance: React.FC = () => {
 
     // NEW: Map of User ID -> Penalty Rate (0.01 = 1%)
     const [userPenaltyRates, setUserPenaltyRates] = useState<Record<string, number>>({});
+
+
 
     useEffect(() => {
         if (userProfile) {
@@ -248,6 +252,8 @@ const Finance: React.FC = () => {
                 .order('created_at', { ascending: false });
             const custList = (customers as Customer[]) || [];
             setAllCustomers(custList);
+
+
 
             const { data: trans } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
             let transList = (trans as Transaction[]) || [];
@@ -1004,11 +1010,18 @@ const Finance: React.FC = () => {
     const openSalaryModal = (user: UserProfile, maxAmount: number) => {
         setSalaryPayoutTarget({ user, maxAmount });
         setSalaryPayoutAmount('');
+        setSalaryPayoutFundId(selectedFundPeriod !== 'all' ? selectedFundPeriod : ''); // NEW: Default to current fund
         setShowSalaryConfirmModal(true);
     };
 
     const confirmPaySalary = async () => {
         if (!salaryPayoutTarget || !salaryPayoutAmount) return;
+
+        // NEW: Validate fund selection
+        if (!salaryPayoutFundId) {
+            showToast("Vui lòng chọn quỹ để chi lương!", 'error');
+            return;
+        }
 
         // Remove non-numeric chars (commas, dots) before parsing
         const rawAmount = salaryPayoutAmount.replace(/[^0-9]/g, '');
@@ -1024,6 +1037,8 @@ const Finance: React.FC = () => {
         }
 
         const user = salaryPayoutTarget.user;
+        const selectedFund = fundPeriods.find(p => p.id === salaryPayoutFundId);
+        const fundLabel = selectedFund?.name || 'Không xác định';
         const timeLabel = selectedMonth === 'all' ? `Năm ${selectedYear}` : typeof selectedMonth === 'number' ? `T${selectedMonth}/${selectedYear}` : `${selectedMonth.toUpperCase()}/${selectedYear}`;
 
         try {
@@ -1032,26 +1047,36 @@ const Finance: React.FC = () => {
                 user_name: user.full_name,
                 type: 'expense',
                 amount: Math.floor(amount),
-                reason: `Chi lương: ${user.full_name} - ${timeLabel}`,
+                reason: `Chi lương: ${user.full_name} - ${timeLabel} (${fundLabel})`,
                 status: 'approved',
-                approved_by: userProfile?.id
+                approved_by: userProfile?.id,
+                fund_period_id: salaryPayoutFundId // NEW: Assign to selected fund
             }]);
             if (error) throw error;
             fetchDataWithIsolation();
             setShowSalaryConfirmModal(false);
             setSalaryPayoutTarget(null);
-            showToast(`Đã chi lương cho ${user.full_name}!`, 'success');
+            showToast(`Đã chi lương cho ${user.full_name}! (Quỹ: ${fundLabel})`, 'success');
         } catch (e: any) {
             showToast("Lỗi chi lương: " + e.message, 'error');
         }
     };
 
     const handlePayAllSalaries = async () => {
+        // NEW: Validate fund selection
+        if (selectedFundPeriod === 'all') {
+            showToast("Vui lòng chọn một quỹ cụ thể trước khi chi lương hàng loạt!", 'error');
+            return;
+        }
+
         const salaryCandidates = profitSharingData.filter(row => row.estimatedIncome > 1000); // Only pay if > 1000 VND
         if (salaryCandidates.length === 0) { showToast("Không có nhân viên nào cần chi lương.", 'error'); return; }
 
+        const selectedFund = fundPeriods.find(p => p.id === selectedFundPeriod);
+        const fundLabel = selectedFund?.name || 'Không xác định';
+
         const totalAmt = salaryCandidates.reduce((s, r) => s + r.estimatedIncome, 0);
-        if (!window.confirm(`Xác nhận CHI LƯƠNG cho ${salaryCandidates.length} nhân viên? Tổng tiền: ${totalAmt.toLocaleString('vi-VN')} đ`)) return;
+        if (!window.confirm(`Xác nhận CHI LƯƠNG cho ${salaryCandidates.length} nhân viên?\nTổng tiền: ${totalAmt.toLocaleString('vi-VN')} đ\nQuỹ: ${fundLabel}`)) return;
 
         const timeLabel = selectedMonth === 'all' ? `Năm ${selectedYear}` : typeof selectedMonth === 'number' ? `T${selectedMonth}/${selectedYear}` : `${selectedMonth.toUpperCase()}/${selectedYear}`;
 
@@ -1061,16 +1086,17 @@ const Finance: React.FC = () => {
                 user_name: row.user.full_name,
                 type: 'expense',
                 amount: Math.floor(row.estimatedIncome),
-                reason: `Chi lương: ${row.user.full_name} - ${timeLabel}`,
+                reason: `Chi lương: ${row.user.full_name} - ${timeLabel} (${fundLabel})`,
                 status: 'approved',
-                approved_by: userProfile?.id
+                approved_by: userProfile?.id,
+                fund_period_id: selectedFundPeriod // NEW: Assign to selected fund
             }));
 
             const { error } = await supabase.from('transactions').insert(transactions);
             if (error) throw error;
 
             fetchDataWithIsolation();
-            showToast(`Đã chi lương cho ${salaryCandidates.length} nhân viên!`, 'success');
+            showToast(`Đã chi lương cho ${salaryCandidates.length} nhân viên! (Quỹ: ${fundLabel})`, 'success');
         } catch (e: any) {
             showToast("Lỗi chi lương hàng loạt: " + e.message, 'error');
         }
@@ -2241,6 +2267,23 @@ const Finance: React.FC = () => {
                                 <p className="text-sm text-gray-500">Chi lương cho nhân viên</p>
                                 <p className="text-xl font-bold text-gray-900">{salaryPayoutTarget.user.full_name}</p>
                             </div>
+                            {/* NEW: Fund Selection Dropdown */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">Chọn Quỹ để chi <span className="text-red-500">*</span></label>
+                                <select
+                                    value={salaryPayoutFundId}
+                                    onChange={(e) => setSalaryPayoutFundId(e.target.value)}
+                                    className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-green-100 focus:border-green-500 font-bold text-gray-700 bg-white"
+                                >
+                                    <option value="">-- Chọn quỹ --</option>
+                                    {fundPeriods.filter(p => !p.is_completed).map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                                {!salaryPayoutFundId && (
+                                    <p className="text-xs text-red-500 mt-1">Bạn phải chọn quỹ trước khi chi lương.</p>
+                                )}
+                            </div>
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 mb-2">Số tiền chi lương (Nhập tay)</label>
                                 <div className="relative">
@@ -2261,7 +2304,11 @@ const Finance: React.FC = () => {
                             <div className="p-3 bg-gray-50 rounded-xl text-xs text-gray-500 border border-gray-100 italic">
                                 Lưu ý: Số tiền này sẽ được ghi nhận là "Chi quỹ" (Expense) và khấu trừ vào khoản "Thực nhận" của nhân viên trong bảng lương.
                             </div>
-                            <button onClick={confirmPaySalary} className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg shadow-green-200 transition-all active:scale-95">
+                            <button
+                                onClick={confirmPaySalary}
+                                disabled={!salaryPayoutFundId}
+                                className={`w-full py-3 font-bold rounded-xl shadow-lg transition-all active:scale-95 ${salaryPayoutFundId ? 'bg-green-600 hover:bg-green-700 text-white shadow-green-200' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+                            >
                                 Xác nhận Chi ngay (Approved)
                             </button>
                         </div>
