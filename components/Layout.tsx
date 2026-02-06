@@ -16,6 +16,7 @@ import VersionChecker from './VersionChecker';
 import { useTheme } from '../contexts/ThemeContext';
 
 import UserStatusIndicator from './UserStatusIndicator';
+import VersionLabel from './VersionLabel';
 
 interface NavItemDef {
     key: string;
@@ -475,6 +476,12 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                         <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
                         Đăng xuất
                     </button>
+                </div>
+
+                <div className="px-6 pb-4 text-center">
+                    <p className="text-[10px] text-slate-400 dark:text-slate-600 font-mono">
+                        <VersionLabel />
+                    </p>
                 </div>
             </aside >
 

@@ -6,7 +6,7 @@
   "scripts": {
     "generate-sw": "node scripts/generate-sw.js",
     "dev": "node scripts/generate-sw.js && node scripts/generate-version.js && vite",
-    "build": "node scripts/generate-sw.js && node scripts/generate-version.js && vite build",
+    "build": "node scripts/generate-sw.js && node scripts/bump-version.js && node scripts/generate-version.js && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { User, Lock, Loader2, AlertCircle, ShieldCheck, Mail, ArrowLeft, ChevronRight, ArrowRight } from 'lucide-react';
+import VersionLabel from '../components/VersionLabel';
 
 const { useNavigate, Link } = ReactRouterDOM as any;
 
@@ -192,8 +193,10 @@ const Login: React.FC = () => {
                             Hệ thống CRM tối ưu dành riêng cho đội ngũ kinh doanh VinFast. Tăng tốc độ chốt đơn, quản lý dòng tiền và chăm sóc khách hàng hiệu quả.
                         </p>
                     </div>
-                    <div className="relative z-10 text-xs text-blue-200/50">
-                        © 2025 VinFast CRM Enterprise by Nguyên Hồ
+                    <div className="relative z-10 text-xs text-blue-200/50 flex items-center gap-2">
+                        <span>© 2025 VinFast CRM Enterprise by Nguyên Hồ</span>
+                        <span className="w-1 h-1 rounded-full bg-blue-200/30"></span>
+                        <VersionLabel className="font-mono opacity-80" />
                     </div>
 
                     {/* Overlay Pattern */}
