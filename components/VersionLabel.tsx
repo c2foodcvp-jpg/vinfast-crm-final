@@ -7,7 +7,7 @@ interface VersionLabelProps {
     prefix?: string;
 }
 
-const VersionLabel: React.FC<VersionLabelProps> = ({ className = '', prefix = 'Phiên bản :' }) => {
+const VersionLabel: React.FC<VersionLabelProps> = ({ className = '', prefix = 'Phiên bản : ' }) => {
     const { currentVersion } = useVersionCheck(0); // 0 = no auto check, just initial load
 
     if (!currentVersion) return null;
@@ -24,7 +24,7 @@ const VersionLabel: React.FC<VersionLabelProps> = ({ className = '', prefix = 'P
 
     return (
         <span className={`${className}`}>
-            {prefix} {formatVersion(currentVersion.version)}
+            {prefix}{formatVersion(currentVersion.version)}
         </span>
     );
 };

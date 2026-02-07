@@ -8,7 +8,6 @@ import {
     CheckCircle2,
     Trash2,
     X,
-    AlertTriangle,
     Loader2,
     ExternalLink,
     Wallet,
@@ -23,7 +22,7 @@ interface CustomerFinancePopupProps {
     userProfile: UserProfile | null;
 }
 
-const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, onClose }) => {
+const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, onClose, userProfile }) => {
     const navigate = useNavigate();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loading, setLoading] = useState(true);
@@ -98,10 +97,74 @@ const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, o
     };
 
     const stats = useMemo(() => {
-        const income = transactions.filter(t => t.type === 'revenue' || (t as any).type === 'deposit').reduce((sum, t) => sum + t.amount, 0);
-        const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+        const income = transactions.filter(t => (t.type === 'revenue' || (t as any).type === 'deposit') && (t.status === 'approved' || !t.status)).reduce((sum, t) => sum + t.amount, 0);
+        const expense = transactions.filter(t => t.type === 'expense' && (t.status === 'approved' || !t.status)).reduce((sum, t) => sum + t.amount, 0);
         return { income, expense, balance: income - expense };
     }, [transactions]);
+
+    const handleApproveTransaction = async (transaction: Transaction) => {
+        if (!window.confirm("Duyệt giao dịch này?")) return;
+        try {
+            const { error: updateError } = await supabase.from('customer_transactions')
+                .update({
+                    status: 'approved',
+                    approved_by: userProfile?.id,
+                    rejection_reason: null
+                })
+                .eq('id', transaction.id);
+
+            if (updateError) throw updateError;
+
+            // Update Customer Deal Details Actual Revenue if it is REVENUE
+            if (transaction.type === 'revenue' || (transaction as any).type === 'deposit') {
+                const { data: custData, error: custError } = await supabase
+                    .from('customers')
+                    .select('deal_details')
+                    .eq('id', customer.id)
+                    .single();
+
+                if (!custError && custData) {
+                    const currentActual = (custData as any).deal_details?.actual_revenue || 0;
+                    const newActual = currentActual + transaction.amount;
+                    await supabase.from('customers').update({
+                        deal_details: {
+                            ...(custData as any).deal_details,
+                            actual_revenue: newActual
+                        }
+                    }).eq('id', customer.id);
+                }
+            }
+
+            setTransactions(prev => prev.map(t =>
+                t.id === transaction.id ? { ...t, status: 'approved', approved_by: userProfile?.id } : t
+            ));
+        } catch (e: any) {
+            alert("Lỗi duyệt: " + e.message);
+        }
+    };
+
+    const handleRejectTransaction = async (transaction: Transaction) => {
+        const reason = prompt("Lý do từ chối:");
+        if (reason === null) return;
+
+        try {
+            const { error: updateError } = await supabase.from('customer_transactions')
+                .update({
+                    status: 'rejected',
+                    approved_by: userProfile?.id,
+                    rejection_reason: reason
+                })
+                .eq('id', transaction.id);
+
+            if (updateError) throw updateError;
+
+            setTransactions(prev => prev.map(t =>
+                t.id === transaction.id ? { ...t, status: 'rejected', approved_by: userProfile?.id, rejection_reason: reason } : t
+            ));
+        } catch (e: any) {
+            alert("Lỗi từ chối: " + e.message);
+        }
+    };
 
     return (
         <div className="fixed inset-0 z-[100] flex justify-center items-center bg-black/50 transition-opacity duration-200">
@@ -133,19 +196,19 @@ const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, o
                 </div>
 
                 {/* STATS: Modern Cards */}
-                <div className="p-6 grid grid-cols-3 gap-4 bg-gray-50/50">
-                    <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center">
+                <div className="p-4 md:p-6 grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 bg-gray-50/50">
+                    <div className="bg-white p-3 md:p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center">
                         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Tổng Thu</span>
-                        <span className="text-lg font-bold text-emerald-600">+{formatCurrency(stats.income)}</span>
+                        <span className="text-base md:text-lg font-bold text-emerald-600">+{formatCurrency(stats.income)}</span>
                     </div>
-                    <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center">
+                    <div className="bg-white p-3 md:p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center">
                         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Tổng Chi</span>
-                        <span className="text-lg font-bold text-rose-600">-{formatCurrency(stats.expense)}</span>
+                        <span className="text-base md:text-lg font-bold text-rose-600">-{formatCurrency(stats.expense)}</span>
                     </div>
-                    <div className="bg-gradient-to-br from-gray-900 to-gray-800 p-4 rounded-xl text-white shadow-lg flex flex-col items-center justify-center relative overflow-hidden">
+                    <div className="col-span-2 md:col-span-1 bg-gradient-to-br from-gray-900 to-gray-800 p-3 md:p-4 rounded-xl text-white shadow-lg flex flex-col items-center justify-center relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-16 h-16 bg-white/5 rounded-full -mr-8 -mt-8 blur-xl"></div>
                         <span className="text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1 relative z-10">Thực Nhận</span>
-                        <span className={`text-xl font-bold relative z-10 ${stats.balance >= 0 ? 'text-white' : 'text-rose-400'}`}>
+                        <span className={`text-lg md:text-xl font-bold relative z-10 ${stats.balance >= 0 ? 'text-white' : 'text-rose-400'}`}>
                             {formatCurrency(stats.balance)}
                         </span>
                     </div>
@@ -203,14 +266,22 @@ const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, o
                             {transactions.map(t => (
                                 <div
                                     key={t.id}
-                                    className="group flex justify-between items-center p-3.5 rounded-xl border border-gray-100 bg-white hover:border-gray-300 hover:shadow-sm transition-all duration-200"
+                                    className={`group flex justify-between items-center p-3.5 rounded-xl border ${t.status === 'pending' ? 'border-amber-200 bg-amber-50/50' :
+                                        t.status === 'rejected' ? 'border-gray-100 bg-gray-50 opacity-60' :
+                                            'border-gray-100 bg-white'
+                                        } hover:border-gray-300 hover:shadow-sm transition-all duration-200`}
                                 >
                                     <div className="flex items-center gap-3.5">
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${['revenue', 'deposit'].includes(t.type) ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
                                             {['revenue', 'deposit'].includes(t.type) ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}
                                         </div>
                                         <div>
-                                            <p className="font-bold text-gray-900 text-sm">{t.reason}</p>
+                                            <div className="flex items-center gap-2">
+                                                <p className="font-bold text-gray-900 text-sm">{t.reason}</p>
+                                                {/* Status Badge */}
+                                                {t.status === 'pending' && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 uppercase">Chờ duyệt</span>}
+                                                {t.status === 'rejected' && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-200 text-gray-600 uppercase line-through">Đã hủy</span>}
+                                            </div>
                                             <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-0.5 font-medium">
                                                 <span className="flex items-center gap-0.5"><Calendar size={10} /> {new Date(t.transaction_date || t.created_at).toLocaleDateString('vi-VN')}</span>
                                                 <span className="w-0.5 h-0.5 bg-gray-300 rounded-full"></span>
@@ -219,9 +290,27 @@ const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, o
                                         </div>
                                     </div>
                                     <div className="text-right flex items-center gap-3">
-                                        <p className={`font-bold text-sm ${['revenue', 'deposit'].includes(t.type) ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                            {['revenue', 'deposit'].includes(t.type) ? '+' : '-'}{formatCurrency(t.amount)}
-                                        </p>
+                                        <div className="flex flex-col items-end">
+                                            <p className={`font-bold text-sm ${['revenue', 'deposit'].includes(t.type) ? 'text-emerald-600' : 'text-rose-600'} ${t.status === 'rejected' ? 'line-through opacity-50' : ''}`}>
+                                                {['revenue', 'deposit'].includes(t.type) ? '+' : '-'}{formatCurrency(t.amount)}
+                                            </p>
+                                            {(userProfile?.role === 'admin' || userProfile?.role === 'mod') && t.status === 'pending' && (
+                                                <div className="flex items-center gap-1 mt-1">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleApproveTransaction(t); }}
+                                                        className="p-1 bg-emerald-100 text-emerald-600 rounded hover:bg-emerald-200" title="Duyệt"
+                                                    >
+                                                        <CheckCircle2 size={12} />
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleRejectTransaction(t); }}
+                                                        className="p-1 bg-rose-100 text-rose-600 rounded hover:bg-rose-200" title="Từ chối"
+                                                    >
+                                                        <X size={12} />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }}
                                             className="text-gray-300 hover:text-rose-500 transition-colors p-1.5 rounded-md hover:bg-rose-50 opacity-0 group-hover:opacity-100"

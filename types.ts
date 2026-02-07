@@ -313,6 +313,7 @@ export interface Transaction {
   status: TransactionStatus;
   proof_url?: string; // For images/receipts
   approved_by?: string;
+  rejection_reason?: string;
   created_at: string;
   _is_part_time_creator?: boolean; // Helper for finance calc
   fund_period_id?: string; // Explicit Fund Period Assignment

@@ -478,10 +478,17 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                     </button>
                 </div>
 
-                <div className="px-6 pb-4 text-center">
-                    <p className="text-[10px] text-slate-400 dark:text-slate-600 font-mono">
-                        <VersionLabel />
-                    </p>
+                <div className="px-6 pb-4 flex justify-center">
+                    <div className="relative group cursor-default">
+                        <div className="absolute -inset-1 bg-gradient-to-r from-primary-600 to-indigo-600 rounded-full blur opacity-20 group-hover:opacity-40 transition duration-1000 group-hover:duration-200"></div>
+                        <div className="relative px-3 py-1 bg-white dark:bg-slate-800 rounded-full border border-slate-200 dark:border-slate-700 text-[10px] text-slate-500 dark:text-slate-400 font-bold flex items-center gap-2 shadow-sm">
+                            <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                            </span>
+                            <VersionLabel className="tracking-wide" prefix="v" />
+                        </div>
+                    </div>
                 </div>
             </aside >
 

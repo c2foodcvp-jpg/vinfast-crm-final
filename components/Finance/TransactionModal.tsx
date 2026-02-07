@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, Calendar, DollarSign, FileText, AlertTriangle } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
-import { Customer, TransactionType } from '../../types';
+import { Customer } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface TransactionModalProps {
@@ -75,13 +75,15 @@ const TransactionModal: React.FC<TransactionModalProps> = ({ isOpen, onClose, on
                 amount: numAmount,
                 reason: actualReason,
                 transaction_date: new Date(date).toISOString(),
-                created_at: new Date().toISOString()
+                created_at: new Date().toISOString(),
+                status: (userProfile?.role === 'admin' || userProfile?.role === 'mod') ? 'approved' : 'pending',
+                approved_by: (userProfile?.role === 'admin' || userProfile?.role === 'mod') ? userProfile?.id : null
             }]);
 
             if (insertError) throw insertError;
 
-            // Update Customer Deal Details Actual Revenue if it is REVENUE
-            if (type === 'revenue') {
+            // Update Customer Deal Details Actual Revenue if it is REVENUE and APPROVED
+            if (type === 'revenue' && (userProfile?.role === 'admin' || userProfile?.role === 'mod')) {
                 const currentActual = customer.deal_details?.actual_revenue || 0;
                 const newActual = currentActual + numAmount;
 

@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from './AuthContext';
-import { CheckCircle2, XCircle, Bell, X, Info } from 'lucide-react';
+import { CheckCircle2, XCircle, X, Info } from 'lucide-react';
 
 // --- Types ---
 type NotificationType = 'success' | 'error' | 'info';
@@ -28,20 +28,18 @@ const ToastContainer: React.FC<{ notifications: Notification[]; remove: (id: str
       {notifications.map((notif) => (
         <div
           key={notif.id}
-          className={`pointer-events-auto min-w-[320px] max-w-sm rounded-xl shadow-lg border p-4 flex items-start gap-3 transform transition-all duration-300 animate-fade-in ${
-            notif.type === 'success' ? 'bg-white border-green-200 text-green-800' :
+          className={`pointer-events-auto min-w-[320px] max-w-sm rounded-xl shadow-lg border p-4 flex items-start gap-3 transform transition-all duration-300 animate-fade-in ${notif.type === 'success' ? 'bg-white border-green-200 text-green-800' :
             notif.type === 'error' ? 'bg-white border-red-200 text-red-800' :
-            'bg-white border-blue-200 text-blue-800'
-          }`}
+              'bg-white border-blue-200 text-blue-800'
+            }`}
         >
-          <div className={`mt-0.5 p-1 rounded-full shrink-0 ${
-             notif.type === 'success' ? 'bg-green-100 text-green-600' :
-             notif.type === 'error' ? 'bg-red-100 text-red-600' :
-             'bg-blue-100 text-blue-600'
-          }`}>
-            {notif.type === 'success' ? <CheckCircle2 size={18} /> : 
-             notif.type === 'error' ? <XCircle size={18} /> : 
-             <Info size={18} />}
+          <div className={`mt-0.5 p-1 rounded-full shrink-0 ${notif.type === 'success' ? 'bg-green-100 text-green-600' :
+            notif.type === 'error' ? 'bg-red-100 text-red-600' :
+              'bg-blue-100 text-blue-600'
+            }`}>
+            {notif.type === 'success' ? <CheckCircle2 size={18} /> :
+              notif.type === 'error' ? <XCircle size={18} /> :
+                <Info size={18} />}
           </div>
           <div className="flex-1">
             <h4 className="font-bold text-sm">{notif.title}</h4>
@@ -61,7 +59,7 @@ const ToastContainer: React.FC<{ notifications: Notification[]; remove: (id: str
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { userProfile } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  
+
   // Sound effect ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -82,7 +80,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const addNotification = (title: string, message: string, type: NotificationType = 'info') => {
     const id = Date.now().toString();
     const newNotif = { id, type, title, message, timestamp: Date.now() };
-    
+
     setNotifications((prev) => [newNotif, ...prev]);
     playSound();
 
@@ -118,7 +116,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
             const title = newData.status === 'approved' ? 'Yêu cầu được Duyệt' : 'Yêu cầu bị Từ chối';
             const reasonSnippet = newData.reason ? `"${newData.reason.substring(0, 20)}..."` : 'giao dịch';
             const msg = `Yêu cầu tài chính ${reasonSnippet} của bạn đã được ${newData.status === 'approved' ? 'duyệt' : 'từ chối'}.`;
-            
+
             addNotification(title, msg, type);
           }
         }
@@ -138,7 +136,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
             const proposalType = newData.type === 'salary_advance' ? 'ứng lương' : 'mượn xe Demo';
             const title = newData.status === 'approved' ? 'Đề xuất được Duyệt' : 'Đề xuất bị Từ chối';
             const msg = `Đề xuất ${proposalType} với số tiền ${Number(newData.amount).toLocaleString('vi-VN')} VNĐ đã có kết quả.`;
-            
+
             addNotification(title, msg, type);
           }
         }
@@ -158,8 +156,27 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
             const type = newData.status === 'approved' ? 'success' : 'error';
             const title = newData.status === 'approved' ? 'Chi Quỹ được Duyệt' : 'Chi Quỹ bị Từ chối';
             const msg = `Yêu cầu chi quỹ "${newData.reason}" đã được xử lý.`;
-            
+
             addNotification(title, msg, type);
+          }
+        }
+      )
+      .subscribe();
+
+    // 4. Centralized System Notifications (Chat, Finance, Leads...)
+    const systemChannel = supabase.channel('system_notifications_channel')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'system_notifications' },
+        (payload) => {
+          const newNotif = payload.new;
+          // Check if targeted
+          if (newNotif.target_user_ids && newNotif.target_user_ids.includes(userProfile.id)) {
+            let type: NotificationType = 'info';
+            if (newNotif.type.includes('error') || newNotif.type.includes('rejected')) type = 'error';
+            else if (newNotif.title.toLowerCase().includes('duyệt') || newNotif.type.includes('approved') || newNotif.type.includes('success')) type = 'success';
+
+            addNotification(newNotif.title, newNotif.content, type);
           }
         }
       )
@@ -167,6 +184,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(systemChannel);
     };
   }, [userProfile]);
 
