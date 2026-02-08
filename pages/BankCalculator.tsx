@@ -363,10 +363,11 @@ const BankCalculator: React.FC = () => {
                     // I will leave Image alone for now regarding hiding, but fix the cut-off/overflow logic.
 
                     // Thêm tiêu đề chuyên nghiệp vào bản clone
+                    const bankTitle = userProfile?.quote_template?.bank_title || "BẢNG TÍNH LÃI SUẤT TRẢ GÓP VINFAST";
                     const header = clonedDoc.createElement('div');
                     header.innerHTML = `
                     <div style="padding: 20px; border-bottom: 2px solid #2462bd; margin-bottom: 20px; text-align: center;">
-                        <h1 style="color: #2462bd; font-size: 24px; font-weight: bold; margin: 0;">BẢNG TÍNH LÃI SUẤT TRẢ GÓP VINFAST</h1>
+                        <h1 style="color: #2462bd; font-size: 24px; font-weight: bold; margin: 0;">${bankTitle}</h1>
                         <p style="color: #666; margin: 5px 0;">Ngày xuất: ${new Date().toLocaleString('vi-VN')}</p>
                     </div>
                 `;
@@ -410,10 +411,11 @@ const BankCalculator: React.FC = () => {
                         summary.remove();
                     }
 
+                    const bankTitle = userProfile?.quote_template?.bank_title || "BẢNG TÍNH LÃI SUẤT TRẢ GÓP VINFAST";
                     const header = clonedDoc.createElement('div');
                     header.innerHTML = `
                         <div style="padding: 20px; border-bottom: 2px solid #2462bd; margin-bottom: 20px; text-align: center;">
-                             <h1 style="color: #2462bd; font-size: 24px; font-weight: bold; margin: 0;">BẢNG TÍNH LÃI SUẤT TRẢ GÓP VINFAST</h1>
+                             <h1 style="color: #2462bd; font-size: 24px; font-weight: bold; margin: 0;">${bankTitle}</h1>
                              <p style="color: #666; margin: 5px 0;">Ngày xuất: ${new Date().toLocaleString('vi-VN')}</p>
                         </div>
                     `;

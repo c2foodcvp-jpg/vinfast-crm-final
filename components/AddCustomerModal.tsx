@@ -63,7 +63,17 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onClose, on
 
     const fetchCarModels = async () => {
         try {
-            const { data } = await supabase.from('car_models').select('name').order('priority', { ascending: true });
+            let query = supabase.from('car_models').select('name').order('priority', { ascending: true });
+            // Team isolation: filter by manager_id
+            if (userProfile) {
+                if (userProfile.role === 'mod') {
+                    query = query.or(`manager_id.eq.${userProfile.id},manager_id.is.null`);
+                } else if (userProfile.manager_id && userProfile.role !== 'admin') {
+                    query = query.or(`manager_id.eq.${userProfile.manager_id},manager_id.is.null`);
+                }
+                // Admin sees all
+            }
+            const { data } = await query;
             if (data && data.length > 0) {
                 setCarList(data.map(c => c.name));
             }

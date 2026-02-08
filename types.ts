@@ -194,6 +194,16 @@ export interface UserProfile {
   // NEW: Team QR Code (Manager Level)
   qr_code_url?: string;
 
+  // NEW: Quote Template
+  quote_template?: {
+    title?: string;
+    company_name?: string;
+    subtitle?: string;
+    bank_title?: string;
+    logo_url?: string;
+    use_logo?: boolean;
+  };
+
   created_at?: string;
   last_login_at?: string; // Track last login time
   discord_config?: any;

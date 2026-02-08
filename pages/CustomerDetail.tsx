@@ -307,7 +307,24 @@ const CustomerDetail: React.FC = () => {
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => setToast({ msg, type });
     const formatCurrency = (value: number) => !value ? '0' : value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 
-    const fetchDistributors = async () => { try { const { data } = await supabase.from('distributors').select('*').order('name'); if (data) setDistributors(data as Distributor[]); } catch (e) { } };
+    const fetchDistributors = async () => {
+        try {
+            let query = supabase.from('distributors').select('*').order('name');
+            // Team isolation: filter by manager_id
+            if (userProfile) {
+                if (isAdmin) {
+                    // Admin sees all
+                } else if (isMod) {
+                    query = query.or(`manager_id.eq.${userProfile.id},manager_id.is.null`);
+                } else if (userProfile.manager_id) {
+                    // Employee sees their MOD's config
+                    query = query.or(`manager_id.eq.${userProfile.manager_id},manager_id.is.null`);
+                }
+            }
+            const { data } = await query;
+            if (data) setDistributors(data as Distributor[]);
+        } catch (e) { }
+    };
 
     const fetchEmployees = async () => {
         try {
@@ -320,7 +337,18 @@ const CustomerDetail: React.FC = () => {
 
     const fetchCarModels = async () => {
         try {
-            const { data } = await supabase.from('car_models').select('name').order('priority', { ascending: true });
+            let query = supabase.from('car_models').select('name, manager_id').order('priority', { ascending: true });
+            // Team isolation: filter by manager_id
+            if (userProfile) {
+                if (isAdmin) {
+                    // Admin sees all
+                } else if (isMod) {
+                    query = query.or(`manager_id.eq.${userProfile.id},manager_id.is.null`);
+                } else if (userProfile.manager_id) {
+                    query = query.or(`manager_id.eq.${userProfile.manager_id},manager_id.is.null`);
+                }
+            }
+            const { data } = await query;
             if (data && data.length > 0) {
                 setCarList(data.map(c => c.name));
             }

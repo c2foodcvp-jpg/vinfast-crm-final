@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
-import { Customer, Transaction, UserProfile } from '../../types';
+import { Customer, Transaction, UserProfile, Interaction } from '../../types';
 import {
     ArrowDownLeft,
     ArrowUpRight,
@@ -25,6 +25,9 @@ interface CustomerFinancePopupProps {
 const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, onClose, userProfile }) => {
     const navigate = useNavigate();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [financeNotes, setFinanceNotes] = useState<Interaction[]>([]);
+    const [activeTab, setActiveTab] = useState<'transactions' | 'comments'>('transactions');
+    const [newNote, setNewNote] = useState('');
     const [loading, setLoading] = useState(true);
     const [profilesMap, setProfilesMap] = useState<Record<string, string>>({});
 
@@ -47,12 +50,23 @@ const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, o
 
                 if (transError) throw transError;
 
+                // Fetch Interactions (Finance Notes)
+                const { data: notesData } = await supabase
+                    .from('interactions')
+                    .select('*')
+                    .eq('customer_id', customer.id)
+                    .ilike('content', '[Tài chính]%') // Filter strictly by prefix
+                    .order('created_at', { ascending: false });
+
                 if (isMounted) {
                     setTransactions(transData as unknown as Transaction[]);
+                    if (notesData) setFinanceNotes(notesData);
                 }
 
                 // Extract User IDs for Profiles
-                const userIds = Array.from(new Set((transData || []).map((t: any) => t.created_by || t.user_id)));
+                const transUserIds = (transData || []).map((t: any) => t.created_by || t.user_id);
+                const noteUserIds = (notesData || []).map((n: any) => n.user_id);
+                const userIds = Array.from(new Set([...transUserIds, ...noteUserIds]));
 
                 if (userIds.length > 0) {
                     const { data: profiles } = await supabase
@@ -77,6 +91,31 @@ const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, o
 
         return () => { isMounted = false; };
     }, [customer.id]);
+
+    const handleAddNote = async () => {
+        if (!newNote.trim()) return;
+        try {
+            const content = `[Tài chính] ${newNote}`;
+            const { data, error } = await supabase
+                .from('interactions')
+                .insert([{
+                    customer_id: customer.id,
+                    user_id: userProfile?.id,
+                    type: 'note', // Use 'note' type but with prefix
+                    content: content,
+                    created_at: new Date().toISOString()
+                }])
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            setFinanceNotes(prev => [data, ...prev]);
+            setNewNote('');
+        } catch (e: any) {
+            alert("Lỗi thêm ghi chú: " + e.message);
+        }
+    };
 
     const formatCurrency = (val: number) => val.toLocaleString('vi-VN');
 
@@ -250,77 +289,138 @@ const CustomerFinancePopup: React.FC<CustomerFinancePopupProps> = ({ customer, o
                     )}
                 </div>
 
-                {/* LIST: Transactions */}
-                <div className="flex-1 overflow-y-auto px-6 py-4 bg-white border-t border-gray-100 custom-scrollbar">
-                    {loading ? (
-                        <div className="flex justify-center items-center h-full py-8">
-                            <Loader2 className="animate-spin text-gray-300" size={24} />
-                        </div>
-                    ) : transactions.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full py-8 text-gray-300 gap-2">
-                            <Wallet size={32} className="opacity-20" />
-                            <p className="text-sm italic">Chưa có giao dịch phát sinh</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-3 pb-4">
-                            {transactions.map(t => (
-                                <div
-                                    key={t.id}
-                                    className={`group flex justify-between items-center p-3.5 rounded-xl border ${t.status === 'pending' ? 'border-amber-200 bg-amber-50/50' :
-                                        t.status === 'rejected' ? 'border-gray-100 bg-gray-50 opacity-60' :
-                                            'border-gray-100 bg-white'
-                                        } hover:border-gray-300 hover:shadow-sm transition-all duration-200`}
-                                >
-                                    <div className="flex items-center gap-3.5">
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${['revenue', 'deposit'].includes(t.type) ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
-                                            {['revenue', 'deposit'].includes(t.type) ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}
-                                        </div>
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <p className="font-bold text-gray-900 text-sm">{t.reason}</p>
-                                                {/* Status Badge */}
-                                                {t.status === 'pending' && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 uppercase">Chờ duyệt</span>}
-                                                {t.status === 'rejected' && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-200 text-gray-600 uppercase line-through">Đã hủy</span>}
-                                            </div>
-                                            <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-0.5 font-medium">
-                                                <span className="flex items-center gap-0.5"><Calendar size={10} /> {new Date(t.transaction_date || t.created_at).toLocaleDateString('vi-VN')}</span>
-                                                <span className="w-0.5 h-0.5 bg-gray-300 rounded-full"></span>
-                                                <span className="flex items-center gap-0.5"><User size={10} /> {profilesMap[(t as any).created_by || t.user_id] || 'Unknown'}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="text-right flex items-center gap-3">
-                                        <div className="flex flex-col items-end">
-                                            <p className={`font-bold text-sm ${['revenue', 'deposit'].includes(t.type) ? 'text-emerald-600' : 'text-rose-600'} ${t.status === 'rejected' ? 'line-through opacity-50' : ''}`}>
-                                                {['revenue', 'deposit'].includes(t.type) ? '+' : '-'}{formatCurrency(t.amount)}
-                                            </p>
-                                            {(userProfile?.role === 'admin' || userProfile?.role === 'mod') && t.status === 'pending' && (
-                                                <div className="flex items-center gap-1 mt-1">
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleApproveTransaction(t); }}
-                                                        className="p-1 bg-emerald-100 text-emerald-600 rounded hover:bg-emerald-200" title="Duyệt"
-                                                    >
-                                                        <CheckCircle2 size={12} />
-                                                    </button>
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleRejectTransaction(t); }}
-                                                        className="p-1 bg-rose-100 text-rose-600 rounded hover:bg-rose-200" title="Từ chối"
-                                                    >
-                                                        <X size={12} />
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }}
-                                            className="text-gray-300 hover:text-rose-500 transition-colors p-1.5 rounded-md hover:bg-rose-50 opacity-0 group-hover:opacity-100"
-                                            title="Xóa giao dịch"
-                                        >
-                                            <Trash2 size={14} />
-                                        </button>
-                                    </div>
+                <div className="flex px-6 border-b border-gray-100 mt-2">
+                    <button
+                        onClick={() => setActiveTab('transactions')}
+                        className={`py-3 px-4 text-sm font-bold border-b-2 transition-colors ${activeTab === 'transactions' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    >
+                        Giao dịch
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('comments')}
+                        className={`py-3 px-4 text-sm font-bold border-b-2 transition-colors ${activeTab === 'comments' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    >
+                        Ghi chú & Trao đổi
+                    </button>
+                </div>
+
+                {/* CONTENT AREA */}
+                <div className="flex-1 overflow-y-auto px-6 py-4 bg-white custom-scrollbar">
+                    {activeTab === 'transactions' ? (
+                        <>
+                            {loading ? (
+                                <div className="flex justify-center items-center h-full py-8">
+                                    <Loader2 className="animate-spin text-gray-300" size={24} />
                                 </div>
-                            ))}
+                            ) : transactions.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full py-8 text-gray-300 gap-2">
+                                    <Wallet size={32} className="opacity-20" />
+                                    <p className="text-sm italic">Chưa có giao dịch phát sinh</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3 pb-4">
+                                    {transactions.map(t => (
+                                        <div
+                                            key={t.id}
+                                            className={`group flex justify-between items-center p-3.5 rounded-xl border ${t.status === 'pending' ? 'border-amber-200 bg-amber-50/50' :
+                                                t.status === 'rejected' ? 'border-gray-100 bg-gray-50 opacity-60' :
+                                                    'border-gray-100 bg-white'
+                                                } hover:border-gray-300 hover:shadow-sm transition-all duration-200`}
+                                        >
+                                            <div className="flex items-center gap-3.5">
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${['revenue', 'deposit'].includes(t.type) ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                                                    {['revenue', 'deposit'].includes(t.type) ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="font-bold text-gray-900 text-sm">{t.reason}</p>
+                                                        {/* Status Badge */}
+                                                        {t.status === 'pending' && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 uppercase">Chờ duyệt</span>}
+                                                        {t.status === 'rejected' && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-200 text-gray-600 uppercase line-through">Đã hủy</span>}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-0.5 font-medium">
+                                                        <span className="flex items-center gap-0.5"><Calendar size={10} /> {new Date(t.transaction_date || t.created_at).toLocaleDateString('vi-VN')}</span>
+                                                        <span className="w-0.5 h-0.5 bg-gray-300 rounded-full"></span>
+                                                        <span className="flex items-center gap-0.5"><User size={10} /> {profilesMap[(t as any).created_by || t.user_id] || 'Unknown'}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="text-right flex items-center gap-3">
+                                                <div className="flex flex-col items-end">
+                                                    <p className={`font-bold text-sm ${['revenue', 'deposit'].includes(t.type) ? 'text-emerald-600' : 'text-rose-600'} ${t.status === 'rejected' ? 'line-through opacity-50' : ''}`}>
+                                                        {['revenue', 'deposit'].includes(t.type) ? '+' : '-'}{formatCurrency(t.amount)}
+                                                    </p>
+                                                    {(userProfile?.role === 'admin' || userProfile?.role === 'mod') && t.status === 'pending' && (
+                                                        <div className="flex items-center gap-1 mt-1">
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); handleApproveTransaction(t); }}
+                                                                className="p-1 bg-emerald-100 text-emerald-600 rounded hover:bg-emerald-200" title="Duyệt"
+                                                            >
+                                                                <CheckCircle2 size={12} />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); handleRejectTransaction(t); }}
+                                                                className="p-1 bg-rose-100 text-rose-600 rounded hover:bg-rose-200" title="Từ chối"
+                                                            >
+                                                                <X size={12} />
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }}
+                                                    className="text-gray-300 hover:text-rose-500 transition-colors p-1.5 rounded-md hover:bg-rose-50 opacity-0 group-hover:opacity-100"
+                                                    title="Xóa giao dịch"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <div className="flex flex-col h-full">
+                            <div className="flex-1 space-y-4 mb-4 overflow-y-auto pr-2 custom-scrollbar">
+                                {financeNotes.length === 0 ? (
+                                    <p className="text-center text-gray-400 italic text-sm py-8">Chưa có ghi chú nào.</p>
+                                ) : (
+                                    financeNotes.map((note) => (
+                                        <div key={note.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className="font-bold text-xs text-blue-600">{profilesMap[note.user_id] || 'N/A'}</span>
+                                                <span className="text-[10px] text-gray-400">{new Date(note.created_at).toLocaleString('vi-VN')}</span>
+                                            </div>
+                                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.content.replace(/^\[Tài chính\]\s*/, '')}</p>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                            <div className="pt-2 border-t border-gray-100">
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={newNote}
+                                        onChange={(e) => setNewNote(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleAddNote();
+                                            }
+                                        }}
+                                        placeholder="Nhập ghi chú tài chính..."
+                                        className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
+                                    />
+                                    <button
+                                        onClick={handleAddNote}
+                                        disabled={!newNote.trim()}
+                                        className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        Gửi
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>

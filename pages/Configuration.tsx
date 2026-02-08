@@ -146,10 +146,13 @@ const Configuration: React.FC = () => {
                 if (['distributors', 'car_models', 'car_versions', 'demo_cars', 'quote_configs', 'banks'].includes(table)) {
                     if (isAdmin) {
                         if (selectedTeam !== 'all') {
-                            query = query.eq('manager_id', selectedTeam);
+                            // Admin filtering by specific team - include team + global
+                            query = query.or(`manager_id.eq.${selectedTeam},manager_id.is.null`);
                         }
+                        // Admin with 'all' selected sees everything
                     } else if (isMod && userProfile) {
-                        query = query.eq('manager_id', userProfile.id);
+                        // MOD sees their own team config + global configs
+                        query = query.or(`manager_id.eq.${userProfile.id},manager_id.is.null`);
                     }
                 }
                 return query;
@@ -198,7 +201,15 @@ const Configuration: React.FC = () => {
                 if (error) throw error;
                 setDemoCars(data as DemoCar[]);
             } else if (activeTab === 'regservices') {
-                const { data, error } = await supabase.from('registration_services').select('*').eq('is_active', true).order('priority', { ascending: true });
+                let regQuery = supabase.from('registration_services').select('*').eq('is_active', true).order('priority', { ascending: true });
+                if (isAdmin) {
+                    if (selectedTeam !== 'all') {
+                        regQuery = regQuery.or(`manager_id.eq.${selectedTeam},manager_id.is.null`);
+                    }
+                } else if (isMod && userProfile) {
+                    regQuery = regQuery.or(`manager_id.eq.${userProfile.id},manager_id.is.null`);
+                }
+                const { data, error } = await regQuery;
                 if (error) throw error;
                 setRegServices(data as RegistrationService[]);
             }

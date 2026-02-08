@@ -68,13 +68,23 @@ const QuickInteractionModal: React.FC<QuickInteractionModalProps> = ({ isOpen, o
     const scrollContainerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        // Fetch Car Models once
+        // Fetch Car Models with Team Isolation
         const fetchCars = async () => {
-            const { data } = await supabase.from('car_models').select('name').order('priority', { ascending: true });
+            let query = supabase.from('car_models').select('name').order('priority', { ascending: true });
+            // Team isolation: filter by manager_id
+            if (userProfile) {
+                if (userProfile.role === 'mod') {
+                    query = query.or(`manager_id.eq.${userProfile.id},manager_id.is.null`);
+                } else if (userProfile.manager_id && userProfile.role !== 'admin') {
+                    query = query.or(`manager_id.eq.${userProfile.manager_id},manager_id.is.null`);
+                }
+                // Admin sees all
+            }
+            const { data } = await query;
             if (data) setCarList(data.map(c => c.name));
         };
         fetchCars();
-    }, []);
+    }, [userProfile]);
 
     const startVoiceSession = () => {
         const isPlatinumOrHigher = userProfile?.member_tier === MembershipTier.PLATINUM ||

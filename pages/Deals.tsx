@@ -190,8 +190,16 @@ const Deals: React.FC = () => {
 
             setCustomers(sortedData);
 
-            // 3. Fetch Distributors
-            const { data: distData } = await supabase.from('distributors').select('*').order('name');
+            // 3. Fetch Distributors with Team Isolation
+            let distQuery = supabase.from('distributors').select('*').order('name');
+            if (isAdmin) {
+                // Admin sees all
+            } else if (isMod && userProfile) {
+                distQuery = distQuery.or(`manager_id.eq.${userProfile.id},manager_id.is.null`);
+            } else if (userProfile?.manager_id) {
+                distQuery = distQuery.or(`manager_id.eq.${userProfile.manager_id},manager_id.is.null`);
+            }
+            const { data: distData } = await distQuery;
             if (distData) setDistributors(distData as Distributor[]);
 
             // 4. Fetch Transactions (for dealer_debt and deposit calculations)
