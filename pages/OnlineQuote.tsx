@@ -258,7 +258,7 @@ const PrintableQuoteTemplate: React.FC<{ data: any }> = ({ data }) => {
 
 // --- MAIN COMPONENT ---
 const OnlineQuote: React.FC = () => {
-    const { userProfile } = useAuth();
+    const { userProfile, isAdmin, isMod } = useAuth();
     const navigate = useNavigate();
     const quoteRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
@@ -1312,7 +1312,7 @@ const OnlineQuote: React.FC = () => {
                         Tính lãi Bank
                     </button>
                     <div className="w-px h-8 bg-gray-300 mx-1"></div>
-                    {(userProfile?.role === 'admin' || userProfile?.role === 'mod') && (
+                    {(isAdmin || isMod || (userProfile?.role as any) === 'MOD') && (
                         <button onClick={() => setShowConfigModal(true)} className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-100 transition-all shadow-sm">
                             <Settings2 size={16} /> Mẫu in
                         </button>

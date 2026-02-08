@@ -1,7 +1,7 @@
 {
   "name": "vinfast-crm",
   "private": true,
-  "version": "1.6.0",
+  "version": "1.6.1",
   "type": "module",
   "scripts": {
     "generate-sw": "node scripts/generate-sw.js",
